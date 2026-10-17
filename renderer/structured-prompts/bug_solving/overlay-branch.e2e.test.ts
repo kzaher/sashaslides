@@ -14,16 +14,13 @@ import { existsSync, mkdirSync, writeFileSync, rmSync, appendFileSync, readFileS
 import { resolve } from "path";
 import { createCowWorkspace, cleanupAllCowWorkspaces, cleanupCowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
 import { overlayWorkspaceOptions } from "./cow-options.js";
+import { ok, summary } from "./test-harness.js";
 
 const REPO = "/workspaces/sashaslides";
 const ROOT = "/overlays/e2e-branches"; // isolated root so we never touch a live run's branches
 const env = { ...process.env, OVERLAY_BRANCH_ROOT: ROOT };
 const CANARY = "renderer/html2slides/convert-pptx.ts"; // a real tracked converter file
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); } else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 function sh(cmd: string): string {
   return execSync(cmd, { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
@@ -132,7 +129,6 @@ function main() {
     ok("(final) base working tree restored byte-for-byte", finalCanary === baseCanary);
   }
 
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) process.exit(1);
+  summary();
 }
 main();

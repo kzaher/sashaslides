@@ -4,7 +4,7 @@
 
 | | What | How to mock it | Notes |
 |---|---|---|---|
-| **(H)** | **Human rating** (you clicking Good/Bad) | `greenCluster(...)`, `writeRatingOutcome(...)`, or rating-outcome marker files | The single human ask; provided as the merge's *input*. |
+| **(H)** | **Human rating** (you clicking Good/Bad) | `greenCluster(...)` or rating-outcome marker files | The single human ask; provided as the merge's *input*. |
 | **(L)** | **The LLM call** | `mockLlm(reply, {tag})` → a **real** `IO` that intercepts only `claude`/`codex` spawns | Everything else (bash, git, fs, clock, log) runs for real via `realIO`. |
 | **(R)** | **The Google-Slides recording** (`record-rendering --mode full`) | `recordingFromContent(...)` / `recordingSeam(...)` → a `MergeRenderSeam` injected via `realLlmMergeOps({ render })` | Only the render *output* is synthesized; it's driven by the REAL overlay content. |
 

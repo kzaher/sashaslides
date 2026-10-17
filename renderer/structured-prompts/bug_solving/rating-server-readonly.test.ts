@@ -25,33 +25,16 @@
  * dirs. Guarded so a spawn failure / hang reports a FAIL, not an infinite wait.
  */
 import { spawn, ChildProcess } from "child_process";
-import { createServer } from "net";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { ok, summary, freePort } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); }
-  else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER = resolve(HERE, "../../html2slides/rating-server.ts");
 
-/** Ask the OS for a free ephemeral port (bind to :0, read the assigned port). */
-function freePort(): Promise<number> {
-  return new Promise((res, rej) => {
-    const srv = createServer();
-    srv.on("error", rej);
-    srv.listen(0, () => {
-      const addr = srv.address();
-      const port = typeof addr === "object" && addr ? addr.port : 0;
-      srv.close(() => res(port));
-    });
-  });
-}
 
 /** Seed a minimal results dir with an EXISTING rating that carries a comment and
  *  annotation reference, so we can prove a later rating leaves them untouched. */
@@ -212,7 +195,6 @@ async function main() {
   kill(ed.child);
   rmSync(edDir, { recursive: true, force: true });
 
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) process.exit(1);
+  summary();
 }
 main();

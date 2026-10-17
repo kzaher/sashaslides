@@ -81,8 +81,7 @@ import {
   type StabilityClassification,
   STABILITY_JSON,
   loadStability,
-  extractSlideXml,
-  extractRenderedPartsHash,
+  recordFromRenderDir,
 } from "./stability.js";
 
 // ---------------------------------------------------------------------------
@@ -211,17 +210,29 @@ export function mergeThree(base: string, cur: string, other: string, labels: { c
   if (cur === other) return { content: cur, conflicted: false };
   if (base === cur) return { content: other, conflicted: false };   // cur unchanged → take other's diff verbatim
   if (base === other) return { content: cur, conflicted: false };   // other unchanged → keep cur
+  const failed = { content: cur, conflicted: true };
+  return withTempFiles("sp-3way-", { cur, base, other }, failed, (f) => {
+    const r = spawnSync("git", ["merge-file", "-p", "--diff3", "-L", labels.cur, "-L", labels.base, "-L", labels.other, f.cur, f.base, f.other], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    // status: 0 clean, >0 conflict count, null on spawn failure.
+    if (r.status == null || typeof r.stdout !== "string") return failed;
+    return { content: r.stdout, conflicted: /^<<<<<<< /m.test(r.stdout) };
+  });
+}
+
+/** Write `contents` to files in a fresh temp dir, run `use` on their paths, and remove the dir.
+ *  Returns `onError` when anything throws: the merge helpers must never throw. */
+function withTempFiles<K extends string, T>(prefix: string, contents: Readonly<Record<K, string>>, onError: T, use: (paths: Readonly<Record<K, string>>) => T): T {
   let dir: string | null = null;
   try {
-    dir = mkdtempSync(join(tmpdir(), "sp-3way-"));
-    const curF = join(dir, "cur"), baseF = join(dir, "base"), otherF = join(dir, "other");
-    writeFileSync(curF, cur); writeFileSync(baseF, base); writeFileSync(otherF, other);
-    const r = spawnSync("git", ["merge-file", "-p", "--diff3", "-L", labels.cur, "-L", labels.base, "-L", labels.other, curF, baseF, otherF], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-    // status: 0 clean, >0 conflict count, null on spawn failure.
-    if (r.status == null || typeof r.stdout !== "string") return { content: cur, conflicted: true };
-    return { content: r.stdout, conflicted: /^<<<<<<< /m.test(r.stdout) };
+    dir = mkdtempSync(join(tmpdir(), prefix));
+    const paths = {} as Record<K, string>;
+    for (const name of Object.keys(contents) as K[]) {
+      paths[name] = join(dir, name);
+      writeFileSync(paths[name], contents[name]);
+    }
+    return use(paths);
   } catch {
-    return { content: cur, conflicted: true };
+    return onError;
   } finally {
     if (dir) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* */ } }
   }
@@ -253,27 +264,18 @@ export function mergeN(base: string, forks: ForkVersion[]): { content: string; c
  *  never throws (a merge must not die on a diff). */
 function diffVsBase(base: string, other: string, label: string): string {
   if (base === other) return "(identical to base — this fork changed nothing in this file)";
-  let dir: string | null = null;
-  try {
-    dir = mkdtempSync(join(tmpdir(), "sp-mdiff-"));
-    const baseF = join(dir, "base"), otherF = join(dir, "other");
-    writeFileSync(baseF, base);
-    writeFileSync(otherF, other);
+  return withTempFiles("sp-mdiff-", { base, other }, "(diff unavailable: temp files)", (f) => {
     try {
       // diff exits 0 when identical (handled above), 1 when they differ (throws
       // with the diff on .stdout), ≥2 on a real error.
-      execSync(`diff -u --label base --label ${JSON.stringify(label)} ${JSON.stringify(baseF)} ${JSON.stringify(otherF)}`, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+      execSync(`diff -u --label base --label ${JSON.stringify(label)} ${JSON.stringify(f.base)} ${JSON.stringify(f.other)}`, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
       return "(identical to base)";
     } catch (e) {
       const err = e as { status?: number; stdout?: string; message?: string };
       if (err.status === 1 && typeof err.stdout === "string") return err.stdout.replace(/\n+$/, "");
       return `(diff unavailable: ${err.message ?? "error"})`;
     }
-  } catch (e) {
-    return `(diff unavailable: ${(e as Error).message})`;
-  } finally {
-    if (dir) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* */ } }
-  }
+  });
 }
 
 // ── The agentic edit-and-verify prompt (PATHS, not inline contents) ──────────
@@ -377,6 +379,55 @@ function installValue<T>(session: Session, value: T): SessionWithResult<T> {
 /** shell-quote a path for an echo marker. */
 const shq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
 
+/**
+ * One file's merge-edit node: write the 3-way result into the workspace upper, write the
+ * reference material (base + each fork's file and diff) into `inputsDir`, and let the model edit
+ * the upper file IN PLACE (one agentic edit/verify send), then read it back. The model edits the
+ * ABSOLUTE upper path with its tools; no switchCwd, since a sticky cwd into a to-be-deleted overlay
+ * would leave later nodes spawning in a vanished dir (setpriv ENOENT).
+ */
+function editMergedFile(session: Session, o: Readonly<{
+  ws: CowWorkspace;
+  rel: string;
+  base: string;
+  forks: ForkVersion[];
+  merged: Readonly<{ content: string; conflicted: boolean }>;
+  inputsDir: string;
+  /** the monitor-visible echo node's label. */
+  marker: string;
+  /** receives the edited content. */
+  onEdited?: (content: string) => void;
+}>): SessionWithResult<string> {
+  const { ws, rel, merged } = o;
+  ws.writeUpperFile(rel, merged.content);
+  const editTarget = join(ws.upperDir(), rel);
+  const inputs = writeMergeInputs(o.inputsDir, rel, o.base, o.forks);
+  return session
+    .send({ prompt: mergeEditPrompt({ rel, editTarget, inputs, conflicted: merged.conflicted }) })
+    .combineWith<string, string>(
+      (b) => b.executeShell(() => `echo ${o.marker} conflicted=${merged.conflicted}`),
+      () => {
+        const edited = ws.readUpperFile(rel) ?? merged.content;
+        o.onEdited?.(edited);
+        return edited;
+      },
+    );
+}
+
+/** What the human made of one fold's changed slides. */
+type FoldRating =
+  | Readonly<{ kind: "unchanged" }>
+  | Readonly<{ kind: "green"; changed: string[]; verdict: MergeRatingVerdict }>
+  | Readonly<{ kind: "red"; changed: string[]; verdict: MergeRatingVerdict }>;
+
+/** DETECT the slides a fold changed against `intended`, and when any changed, RATE them. */
+function detectAndRate(ops: MergeOps, ws: CowWorkspace, intended: string[], phase: MergeRatingArgs["phase"], label: string): FoldRating {
+  const { changedSlides } = ops.detectChanged(ws, intended);
+  if (changedSlides.length === 0) return { kind: "unchanged" };
+  const verdict = ops.rateChanged({ changed: changedSlides, ws, phase, label });
+  return { kind: verdict.red.length === 0 ? "green" : "red", changed: changedSlides, verdict };
+}
+
 // ---------------------------------------------------------------------------
 // The merge graph
 // ---------------------------------------------------------------------------
@@ -438,7 +489,6 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
 
   // ── (2) ALL-AT-ONCE, wrapped in a try that falls back to SEQUENTIAL ─────────
   const allWs = createCowWorkspace(overlayWorkspaceOptions({ base: repo, id: `llm-merge-all-${process.pid}-${Date.now()}`, upperRoot: args.upperRoot }));
-  const allState = { merged: {} as Record<string, string> };
 
   return session.try<MergeReport>(
     (s) => {
@@ -451,20 +501,12 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
       for (const rel of multiForkFiles) {
         chain = chain.pipe((sc) => {
           const forks: ForkVersion[] = fileForks.get(rel)!.map((f) => ({ task: f.cluster.task, content: f.content }));
-          const bc = baseContent(rel);
-          const { content: merged, conflicted } = mergeN(bc, forks);
-          allWs.writeUpperFile(rel, merged);                       // 3-way result → upper (the model edits it in place)
-          const editTarget = join(allWs.upperDir(), rel);
-          const inputs = writeMergeInputs(join(inputsRoot, rel.replace(/\//g, "__")), rel, bc, forks);
-          // The model edits the ABSOLUTE editTarget (an overlay-upper path) with
-          // its tools — no switchCwd (a sticky cwd into a to-be-deleted overlay
-          // would leave later nodes spawning in a vanished dir → setpriv ENOENT).
-          return sc
-            .send({ prompt: mergeEditPrompt({ rel, editTarget, inputs, conflicted }) })
-            .combineWith<string, string>(
-              (b) => b.executeShell(() => `echo llm-merge:all-edited ${shq(rel)} conflicted=${conflicted}`),
-              () => { allState.merged[rel] = allWs.readUpperFile(rel) ?? merged; return allState.merged[rel]; },
-            );
+          const base = baseContent(rel);
+          return editMergedFile(sc, {
+            ws: allWs, rel, base, forks, merged: mergeN(base, forks),
+            inputsDir: join(inputsRoot, rel.replace(/\//g, "__")),
+            marker: `llm-merge:all-edited ${shq(rel)}`,
+          });
         });
       }
 
@@ -487,23 +529,25 @@ export function llmMerge(session: Session, args: LlmMergeArgs): SessionWithResul
       const decided = chain.pipe((sc) =>
         sc.executeShell(() => {
           for (const rel of singleForkFiles) allWs.writeUpperFile(rel, fileForks.get(rel)![0].content);
-          const { changedSlides } = ops.detectChanged(allWs, allIntendedSlides);
-          decision.changed = changedSlides;
-          if (changedSlides.length === 0) {                       // nothing differs from approved → accept
-            acceptAll([]);
-            decision.outcome = "accepted";
-            return `echo llm-merge:all-accept-nochange [${report.mergedFiles.join(",")}]`;
+          const rating = detectAndRate(ops, allWs, allIntendedSlides, "all-at-once", "all-together");
+          switch (rating.kind) {
+            case "unchanged":                                     // nothing differs from approved → accept
+              acceptAll([]);
+              decision.outcome = "accepted";
+              return `echo llm-merge:all-accept-nochange [${report.mergedFiles.join(",")}]`;
+            case "green":                                         // ALL changed slides green → accept the combined merge
+              acceptAll(rating.changed);
+              decision.outcome = "accepted";
+              return `echo llm-merge:all-accept green=[${rating.verdict.green.join(",")}]`;
+            case "red":
+              // Any red (incl. "reject all") ABANDONS the all-together merge → SEQUENTIAL
+              // (fold each fork alone), which then isolates which fix is at fault.
+              decision.changed = rating.changed;
+              decision.outcome = "rejected";
+              return `echo llm-merge:all-rejected red=[${rating.verdict.red.join(",")}]`;
+            default:
+              return assertNever(rating);
           }
-          const verdict = ops.rateChanged({ changed: changedSlides, ws: allWs, phase: "all-at-once", label: "all-together" });
-          if (verdict.red.length === 0) {                         // ALL changed slides green → accept the combined merge
-            acceptAll(changedSlides);
-            decision.outcome = "accepted";
-            return `echo llm-merge:all-accept green=[${verdict.green.join(",")}]`;
-          }
-          // Any red (incl. "reject all") ABANDONS the all-together merge → SEQUENTIAL
-          // (fold each fork alone), which then isolates which fix is at fault.
-          decision.outcome = "rejected";
-          return `echo llm-merge:all-rejected red=[${verdict.red.join(",")}]`;
         }),
       );
 
@@ -587,21 +631,15 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
     // forks kept before it (the target MUTATES).
     for (const { rel, content } of forkFiles) {
       chain = chain.pipe((sc) => {
-        const current = cur(rel);            // includes prior folded forks
-        const bc = baseContent(rel);
-        const { content: merged, conflicted } = mergeThree(bc, current, content, { cur: "merged so far", base: "base", other: `fix: ${cluster.task}` });
-        seqWs.writeUpperFile(rel, merged);
-        const editTarget = join(seqWs.upperDir(), rel);
-        const inputs = writeMergeInputs(join(seqInputsRoot, `${cluster.task}--${rel.replace(/\//g, "__")}`), rel, bc, [{ task: cluster.task, content }]);
-        return sc
-          .send({ prompt: mergeEditPrompt({ rel, editTarget, inputs, conflicted }) })
-          .combineWith<string, string>(
-            (b) => b.executeShell(() => `echo llm-merge:seq-edited ${cluster.task} ${shq(rel)} conflicted=${conflicted}`),
-            () => {
-              accepted[rel] = seqWs.readUpperFile(rel) ?? merged;
-              return accepted[rel];
-            },
-          );
+        const base = baseContent(rel);
+        return editMergedFile(sc, {
+          ws: seqWs, rel, base, forks: [{ task: cluster.task, content }],
+          // cur(rel) includes the forks folded before this one.
+          merged: mergeThree(base, cur(rel), content, { cur: "merged so far", base: "base", other: `fix: ${cluster.task}` }),
+          inputsDir: join(seqInputsRoot, `${cluster.task}--${rel.replace(/\//g, "__")}`),
+          marker: `llm-merge:seq-edited ${cluster.task} ${shq(rel)}`,
+          onEdited: (edited) => { accepted[rel] = edited; },
+        });
       });
     }
 
@@ -614,7 +652,6 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
     chain = chain.pipe((sc) =>
       sc.executeShell(() => {
         const greenInPlay = [...new Set([...keptClusters.flatMap((c) => c.slides), ...cluster.slides])];
-        const { changedSlides } = ops.detectChanged(seqWs, greenInPlay);
         const keep = (): void => {
           report.accepted.push(cluster.task);
           keptClusters.push(cluster);
@@ -628,20 +665,23 @@ function sequentialFold(session: Session, ctx: SeqCtx): SessionWithResult<MergeR
           report.rejected.push({ task: cluster.task, reason, demotedSlides: cluster.slides });
           try { ops.demote(cluster.slides, cluster.task, reason); } catch { /* non-fatal */ }
         };
-        if (changedSlides.length === 0) {                        // nothing differs from reference → keep silently
-          keep();
-          ops.commitAccepted(cluster.slides);
-          return `echo llm-merge:seq-keep-nochange ${cluster.task}`;
+        const rating = detectAndRate(ops, seqWs, greenInPlay, "sequential", cluster.task);
+        switch (rating.kind) {
+          case "unchanged":                                      // nothing differs from reference → keep silently
+            keep();
+            ops.commitAccepted(cluster.slides);
+            return `echo llm-merge:seq-keep-nochange ${cluster.task}`;
+          case "green":                                          // all changed slides green → keep + new green
+            keep();
+            ops.commitAccepted(rating.changed);
+            return `echo llm-merge:seq-keep ${cluster.task} green=[${rating.verdict.green.join(",")}]`;
+          case "red":
+            // any red (incl. reject-all) drops THIS fork + demotes; the fold CONTINUES.
+            rollbackDemote(`human rejected changed slide(s) [${rating.verdict.red.join(", ")}]`);
+            return `echo llm-merge:seq-reject ${cluster.task} red=[${rating.verdict.red.join(",")}]`;
+          default:
+            return assertNever(rating);
         }
-        const verdict = ops.rateChanged({ changed: changedSlides, ws: seqWs, phase: "sequential", label: cluster.task });
-        if (verdict.red.length === 0) {                          // all changed slides green → keep + new green
-          keep();
-          ops.commitAccepted(changedSlides);
-          return `echo llm-merge:seq-keep ${cluster.task} green=[${verdict.green.join(",")}]`;
-        }
-        // any red (incl. reject-all) drops THIS fork + demotes; the fold CONTINUES.
-        rollbackDemote(`human rejected changed slide(s) [${verdict.red.join(", ")}]`);
-        return `echo llm-merge:seq-reject ${cluster.task} red=[${verdict.red.join(",")}]`;
       }),
     );
   }
@@ -749,20 +789,6 @@ export function mergeRenderCommand(
   return { cmd, outDir: join(ws.upperDir(), opts.outRel) };
 }
 
-/** Read a single slide's render record out of a record-rendering `--out` dir:
- *  Google thumbnail (pixel), slide XML, and embedded rendered-parts hash. */
-function recordFromDir(dir: string, slideId: string): RenderRecord {
-  const png = join(dir, "thumbs", `${slideId}.png`);
-  const pptx = join(dir, "pptx", `${slideId}.pptx`);
-  const rec: RenderRecord = {};
-  if (existsSync(png)) rec.pngPath = png;
-  const xml = extractSlideXml(pptx);
-  if (xml != null) rec.xml = xml;
-  const parts = extractRenderedPartsHash(pptx);
-  if (parts != null) rec.renderedPartsHash = parts;
-  return rec;
-}
-
 /**
  * Production `MergeOps`. `retest` is the DUAL-CLASS regression gate
  * (regression-gate.ts): it renders the whole deck in the merge workspace and
@@ -801,33 +827,27 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
         timeoutMs,
       );
     }
-    return recordFromDir(baselineDir, slideId);
+    return recordFromRenderDir(baselineDir, slideId);
   };
 
   // LGTM render: the user-approved thumbnail from the SxS dir if present; else
   // the pre-merge base render of that slide.
   const lgtmRecord = (slideId: string): RenderRecord => {
-    if (sxsDir) {
-      for (const sub of ["thumbs", "slides", "originals"]) {
-        const png = join(sxsDir, sub, `${slideId}.png`);
-        if (existsSync(png)) {
-          const rec: RenderRecord = { pngPath: png };
-          // pair with the base render's xml/parts so xml-stable class can compare.
-          const b = baseRecord(slideId);
-          if (b.xml != null) rec.xml = b.xml;
-          if (b.renderedPartsHash != null) rec.renderedPartsHash = b.renderedPartsHash;
-          return rec;
-        }
-      }
-    }
-    return baseRecord(slideId);
+    const png = sxsApprovedPng(sxsDir, slideId);
+    if (png === null) return baseRecord(slideId);
+    const rec: RenderRecord = { pngPath: png };
+    // pair with the base render's xml/parts so xml-stable class can compare.
+    const b = baseRecord(slideId);
+    if (b.xml != null) rec.xml = b.xml;
+    if (b.renderedPartsHash != null) rec.renderedPartsHash = b.renderedPartsHash;
+    return rec;
   };
 
   // Render the merged deck INSIDE the workspace overlay, once per detect call.
   // Track the LAST render dir so the rating UI can show the merged thumbnails.
   // record-rendering hits Google/Chrome and can flake transiently ("socket hang
   // up" when Chrome is overloaded), so RETRY. An empty render must NEVER be passed
-  // through as records: recordFromDir would then read nothing → every slide reads
+  // through as records: recordFromRenderDir would then read nothing → every slide reads
   // as "changed" → the human is asked to rate all 34 phantom slides. So after the
   // retries, THROW — a loud abort (re-runnable) beats a meaningless rating round.
   const RENDER_ATTEMPTS = 3;
@@ -843,14 +863,14 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
       const r = ws.runShell(cmd);
       // ASSERT a COMPLETE render — the gate compares THUMBNAILS (pixels), so a
       // pptx-only render (Google scrape produced no thumbs) must NOT be accepted:
-      // recordFromDir would then read empty pixels → every slide reads "changed" →
+      // recordFromRenderDir would then read empty pixels → every slide reads "changed" →
       // the human is asked to rate all 34 phantom slides (the exact bug we hit).
       const thumbsDir = join(outDir, "thumbs");
       const wantThumbs = csv().split(",").filter(Boolean).length;
       const haveThumbs = existsSync(thumbsDir) ? readdirSync(thumbsDir).filter((f) => /^slide_\d+\.png$/.test(f)).length : 0;
       if (r.code === 0 && haveThumbs >= wantThumbs) {
         lastMergeRenderDir = outDir;
-        return (slideId: string) => recordFromDir(outDir, slideId);
+        return (slideId: string) => recordFromRenderDir(outDir, slideId);
       }
       lastErr = `exit=${r.code} thumbs=${haveThumbs}/${wantThumbs}\n${(r.stderr || "").split("\n").slice(-6).join("\n")}`;
       console.error(`[llm-merge] merge render attempt ${attempt}/${RENDER_ATTEMPTS} INCOMPLETE (exit ${r.code}, thumbs ${haveThumbs}/${wantThumbs}); read dir=${outDir}\n${lastErr}`);
@@ -927,14 +947,20 @@ export function realLlmMergeOps(deps: RealLlmMergeOpsDeps): MergeOps {
 /** The approved-reference PNG shown as "original" in the merge rating UI: the SxS
  *  approved thumbnail if present, else the slide's pre-merge base render. */
 function approvedRefPng(sxsDir: string | undefined, baselineDir: string | null, sid: string): string | null {
-  if (sxsDir) {
-    for (const sub of ["thumbs", "slides", "originals"]) {
-      const p = join(sxsDir, sub, `${sid}.png`);
-      if (existsSync(p)) return p;
-    }
-  }
+  const approved = sxsApprovedPng(sxsDir, sid);
+  if (approved !== null) return approved;
   if (baselineDir) {
     const p = join(baselineDir, "thumbs", `${sid}.png`);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** The user-approved (LGTM) thumbnail of a slide in the SxS results dir, if any. */
+function sxsApprovedPng(sxsDir: string | undefined, sid: string): string | null {
+  if (!sxsDir) return null;
+  for (const sub of ["thumbs", "slides", "originals"]) {
+    const p = join(sxsDir, sub, `${sid}.png`);
     if (existsSync(p)) return p;
   }
   return null;
@@ -1041,32 +1067,29 @@ export function ledgerDemote(historyDir: string, slides: string[], cluster: stri
   if (!slides.length) return;
   const now = new Date().toISOString();
   try { mkdirSync(historyDir, { recursive: true }); } catch { /* */ }
-
-  try {
-    const candFile = join(historyDir, "candidates.json");
-    const cand: Record<string, Record<string, unknown>> =
-      existsSync(candFile) ? JSON.parse(readFileSync(candFile, "utf8")) : {};
-    for (const sid of slides) {
-      const prev = (cand[sid] as Record<string, unknown> | undefined) ?? {};
-      if (prev.status === "bad" && prev.mergeFailed === true && prev.mergeFailedCluster === cluster) continue;
-      cand[sid] = { ...prev, status: "bad", mergeFailed: true, mergeFailedCluster: cluster, mergeFailedReason: reason, mergeFailedAt: now };
+  const failure = { mergeFailed: true, mergeFailedCluster: cluster, mergeFailedReason: reason, mergeFailedAt: now };
+  const ledgers = [
+    // the green-gate the next round reads: flip to bad.
+    { file: "candidates.json", done: (prev: Record<string, unknown>) => prev.status === "bad", patch: { status: "bad", ...failure } },
+    // annotate the issue WITHOUT clobbering the user's comment.
+    { file: "ratings.json", done: () => true, patch: failure },
+  ];
+  for (const ledger of ledgers) {
+    try {
+      const file = join(historyDir, ledger.file);
+      const entries: Record<string, Record<string, unknown>> = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+      for (const sid of slides) {
+        const prev = entries[sid] ?? {};
+        if (ledger.done(prev) && prev.mergeFailed === true && prev.mergeFailedCluster === cluster) continue;
+        entries[sid] = { ...prev, ...ledger.patch };
+      }
+      writeFileSync(file, JSON.stringify(entries, null, 2));
+    } catch (e) {
+      console.error(`[llm-merge] ledgerDemote(${ledger.file.replace(/\.json$/, "")}) best-effort failure for ${cluster}: ${(e as Error).message}`);
     }
-    writeFileSync(candFile, JSON.stringify(cand, null, 2));
-  } catch (e) {
-    console.error(`[llm-merge] ledgerDemote(candidates) best-effort failure for ${cluster}: ${(e as Error).message}`);
   }
+}
 
-  try {
-    const ledgerFile = join(historyDir, "ratings.json");
-    const ledger: Record<string, Record<string, unknown>> =
-      existsSync(ledgerFile) ? JSON.parse(readFileSync(ledgerFile, "utf8")) : {};
-    for (const sid of slides) {
-      const prev = (ledger[sid] as Record<string, unknown> | undefined) ?? {};
-      if (prev.mergeFailed === true && prev.mergeFailedCluster === cluster) continue;
-      ledger[sid] = { ...prev, mergeFailed: true, mergeFailedCluster: cluster, mergeFailedReason: reason, mergeFailedAt: now };
-    }
-    writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2));
-  } catch (e) {
-    console.error(`[llm-merge] ledgerDemote(ratings) best-effort failure for ${cluster}: ${(e as Error).message}`);
-  }
+function assertNever(value: never): never {
+  throw new Error(`Unhandled case: ${String(value)}`);
 }

@@ -28,16 +28,11 @@ import {
   GREEN_INSTABILITY_SENTINEL,
 } from "./regression-gate.js";
 import type { RenderRecord, StabilityClassification } from "./stability.js";
+import { ok, summary } from "./test-harness.js";
 
 // ---------------------------------------------------------------------------
 // harness
 // ---------------------------------------------------------------------------
-let passed = 0, failed = 0;
-const failures: Array<{ name: string; err: unknown }> = [];
-function ok(name: string, cond: boolean, extra = ""): void {
-  if (cond) { passed++; console.log(`  \x1b[32m✓\x1b[0m ${name}`); }
-  else { failed++; console.log(`  \x1b[31m✗\x1b[0m ${name}${extra ? ` — ${extra}` : ""}`); failures.push({ name, err: extra }); }
-}
 const stab = (o: Partial<StabilityClassification>): StabilityClassification => ({
   pixelPerfect: o.pixelPerfect ?? [], xmlStable: o.xmlStable ?? [], unstable: o.unstable ?? [],
   warning: o.warning ?? "", attempts: o.attempts ?? 3,
@@ -226,10 +221,6 @@ function pureTests(): void {
 // RenderRecords (data, not a mocked component).
 function main(): void {
   pureTests();
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) {
-    for (const f of failures) console.log(`  ✗ ${f.name}\n    ${(f.err as Error)?.stack ?? String(f.err)}`);
-    process.exit(1);
-  }
+  summary();
 }
 main();

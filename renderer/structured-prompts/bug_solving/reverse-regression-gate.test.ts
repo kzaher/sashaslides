@@ -14,7 +14,6 @@
  * Only the human click is simulated (an HTTP POST); everything else runs for real.
  */
 import { spawn, execFileSync } from "node:child_process";
-import { createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,14 +22,8 @@ import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { readReverseGateResult, reverseRegressionGate, type ReverseGateSlide } from "./reverse-regression-gate.js";
 import { reverseForkPaths, reverseRatingServerArguments } from "./reverse-direction.js";
+import { ok, summary, freePort } from "./test-harness.js";
 
-let passed = 0;
-let failed = 0;
-function ok(name: string, condition: boolean, extra = ""): void {
-  if (condition) { passed++; console.log(`  ✓ ${name}`); return; }
-  failed++;
-  console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`);
-}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GATE_CLI = join(HERE, "scripts", "reverse-regression-gate.ts");
@@ -52,8 +45,7 @@ async function main(): Promise<void> {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
-  if (failed > 0) process.exit(1);
+  summary();
 }
 
 function pureGate(): void {
@@ -232,17 +224,6 @@ function digestDirectory(directory: string): string {
   return hash.digest("hex");
 }
 
-function freePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, () => {
-      const address = probe.address();
-      const port = typeof address === "object" && address !== null ? address.port : 0;
-      probe.close(() => resolvePort(port));
-    });
-  });
-}
 
 async function waitReady(port: number, deadlineMilliseconds: number): Promise<boolean> {
   const end = Date.now() + deadlineMilliseconds;

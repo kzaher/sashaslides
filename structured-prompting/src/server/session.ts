@@ -12,6 +12,7 @@ import {
   type TryCodeCallback,
   type TryFallbackCallback,
 } from "./graph.js";
+import { randomId, truncate } from "./engine-common.js";
 
 /** Common fields for any CLI call — shared by send. */
 export interface CommonSendArguments {
@@ -109,6 +110,38 @@ export type ParallelApplyFn<T, R> = (s: Session, input: T, index: number) => Ses
 export type TryFn<R> = (s: Session) => SessionWithResult<R>;
 export type TryFallbackFn<R> = (s: Session, err: unknown) => SessionWithResult<R>;
 
+/** The model a Session uses until switchModel/newSession picks another. */
+export const DEFAULT_MODEL: ClaudeModel = "fable";
+
+/** Where a container's body runs: the anchor node plus the model and cwd it inherits. */
+export type BodySessionInit = Readonly<{
+  graph: ComputationGraph;
+  /** The container node (pipe, try, tryAttempt, tryFallback, parallelChild, combineBranch). */
+  anchorId: string;
+  model: ClaudeModel;
+  cwd: string;
+}>;
+
+/**
+ * The Session a container's body is built on. It sets BOTH `tipNodeId` (the
+ * body chains after the anchor) and `containerId` (the body nests under it):
+ * containerId defaults to the root, so a body session built without it
+ * flattens its whole subtree onto the root in the monitor. Interpreters build
+ * body sessions only through this function and `bodySessionWithResult`.
+ */
+export function bodySession(init: BodySessionInit): Session {
+  return new Session(bodySessionArgs(init));
+}
+
+/** `bodySession` for a body that consumes the upstream value (combineWith). */
+export function bodySessionWithResult<T>(init: BodySessionInit): SessionWithResult<T> {
+  return new SessionWithResult<T>(bodySessionArgs(init));
+}
+
+function bodySessionArgs(init: BodySessionInit): SessionInit {
+  return { graph: init.graph, model: init.model, cwd: init.cwd, tipNodeId: init.anchorId, containerId: init.anchorId };
+}
+
 export class Session {
   readonly sessionId: string;
   readonly model: ClaudeModel;
@@ -122,7 +155,7 @@ export class Session {
 
   constructor(init: SessionInit = {}) {
     this.sessionId = init.sessionId ?? randomId();
-    this.model = init.model ?? "fable";
+    this.model = init.model ?? DEFAULT_MODEL;
     this.cwd = init.cwd ?? (typeof process !== "undefined" ? process.cwd() : "/");
     this.graph = init.graph ?? new ComputationGraph(this.sessionId);
     this.tipNodeId = init.tipNodeId ?? this.graph.rootId;
@@ -662,28 +695,11 @@ export function safelyJsonStringify(v: unknown): string {
   }
 }
 
-function truncate(s: string, n: number): string {
-  if (!s) return "";
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1) + "…";
-}
-
 /** Label a PromptInput<T> for the graph row — show "<fn>" for function prompts. */
 function promptLabel(p: unknown, n: number): string {
   if (typeof p === "function") return "<fn>";
   if (typeof p === "string") return truncate(p, n);
   return "";
-}
-
-function randomId(): string {
-  const c = (typeof crypto !== "undefined" ? crypto : undefined) as
-    | (Crypto & { randomUUID?: () => string })
-    | undefined;
-  if (c && typeof c.randomUUID === "function") {
-    return c.randomUUID();
-  }
-  // fallback — should never run under node 22+
-  return "sp_" + Math.random().toString(36).slice(2, 10);
 }
 
 // Re-export ClaudeModel sugar from types for convenience.

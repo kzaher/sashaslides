@@ -12,32 +12,16 @@
  * Boots the real server on temp dirs only (never e2e/goldens*).
  */
 import { spawn, ChildProcess } from "child_process";
-import { createServer } from "net";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { ok, summary, freePort } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); }
-  else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER = resolve(HERE, "../../html2slides/rating-server.ts");
 
-function freePort(): Promise<number> {
-  return new Promise((res, rej) => {
-    const srv = createServer();
-    srv.on("error", rej);
-    srv.listen(0, () => {
-      const addr = srv.address();
-      const port = typeof addr === "object" && addr ? addr.port : 0;
-      srv.close(() => res(port));
-    });
-  });
-}
 
 async function waitReady(port: number, deadlineMs: number): Promise<boolean> {
   const end = Date.now() + deadlineMs;
@@ -121,7 +105,7 @@ async function main(): Promise<void> {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  process.exit(failed ? 1 : 0);
+  summary();
+  process.exit(0);
 }
 main();

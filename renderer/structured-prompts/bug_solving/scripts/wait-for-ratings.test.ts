@@ -11,12 +11,8 @@ import { writeFileSync, readFileSync, mkdtempSync, rmSync, existsSync } from "fs
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { ok, summary } from "../test-harness.js";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); }
-  else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const CLI = "wait-for-ratings.ts";
@@ -124,7 +120,6 @@ function main() {
   }
 
   rmSync(root, { recursive: true, force: true });
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) process.exit(1);
+  summary();
 }
 main();

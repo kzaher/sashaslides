@@ -16,12 +16,8 @@ import { selectOnlyClusters, type Cluster } from "./workspace-setup.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { ok, summary } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); }
-  else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 
 /** Run fn with the given env keys set, then restore (delete keys we set). */
 function withEnv(keys: Record<string, string | undefined>, fn: () => void): void {
@@ -110,5 +106,4 @@ ok("(10a) whitespace-only only → treated as empty → ALL", selectOnlyClusters
 
 rmSync(repo, { recursive: true, force: true });
 
-console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-if (failed) process.exit(1);
+summary();

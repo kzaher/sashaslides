@@ -1,19 +1,7 @@
 /**
- * test-support.ts — the ONE sanctioned mock kit for the bug_solving tests.
- *
- * ██ MOCK POLICY — tests may mock ONLY these THREE things, and NOTHING else ██
- *   (H) HUMAN rating (green/red)      → greenCluster / writeRatingOutcome
- *   (L) the LLM call                  → mockLlm  (real IO; intercepts ONLY claude/codex)
- *   (R) the Google-Slides recording   → recordingFromContent / recordingSeam (MergeRenderSeam)
- * Everything else runs FOR REAL: COW overlays, the filesystem, git, the clock,
- * shells, the regression gate, promote, and the demote ledger. Each mock takes an
- * optional `tag` so a test can identify WHERE the mocked call comes from.
- *
- * The key to "mock only the LLM" is `mockLlm`: it returns a real `IO` that
- * delegates every effect to `realIO` (real bash/git/fs/clock/log) EXCEPT a
- * `claude`/`codex` spawn, which it answers with the injected reply. This is why
- * tests no longer need a wall of MockIO matchers for now/log/bash/git/fs — those
- * are not mocked at all anymore.
+ * test-support.ts — the ONE sanctioned mock kit for the bug_solving tests. Tests may mock only the
+ * human rating, the LLM call and the Google Slides recording; the policy and the per-test audit live
+ * in TESTING-MOCK-POLICY.md.
  */
 import { realIO, type IO, type SpawnCaptureArgs, type SpawnCaptureResult } from "../../../structured-prompting/src/server/io.js";
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
@@ -21,8 +9,7 @@ import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
 import { llmMerge, type GreenCluster, type MergeOps, type MergeRatingArgs, type MergeRatingVerdict, type MergeRenderSeam, type MergeReport } from "./llm-merge.js";
 import type { RenderRecord } from "./stability.js";
 import { execSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 
 // ───────────────────────── (L) the LLM call ─────────────────────────────────
 export interface LlmMock {
@@ -192,14 +179,6 @@ function sha1(s: string): string { return execSync(`printf '%s' ${JSON.stringify
 /** A green cluster (the human marked its slides GOOD). */
 export function greenCluster(task: string, ws: CowWorkspace, slides: string[], sharedDir?: string): GreenCluster {
   return { task, branch_id: ws.id, slides, ...(sharedDir ? { shared_dir: sharedDir } : {}) };
-}
-
-/** Write the fork's rating-outcome marker = the human's green/red verdict (what
- *  the rating UI would persist when you click Good/Bad). */
-export function writeRatingOutcome(sharedDir: string, m: { task: string; green: boolean; good?: string[]; bad?: string[]; unrated?: string[]; slides?: string[] }): void {
-  mkdirSync(sharedDir, { recursive: true });
-  const payload = { task_id: m.task, green: m.green, rated: true, good: m.good ?? [], bad: m.bad ?? [], unrated: m.unrated ?? [], slides: m.slides ?? [] };
-  writeFileSync(join(sharedDir, "rating-outcome.json"), JSON.stringify(payload));
 }
 
 // ───────── (H) human rating of a MERGE's changed slides ─────────────────────

@@ -37,14 +37,8 @@ import { selectOnlyClusters } from "./workspace-setup.js";
 import { mergeSettingsFor, type Task } from "./main.js";
 import { defaultConverterFilter } from "./llm-merge.js";
 import { reverseBriefFor } from "./reverse-run-task.js";
+import { ok, summary } from "./test-harness.js";
 
-let passed = 0;
-let failed = 0;
-function ok(name: string, condition: boolean, extra = ""): void {
-  if (condition) { passed++; console.log(`  ✓ ${name}`); return; }
-  failed++;
-  console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`);
-}
 function throws(run: () => unknown): string | null {
   try { run(); return null; } catch (cause) { return cause instanceof Error ? cause.message : String(cause); }
 }
@@ -189,8 +183,7 @@ ok("(8a) reverse, read-only, exits when rated, candidate", ["--direction", "reve
 ok("(8b) blesses into the fork, never e2e/goldens-reverse", serverArguments[goldensFlag + 1] === fork.forkGoldens && !serverArguments.some((argument) => argument.includes("e2e/goldens-reverse")));
 
 rmSync(root, { recursive: true, force: true });
-console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
-if (failed > 0) process.exit(1);
+summary();
 
 function writePng(path: string, options: Readonly<{ width: number; height: number; value: number }>): void {
   const png = new PNG({ width: options.width, height: options.height });

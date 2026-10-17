@@ -270,16 +270,22 @@ export function defaultStabilityRecorder(deps: DefaultRecorderDeps): StabilityRe
       );
       rendered.set(attemptIdx, outDir);
     }
-    const png = join(outDir, "thumbs", `${slideId}.png`);
-    const pptx = join(outDir, "pptx", `${slideId}.pptx`);
-    const rec: RenderRecord = {};
-    if (existsSync(png)) rec.pngPath = png;
-    const xml = extractSlideXml(pptx);
-    if (xml != null) rec.xml = xml;
-    const parts = extractRenderedPartsHash(pptx);
-    if (parts != null) rec.renderedPartsHash = parts;
-    return rec;
+    return recordFromRenderDir(outDir, slideId);
   };
+}
+
+/** One slide's render record out of a record-rendering `--out` dir: the Google thumbnail (pixel),
+ *  the slide XML and the embedded rendered-parts hash. Missing pieces are left unset. */
+export function recordFromRenderDir(dir: string, slideId: string): RenderRecord {
+  const png = join(dir, "thumbs", `${slideId}.png`);
+  const pptx = join(dir, "pptx", `${slideId}.pptx`);
+  const rec: RenderRecord = {};
+  if (existsSync(png)) rec.pngPath = png;
+  const xml = extractSlideXml(pptx);
+  if (xml != null) rec.xml = xml;
+  const parts = extractRenderedPartsHash(pptx);
+  if (parts != null) rec.renderedPartsHash = parts;
+  return rec;
 }
 
 // ---------------------------------------------------------------------------

@@ -42,11 +42,12 @@ import {
   type RichGraphNode,
   type SendNodeInput,
 } from "./graph.js";
-import { Session, SessionWithResult } from "./session.js";
+import { DEFAULT_MODEL, Session, SessionWithResult, bodySession, bodySessionWithResult } from "./session.js";
 import { realIO, type IO } from "./io.js";
 import { FatalShellError, StructuredError, InterruptException, describeError } from "./errors.js";
 import { claudeDriver } from "./claude-cli.js";
 import type { ModelDriver } from "./model-driver.js";
+import { flattenSchemaUnit, resolvePrompt, safeValue, truncate, type SchemaUnit } from "./engine-common.js";
 
 /**
  * Per-kind handler. Receives the node, the graph (so it can mutate state
@@ -658,8 +659,7 @@ function makePipeHandler(_state: SchedulerState): KindHandler {
     graph.start(node.id);
     const fn = (node as RichGraphNode & { callbacks?: { fn?: (s: Session) => SessionWithResult<unknown> } }).callbacks?.fn;
     if (typeof fn !== "function") { graph.finishErr(node.id, new Error("pipe: missing fn callback")); return; }
-    const sub = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: node.id, containerId: node.id });
-    const tip = fn(sub);
+    const tip = fn(body(graph, node.id, ctx));
     const value = await ctx.driveSub({
       fromId: node.id, tipId: tip.tipNodeId, upstream: ctx.upstream,
       seedCtx: seedFromCtx(ctx),
@@ -675,7 +675,7 @@ function makeCombineWithHandler(state: SchedulerState): KindHandler {
     const cbs = (node as RichGraphNode & { callbacks?: { execution?: (s: SessionWithResult<unknown>) => SessionWithResult<unknown>; combine?: (l: unknown, r: unknown) => unknown } }).callbacks;
     if (!cbs?.execution || !cbs?.combine) { graph.finishErr(node.id, new Error("combineWith: missing callbacks")); return; }
     const branch = graph.create({ parentId: node.id, kind: "combineBranch", label: "combineBranch" });
-    const branchSession = new SessionWithResult<unknown>({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: branch.id, containerId: branch.id });
+    const branchSession = bodySessionWithResult<unknown>({ graph, anchorId: branch.id, model: ctxModel(ctx), cwd: ctx.cwd });
     const tip = cbs.execution(branchSession);
     state.values.set(branch.id, ctx.upstream);
     const rightVal = await ctx.driveSub({
@@ -696,9 +696,8 @@ function makeParallelForkHandler(state: SchedulerState): KindHandler {
     if (typeof apply !== "function") { graph.finishErr(node.id, new Error("parallelFork: missing apply callback")); return; }
     const results = await Promise.all(input.inputs.map(async (childInput, i) => {
       const childNode = graph.create({ parentId: node.id, kind: "parallelChild", label: `child #${i}`, input: { index: i, input: childInput } });
-      const childSession = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: childNode.id, containerId: childNode.id });
       try {
-        const tip = apply(childSession, childInput, i);
+        const tip = apply(body(graph, childNode.id, ctx), childInput, i);
         const value = await ctx.driveSub({
           fromId: childNode.id, tipId: tip.tipNodeId, upstream: undefined,
           // Each child is an independent branch: fresh session, inherit model/cwd.
@@ -728,9 +727,8 @@ function makeTryMultipleTimesHandler(state: SchedulerState): KindHandler {
     let extraPrepend: string[] = [];
     for (let i = 1; i <= max; i++) {
       const att = graph.create({ parentId: node.id, kind: "tryAttempt", label: `attempt ${i}/${max}` });
-      const s = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: att.id, containerId: att.id });
       try {
-        const tip = cbs.code(s);
+        const tip = cbs.code(body(graph, att.id, ctx));
         const value = await ctx.driveSub({
           fromId: att.id, tipId: tip.tipNodeId, upstream: ctx.upstream,
           seedCtx: {
@@ -758,51 +756,69 @@ function makeTryMultipleTimesHandler(state: SchedulerState): KindHandler {
           : [...extraPrepend, `Previous attempt failed: ${describeError(err)}. Diagnose the cause before retrying.`];
       }
     }
-    // Fallback chain.
-    const fb = graph.create({ parentId: node.id, kind: "tryFallback", label: "fallback after retries", input: { error: describeError(lastErr) } });
-    const s = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: fb.id, containerId: fb.id });
-    try {
-      const tip = cbs.fallback(s, lastErr);
-      const value = await ctx.driveSub({
-        fromId: fb.id, tipId: tip.tipNodeId, upstream: ctx.upstream, seedCtx: { model: ctx.model, cwd: ctx.cwd },
-      });
-      state.values.set(fb.id, value);
-      graph.finishOk(fb.id, safeValue(value));
-      ctx.setValue(node.id, value);
-      graph.finishOk(node.id, { recovered: true });
-    } catch (err2) {
-      graph.finishErr(fb.id, err2);
-      graph.finishErr(node.id, err2);
-    }
+    await runFallback({ state, node, graph, ctx, err: lastErr, label: "fallback after retries", fallback: cbs.fallback });
   };
 }
 
-function makeTryHandler(_state: SchedulerState): KindHandler {
+function makeTryHandler(state: SchedulerState): KindHandler {
   return async (node, graph, ctx) => {
     graph.start(node.id);
     const cbs = (node as RichGraphNode & { callbacks?: { code?: (s: Session) => SessionWithResult<unknown>; fallback?: (s: Session, e: unknown) => SessionWithResult<unknown> } }).callbacks;
     if (!cbs?.code || !cbs?.fallback) { graph.finishErr(node.id, new Error("try: missing callbacks")); return; }
     try {
-      const s = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: node.id, containerId: node.id });
-      const tip = cbs.code(s);
+      const tip = cbs.code(body(graph, node.id, ctx));
       const value = await ctx.driveSub({ fromId: node.id, tipId: tip.tipNodeId, upstream: ctx.upstream, seedCtx: seedFromCtx(ctx) });
       ctx.setValue(node.id, value);
       graph.finishOk(node.id, { ok: true });
     } catch (err) {
-      const fb = graph.create({ parentId: node.id, kind: "tryFallback", label: "fallback", input: { error: describeError(err) } });
-      const s = new Session({ model: (ctx.model ?? "fable") as ClaudeModel, cwd: ctx.cwd, graph, tipNodeId: fb.id, containerId: fb.id });
-      try {
-        const tip = cbs.fallback(s, err);
-        const value = await ctx.driveSub({ fromId: fb.id, tipId: tip.tipNodeId, upstream: ctx.upstream, seedCtx: { model: ctx.model, cwd: ctx.cwd } });
-        ctx.setValue(node.id, value);
-        graph.finishOk(fb.id, safeValue(value));
-        graph.finishOk(node.id, { recovered: true });
-      } catch (err2) {
-        graph.finishErr(fb.id, err2);
-        graph.finishErr(node.id, err2);
-      }
+      await runFallback({ state, node, graph, ctx, err, label: "fallback", fallback: cbs.fallback });
     }
   };
+}
+
+/**
+ * The fallback of `try` and `tryMultipleTimes`: build it under a
+ * `tryFallback` node and drive it. Recovery finishes the container ok; a
+ * failing fallback fails both nodes.
+ */
+async function runFallback(args: {
+  state: SchedulerState;
+  node: RichGraphNode;
+  graph: ComputationGraph;
+  ctx: SchedulerCtx;
+  err: unknown;
+  label: string;
+  fallback: (s: Session, e: unknown) => SessionWithResult<unknown>;
+}): Promise<void> {
+  const { state, node, graph, ctx, err } = args;
+  const fb = graph.create({ parentId: node.id, kind: "tryFallback", label: args.label, input: { error: describeError(err) } });
+  try {
+    const tip = args.fallback(body(graph, fb.id, ctx), err);
+    const value = await ctx.driveSub({
+      fromId: fb.id, tipId: tip.tipNodeId, upstream: ctx.upstream, seedCtx: { model: ctx.model, cwd: ctx.cwd },
+    });
+    state.values.set(fb.id, value);
+    graph.finishOk(fb.id, safeValue(value));
+    ctx.setValue(node.id, value);
+    graph.finishOk(node.id, { recovered: true });
+  } catch (err2) {
+    graph.finishErr(fb.id, err2);
+    graph.finishErr(node.id, err2);
+  }
+}
+
+/**
+ * The scheduler carries the model as a plain string (it travels in ctxPatch
+ * output). Its only writers are switchModel and newSession, whose inputs are
+ * ClaudeModel values, so the cast restores the type the description had.
+ */
+function ctxModel(ctx: SchedulerCtx): ClaudeModel {
+  return (ctx.model ?? DEFAULT_MODEL) as ClaudeModel;
+}
+
+/** A container body's Session, anchored (tip AND container) at `anchorId`. */
+function body(graph: ComputationGraph, anchorId: string, ctx: SchedulerCtx): Session {
+  return bodySession({ graph, anchorId, model: ctxModel(ctx), cwd: ctx.cwd });
 }
 
 /** Synthetic container wrappers are passthroughs finished by their parent handler. */
@@ -845,46 +861,4 @@ export function defaultKindRegistry(
   r.set("try", makeTryHandler(state));
   r.set("tryMultipleTimes", makeTryMultipleTimesHandler(state));
   return { registry: r, values };
-}
-
-// ── helpers (ported from engine.ts) ───────────────────────────────────────────
-
-function resolvePrompt(p: unknown, upstream: unknown): string {
-  if (typeof p === "function") {
-    const v = (p as (u: unknown) => unknown)(upstream);
-    return typeof v === "string" ? v : String(v);
-  }
-  return typeof p === "string" ? p : "";
-}
-
-type JsonSchemaObject = Record<string, unknown>;
-interface SchemaUnit { schema: JsonSchemaObject; components?: JsonSchemaObject; }
-
-function flattenSchemaUnit(unit: SchemaUnit): JsonSchemaObject {
-  const root = unit.schema;
-  if (!root || typeof root !== "object") return root ?? {};
-  if (typeof root.$ref === "string" && unit.components) {
-    const resolved = resolveRef(root.$ref, unit.components);
-    if (resolved) return resolved;
-  }
-  return root;
-}
-
-function resolveRef(ref: string, components: JsonSchemaObject): JsonSchemaObject | null {
-  const parts = ref.replace(/^#\//, "").split("/");
-  let cur: unknown = { components };
-  for (const p of parts) {
-    if (cur == null || typeof cur !== "object") return null;
-    cur = (cur as Record<string, unknown>)[p];
-  }
-  return cur != null && typeof cur === "object" ? (cur as JsonSchemaObject) : null;
-}
-
-function safeValue(v: unknown): unknown {
-  try { JSON.stringify(v); return v; } catch { return String(v); }
-}
-
-function truncate(s: string, n: number): string {
-  if (!s) return "";
-  return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }

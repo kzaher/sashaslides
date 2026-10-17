@@ -8,7 +8,7 @@
  *   (1) `cd renderer && npx tsx renderer/…/record-rendering.ts` doubled to
  *       `renderer/renderer/…` → ERR_MODULE_NOT_FOUND (render never started).
  *   (2) `--out "$PWD/../<abs /tmp path>"` wrote inside the overlay's namespace-
- *       local tree (torn down when runShell returns), NOT where recordFromDir read.
+ *       local tree (torn down when runShell returns), NOT where recordFromRenderDir read.
  *
  * (A) is a pure invariant test on `mergeRenderCommand` — always runs, no overlay
  * or Google, and would have caught BOTH bugs. (B) is an overlay + `--mode pptx`
@@ -23,13 +23,8 @@ import { mergeRenderCommand } from "./llm-merge.js";
 import { createCowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
 import type { CowWorkspace } from "../../../cow-workspace/cow-workspace.ts";
 import { overlayWorkspaceOptions } from "./cow-options.js";
+import { test, summary } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-const failures: Array<{ name: string; err: unknown }> = [];
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try { await fn(); passed++; console.log(`  \x1b[32m✓\x1b[0m ${name}`); }
-  catch (e) { failed++; failures.push({ name, err: e }); console.log(`  \x1b[31m✗\x1b[0m ${name}`); console.log(`      ${((e as Error)?.message ?? String(e)).split("\n").slice(0, 6).join("\n      ")}`); }
-}
 function overlayAvailable(): string | null {
   if (!existsSync("/overlays")) return "no /overlays volume";
   try { execSync("unshare -Urm --map-root-user true", { stdio: "ignore" }); } catch { return "user namespaces unavailable (SYS_ADMIN?)"; }
@@ -82,7 +77,7 @@ async function main(): Promise<void> {
       const r = ws.runShell(cmd);
       assert.equal(r.code, 0, `render exited non-zero:\n${(r.stderr || "").split("\n").slice(-8).join("\n")}`);
       const pptxDir = join(outDir, "pptx");
-      assert.ok(existsSync(pptxDir), `no pptx dir at the read path ${pptxDir} — the render output did not land where recordFromDir reads`);
+      assert.ok(existsSync(pptxDir), `no pptx dir at the read path ${pptxDir} — the render output did not land where recordFromRenderDir reads`);
       assert.ok(readdirSync(pptxDir).some((f) => f.endsWith(".pptx")), `pptx dir ${pptxDir} is empty`);
     } finally {
       try { ws.cleanup(); } catch { /* */ }
@@ -90,7 +85,6 @@ async function main(): Promise<void> {
     }
   });
 
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) { for (const f of failures) console.log(`  ✗ ${f.name}\n    ${(f.err as Error)?.stack ?? String(f.err)}`); process.exit(1); }
+  summary();
 }
 main().catch((e) => { console.error(e); process.exit(1); });

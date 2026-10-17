@@ -8,10 +8,31 @@
  * (/overlays/shared/<run>/<task>, outside the overlay), as the reverse direction's reverseForkPaths
  * (reverse-direction.ts) already does. Binary artefacts only the fork reads (before/after pptx, the
  * per-slide diffs) stay in the repo-relative scratch dir.
+ *
+ * `forwardChain` is the forward direction of the shared fork chain (fork-chain.ts).
  */
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SlideTask, Task } from "./main.js";
+import type { SessionWithResult } from "../../../structured-prompting/src/index.js";
+import type { SlideTask, Task, TaskResult } from "./main.js";
+import { BRANCH_CD_RENDERER, FORK_SCRIPTS, type DirectionChain } from "./fork-chain.js";
+import { acceptDisabled } from "./rating-gate.js";
+
+/** The forward candidate/demotion ledger the fork's rating server and gate mirror verdicts into. */
+export const FORWARD_HISTORY_DIR = "/workspaces/sashaslides/.bug-solving-history";
+
+/** Repository-relative scripts only the forward chain runs. */
+const SCRIPTS = {
+  // record-rendering.ts runs with cwd = <workspace>/renderer so tsx + convert-pptx's node_modules
+  // resolve; it writes per-slide pptx to <out>/pptx/<slide_id>.pptx.
+  record: "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts",
+  diff: "renderer/structured-prompts/bug_solving/scripts/diff-pptx-pairs.ts",
+  // The fork's rating UI (step A1), launched with forwardRatingServerArguments.
+  ratingServer: "renderer/html2slides/rating-server.ts",
+  // Renders the changed non-cluster slides BEFORE/AFTER and image-verifies whether the change is a
+  // VISIBLE regression. Writes <shared>/forward/offtarget-gate.json.
+  offtargetGate: "renderer/structured-prompts/bug_solving/scripts/offtarget-gate.ts",
+} as const;
 
 export type ForwardForkPaths = Readonly<{
   /** offtarget-gate.ts's --scratch: reg-diffs/, offtarget-gate.json and the gate's own renders. */
@@ -198,4 +219,200 @@ export function writeSxsMeta(resultsDir: string, slides: readonly SlideTask[]): 
   } catch (e) {
     console.error(`[writeSxsMeta] non-fatal: ${(e as Error).message}`);
   }
+}
+
+/** The worker's header: where it runs, the cluster, and per slide the user's comment and every
+ *  image to open, plus how to write analysis.md. */
+function analysisPromptFor(task: Task): string {
+  return [
+    `Task: ${task.task_id}`,
+    `You are running INSIDE an isolated overlay branch (${task.branch_id}); your cwd is the repository root and every edit is captured in the branch's private layer (the base working tree is untouched).`,
+    `Scratch (binary artifacts, repo-relative inside the branch): ${task.scratch_dir}`,
+    `Analysis dir (write analysis.md / fix-summary.md HERE, repo-relative inside the branch): ${task.analysis_dir}`,
+    `Cluster hypothesis: ${task.cluster_description}`,
+    ``,
+    `Slides in this task, the user's SxS comments, and the IMAGE MANIFEST for each.`,
+    `Open EACH listed image with the Read tool (it renders PNGs visually):`,
+    ...task.slides.flatMap(s => {
+      const target = s.img_original ?? s.original_png;
+      const attempt = s.img_attempt ?? s.rendered_png;
+      const lines = [
+        ``,
+        `  ${s.slide_id}: "${s.user_comment}"`,
+        `    - TARGET (what the slide SHOULD look like): ${target}`,
+        `    - ATTEMPT (what the converter currently produces — the defect is HERE): ${attempt}`,
+      ];
+      const rawAnn = s.img_annotations ?? s.annotation_png;
+      if (rawAnn)
+        lines.push(`    - RAW ANNOTATION (the user's marks alone, on transparent bg — just to see the shapes): ${rawAnn}`);
+      const highlighted = s.img_highlighted ?? s.composite_png;
+      if (highlighted)
+        lines.push(`    - HIGHLIGHTED ATTEMPT, MAX CONTRAST (the user's marks applied over the TARGET slide with the marked region colour-shifted for maximum visibility — THIS shows you EXACTLY WHERE on the slide the user is pointing): ${highlighted}`);
+      return lines;
+    }),
+    ``,
+    `How to incorporate the user's comments into your analysis:`,
+    `  * The user's words are ground truth — do not argue with them. Your job is`,
+    `    to explain the WHY and propose the minimal fix.`,
+    `  * Open ALL of the images above with the Read tool (it renders PNGs`,
+    `    visually). The RAW ANNOTATION alone is meaningless (transparent`,
+    `    rectangles on nothing) — use the HIGHLIGHTED ATTEMPT (max-contrast`,
+    `    composite) to locate the marked region on the actual slide, then compare`,
+    `    the ATTEMPT vs TARGET in that region to see the defect.`,
+    `  * Always disambiguate TEXT-vs-BOX when the comment is about alignment.`,
+    `  * Write your findings into ${task.analysis_dir}/analysis.md. Use one H2`,
+    `    section per slide. Each section must have: "User comment" (verbatim),`,
+    `    "Observed in current render" (what you see), "Root cause" (file:line),`,
+    `    "Fix strategy" (what you'll change), "Expected diff" (what the pptx`,
+    `    XML change will look like). analysis.md is retry-persistent — on`,
+    `    subsequent attempts, UPDATE existing sections rather than rewriting.`,
+    ``,
+    `After writing analysis.md, apply the fix. Do NOT commit.`,
+  ].join("\n");
+}
+
+function forwardFixPrompt(task: Task): string {
+  return [
+    `The BEFORE-state pptx files are already at ${task.scratch_dir}/before/pptx/<slide_id>.pptx — the scaffolding recorded them before you started. Use them as reference if helpful.`,
+    ``,
+    `Your only task right now:`,
+    `  1. Open EVERY image in the per-slide IMAGE MANIFEST from the header with the Read tool (TARGET, ATTEMPT, RAW ANNOTATION, and the HIGHLIGHTED ATTEMPT max-contrast composite). Use the highlighted attempt to locate the marked region on the slide, then compare ATTEMPT vs TARGET there.`,
+    `  2. Write (or UPDATE if it exists) ${task.analysis_dir}/analysis.md with one H2 section per slide using the template you were given.`,
+    `  3. Apply the MINIMAL code fix in renderer/html2slides/extract-dom.ts and/or convert-pptx.ts.`,
+    `  4. Do NOT run git commit, git stash, git checkout. Leave changes uncommitted.`,
+    `  5. Do NOT record the AFTER pptx, do NOT run the diff script — the orchestrator runs those next.`,
+    ``,
+    `When analysis.md is written and the code edits are in place, reply with exactly the line: FIX_APPLIED.`,
+    `If something blocks you, reply with "FAILED: <one-line reason>" and stop.`,
+  ].join("\n");
+}
+
+/**
+ * The FORWARD direction of the fork chain: HTML fixture -> pptx -> Google Slides. Everything the
+ * host reads back from the fork (gate verdict, Google render, AFTER images, ratings) goes to the
+ * shared dir, outside the overlay. Step 1 (record the BEFORE pptx) runs in the scaffolding.
+ */
+export function forwardChain(task: Task): DirectionChain {
+  const ids = task.slides.map((slide) => slide.slide_id).join(",");
+  const fork = forwardForkPaths(task.shared_dir);
+  // Step 7 re-runs step 4c's render; record-rendering is idempotent per phase, so it only repeats
+  // work when 4c failed.
+  const renderThumbnails =
+    `npx tsx "$ROOT/${SCRIPTS.record}" ` +
+    `--mode full --fixtures "$ROOT/${task.fixtures_dir}" ` +
+    `--slides ${ids} --title "${task.presentation_title}" ` +
+    `--out "${fork.thumbnails}" || true`;
+  return {
+    brief: analysisPromptFor(task),
+    fixPrompt: forwardFixPrompt(task),
+    afterFix: (fixed: SessionWithResult<string>) => fixed
+      // Step 3 — record the AFTER pptx inside the branch, so it picks up the worker's fix.
+      .executeShell(() =>
+        `${BRANCH_CD_RENDERER} && npx tsx "$ROOT/${SCRIPTS.record}" ` +
+        `--mode pptx --fixtures "$ROOT/${task.fixtures_dir}" ` +
+        `--slides ${ids} --out "$ROOT/${task.scratch_dir}/after"`
+      )
+      // Step 4 — pairwise OOXML diffs of the cluster's slides.
+      .executeShell(() =>
+        `${BRANCH_CD_RENDERER} && npx tsx "$ROOT/${SCRIPTS.diff}" ` +
+        `--before "$ROOT/${task.scratch_dir}/before/pptx" --after "$ROOT/${task.scratch_dir}/after/pptx" ` +
+        `--out "$ROOT/${task.scratch_dir}/diffs"`
+      )
+      // Step 4b — REGRESSION SCAN across the whole deck: render every fixture with the fix and diff
+      // it against the pristine `before-all` baseline the scaffolding staged (re-rendering it here
+      // would nest an overlay inside the jail, which the kernel rejects). Dirs are cleared first so
+      // a retry never diffs stale pptx. MERGE_RENDER_CONCURRENCY=1 falls back to serial.
+      .executeShell(() => {
+        const fx = task.fixtures_dir;
+        // /tmp scratch outside the overlay for the whole-deck AFTER pptx.
+        const reg = `/tmp/bs-reg-${task.branch_id}`;
+        return [
+          BRANCH_CD_RENDERER,
+          `rm -rf ${reg} "${fork.regDiffs}" && mkdir -p ${reg}`,
+          `ALL=$(ls "$ROOT/${fx}"/slide_*.html | xargs -n1 basename | sed 's/[.]html$//' | sort -V | paste -sd,)`,
+          `RECORD_CONCURRENCY=${process.env.MERGE_RENDER_CONCURRENCY || "5"} npx tsx "$ROOT/${SCRIPTS.record}" --mode pptx --fixtures "$ROOT/${fx}" --slides "$ALL" --out ${reg}/after-all`,
+          `npx tsx "$ROOT/${SCRIPTS.diff}" --before "$ROOT/${task.scratch_dir}/before-all/pptx" --after ${reg}/after-all/pptx --out "${fork.regDiffs}"`,
+        ].join(" && ");
+      })
+      // Step 4c — render the AFTER state to Google Slides so each verdict can judge PIXEL-ONLY
+      // fixes the OOXML diff is blind to. Cleared first so a retry re-renders the new fix.
+      // Best-effort: the verdict falls back to the diff when the AFTER image is missing.
+      .executeShell(() => `${BRANCH_CD_RENDERER} && rm -rf "${fork.thumbnails}" && ${renderThumbnails}`)
+      // Step 4d — VISUAL off-target gate over step 4b's reg-diffs: renders each changed non-cluster
+      // slide BEFORE/AFTER and asks an image verifier whether the change is a VISIBLE regression.
+      // Best-effort: step 6b falls back to the structural check when its file is missing (a
+      // previous attempt's file is removed first so it can never stand in).
+      .executeShell(() =>
+        `${BRANCH_CD_RENDERER} && rm -f "${fork.offtargetGate}" && npx tsx "$ROOT/${SCRIPTS.offtargetGate}" ` +
+        `--scratch "${fork.root}" --cluster ${ids} --workdir "$ROOT" ` +
+        `--fixtures "$ROOT/${task.fixtures_dir}" ` +
+        `--record "$ROOT/${SCRIPTS.record}" ` +
+        `--title "${task.presentation_title}-offtarget" || true`,
+      )
+      // Step 4e — each slide's AFTER thumbnail copied to <shared>/images/<id>_after.png with the
+      // user's marks composited over it, for the verdict header. Best-effort per slide.
+      .executeShell(() => {
+        const composite = `"$ROOT/${FORK_SCRIPTS.composite}"`;
+        const cmds = task.slides.map(s => {
+          const images = forwardAfterImages(fork, s.slide_id);
+          const ann = s.img_annotations ? ` "${s.img_annotations}" "${images.highlightedAfter}"` : ``;
+          return `npx tsx ${composite} refresh "${images.thumbnail}" "${images.after}"${ann} || true`;
+        });
+        return `${BRANCH_CD_RENDERER} && mkdir -p "${fork.images}" && ${cmds.join(" && ")}`;
+      }),
+    verdictHeader: (slide) => forwardVerdictHeader(task, slide),
+    verdictPrompt: forwardVerdictPrompt,
+    sxsServerSpec: {
+      port: task.server_port,
+      slides: task.slides.map(s => s.slide_id),
+      analysis_md: `${task.analysis_dir}/analysis.md`,
+      diffs_dir: `${task.scratch_dir}/diffs`,
+      // record-rendering --mode full writes the thumbnail to <out>/thumbs/<id>.png.
+      thumbnails_dir: join(fork.thumbnails, "thumbs"),
+      task_title: `bug_solving: ${task.task_id}`,
+    },
+    // C2: only off-target changes the step-4d visual gate confirmed are VISIBLY worse.
+    gateFailures: () => {
+      const offTarget = offTargetRegressions(fork, task.slides.map(s => s.slide_id));
+      return offTarget.length
+        ? [`OFF-TARGET VISIBLE REGRESSIONS (${offTarget.length}) — non-cluster slides the image verifier judged visibly worse after this fix: ${offTarget.join(", ")}`]
+        : [];
+    },
+    // Step 7 — post-verdict productization, NON-FATAL (`|| true`, writeSxsMeta swallows): a flaky
+    // Google upload must never throw an already-PASSED fix away.
+    afterVerdict: (passed: SessionWithResult<TaskResult>) => passed.combineWith<string, TaskResult>(
+      (branch) => branch.executeShell(() => `${BRANCH_CD_RENDERER} && ${renderThumbnails}`),
+      (taskResult) => {
+        writeSxsMeta(fork.thumbnails, task.slides);
+        return taskResult;
+      },
+    ),
+    // Step A1 — the fork's rating UI on its shared Google render. NO_ACCEPT (no human) skips it.
+    ratingServerCommand: (tr) => {
+      if (acceptDisabled(process.env)) {
+        return `${BRANCH_CD_RENDERER} && echo "[rating-server] NO_ACCEPT → skipping ${task.task_id} rating UI"`;
+      }
+      const spec = tr.sxs_server_spec;
+      const log = `${fork.root}/rating-server.log`;
+      const serverArguments = forwardRatingServerArguments({
+        resultsDirectory: fork.thumbnails,
+        slidesDirectory: spec.thumbnails_dir,
+        port: spec.port,
+        slides: spec.slides,
+        // repo-relative inside the branch → absolute via $ROOT
+        analysisPath: `$ROOT/${spec.analysis_md}`,
+        diffsDirectory: `$ROOT/${spec.diffs_dir}`,
+        taskTitle: spec.task_title,
+        historyDirectory: FORWARD_HISTORY_DIR,
+      });
+      return (
+        `${BRANCH_CD_RENDERER} && mkdir -p "${fork.root}" && ` +
+        `echo "[rating-server] ${task.task_id} → http://localhost:${spec.port} (log ${log})" && ` +
+        `npx tsx "$ROOT/${SCRIPTS.ratingServer}" ${serverArguments.map((argument) => `"${argument}"`).join(" ")} 2> "${log}"`
+      );
+    },
+    // The history dir is outside the repository but inside the overlay's lower, so the gate's
+    // ledger mirror lands in the branch upper: best-effort only.
+    ratings: { resultsDirectory: fork.thumbnails, ratingsFile: null, historyDirectory: FORWARD_HISTORY_DIR },
+  };
 }

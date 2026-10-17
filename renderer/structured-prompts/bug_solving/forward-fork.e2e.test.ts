@@ -20,6 +20,7 @@ import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.j
 import { cleanupAllCowWorkspaces } from "../../../cow-workspace/cow-workspace.ts";
 import { forwardForkPaths, offTargetRegressions, writeSxsMeta } from "./forward-fork.js";
 import type { SlideTask } from "./main.js";
+import { ok, summary } from "./test-harness.js";
 
 const REPO = "/workspaces/sashaslides";
 const ROOT = "/overlays/forward-fork-e2e";
@@ -31,10 +32,6 @@ process.env.OVERLAY_BRANCH_ROOT = ROOT;
 process.env.COW_WORKSPACE_ROOT = ROOT; // wins over OVERLAY_BRANCH_ROOT; a cow.mjs shell exports it
 process.env.COW_WORKSPACE_PROVIDER = "overlayfs";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); } else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 
 function overlayAvailable(): string | null {
   if (!existsSync("/overlays")) return "no /overlays volume";
@@ -82,7 +79,6 @@ async function main(): Promise<void> {
     rmSync(`/overlays/forward-fork-e2e-shared/${process.pid}`, { recursive: true, force: true });
     try { rmdirSync("/overlays/forward-fork-e2e-shared"); } catch { /* another run still uses it */ }
   }
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) process.exit(1);
+  summary();
 }
 main();

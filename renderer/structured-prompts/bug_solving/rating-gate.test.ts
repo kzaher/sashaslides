@@ -8,12 +8,8 @@ import { resolveRatingIo } from "./sxs-io.js";
 import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { ok, summary } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); }
-  else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 async function main() {
   console.log("\nrating-gate tests (blocking gate, injected read/sleep)\n");
 
@@ -108,7 +104,6 @@ async function main() {
     ok("(8) acceptDisabled: '1' disables; unset, '0' and 'true' do not", d("1") && !d() && !d("0") && !d("true"));
   }
 
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) process.exit(1);
+  summary();
 }
 main();

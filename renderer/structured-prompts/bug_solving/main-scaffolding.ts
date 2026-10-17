@@ -11,7 +11,7 @@
  *
  * The rating gate + accept/merge now live INSIDE the graph (see main.ts):
  *   - each SOLVED fork boots its OWN rating UI and BLOCKS on the human rating
- *     (runTask steps A1–A3), then writes a rating-outcome.json marker to its
+ *     (fork-chain.ts steps A1–A3), then writes a rating-outcome.json marker to its
  *     shared dir (outside the overlay, so the final phase can read it);
  *   - AFTER the parallelFork barrier a FINAL merge phase (finalMergePhase) folds
  *     every GREEN cluster together with the SIMPLE LLM MERGE (llm-merge.ts): base
@@ -42,7 +42,7 @@
  *   BUG_SOLVING_SXS_DIR override the ratings file / results root, BUG_SOLVING_REVERSE_GOLDENS_DIR
  *   the goldens the gate READS, BUG_SOLVING_REVERSE_CHROME_PORT the Chrome, default the headless 9222).
  *   No BEFORE pptx is recorded (the canonical .sxs-reverse renders are the BEFORE); each
- *   fork runs reverseRunTask (reverse-run-task.ts). See main.ts's header.
+ *   fork runs reverseChain (reverse-run-task.ts). See main.ts's header.
  *
  * ## Monitor URL
  *   Engine prints it on stderr as soon as it binds the port (look for
@@ -138,7 +138,7 @@ const REPO_ROOT = process.cwd();
 // pipeline as AFTER; this is the repo-root-relative path joined onto each
 // task's workspace_dir below.
 const RECORD_SCRIPT_REL = "renderer/structured-prompts/bug_solving/scripts/record-rendering.ts";
-// The per-fork rating UIs run INSIDE the graph (runTask step A1), in the
+// The per-fork rating UIs run INSIDE the graph (fork-chain.ts step A1), in the
 // foreground of their node, and exit once every slide is rated — so the
 // scaffolding tracks no child servers. An uncaughtException still exits non-zero.
 process.on("uncaughtException", (e) => {

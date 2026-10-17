@@ -7,12 +7,8 @@
  */
 import { resolveRatingIo, describeRatingIo } from "./sxs-io.js";
 import { join, resolve, isAbsolute } from "path";
+import { ok, summary } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); }
-  else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 
 function main() {
   console.log("\nsxs-io tests (I/O contract resolvers + describers)\n");
@@ -100,7 +96,6 @@ function main() {
     ok("(10) ratingsFile override resolved + printed", cfg.ratingsFile === resolve("/tmp/elsewhere/ratings.json") && describeRatingIo(cfg).includes(cfg.ratingsFile), cfg.ratingsFile);
   }
 
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) process.exit(1);
+  summary();
 }
 main();

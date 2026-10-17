@@ -1,22 +1,19 @@
 /**
  * rating-marker.test.ts — the rating-outcome marker path + read/validate helpers
- * (main.ts: ratingMarkerPath / readRatingMarker / RatingOutcomeMarker).
+ * (rating-marker.ts: ratingMarkerPath / readRatingMarker / RatingOutcomeMarker).
  *
  * ratingMarkerPath derives <shared_dir>/rating-outcome.json (an absolute path on
  * the shared /overlays volume, OUTSIDE the fork's overlay); readRatingMarker
  * parses+validates it, returning null for absent/malformed/wrong-typed markers
  * and sanitizing the string arrays. No engine execution — just the pure helpers.
  */
-import { ratingMarkerPath, readRatingMarker, type Task, type RatingOutcomeMarker } from "./main.js";
+import type { Task } from "./main.js";
+import { ratingMarkerPath, readRatingMarker, type RatingOutcomeMarker } from "./rating-marker.js";
 import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { ok, summary } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); }
-  else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 
 /** Minimal Task carrying only the fields ratingMarkerPath/readRatingMarker use
  *  (shared_dir + task_id); the rest are filler to satisfy the type. The marker
@@ -127,7 +124,6 @@ function main() {
   }
 
   rmSync(root, { recursive: true, force: true });
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) process.exit(1);
+  summary();
 }
 main();

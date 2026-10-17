@@ -28,6 +28,7 @@ import { resolve } from "path";
 import { ClaudeEngine, Session } from "../../../structured-prompting/src/index.js";
 import { createCowWorkspace, cleanupAllCowWorkspaces } from "../../../cow-workspace/cow-workspace.ts";
 import { overlayWorkspaceOptions } from "./cow-options.js";
+import { ok, summary } from "./test-harness.js";
 
 const REPO = "/workspaces/sashaslides";
 const ROOT = "/overlays/switch-branch-e2e"; // isolated root — never touches a live run
@@ -48,10 +49,6 @@ process.env.COW_WORKSPACE_ROOT = ROOT;
 process.env.COW_WORKSPACE_PROVIDER = "overlayfs";
 const env = { ...process.env, OVERLAY_BRANCH_ROOT: ROOT };
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); } else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 
 function overlayAvailable(): string | null {
   if (!existsSync("/overlays")) return "no /overlays volume";
@@ -111,7 +108,6 @@ async function main() {
     ok("(final) base working tree restored byte-for-byte", finalCanary === baseCanary);
   }
 
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) process.exit(1);
+  summary();
 }
 main();

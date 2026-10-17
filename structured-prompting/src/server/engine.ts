@@ -1,6 +1,8 @@
 import {
   Session,
   SessionWithResult,
+  bodySession,
+  bodySessionWithResult,
   type RichGraphNode,
 } from "./session.js";
 import { ComputationGraph } from "./graph.js";
@@ -13,6 +15,7 @@ import { startMonitor, type MonitorServer } from "./server.js";
 import { realIO, type IO } from "./io.js";
 import { captureWorktreeDiff, indexFileForCwd } from "./git-diff.js";
 import { runScheduler, defaultKindRegistry } from "./scheduler.js";
+import { flattenSchemaUnit, resolvePrompt, safeValue, truncate, type SchemaUnit } from "./engine-common.js";
 
 /**
  * Node kinds that can change files on disk and are therefore worth capturing a
@@ -71,6 +74,25 @@ function cloneCtx(ctx: RunCtx): RunCtx {
     pendingForkNodeId: ctx.pendingForkNodeId,
     pendingCompact: ctx.pendingCompact,
     pendingCompactNodeId: ctx.pendingCompactNodeId,
+  };
+}
+
+/**
+ * A context with no conversation state: no driver session to resume, empty
+ * prepend/append buffers, nothing pending. Model, cwd and branch carry over.
+ */
+function freshCtx(from: Readonly<Pick<RunCtx, "model" | "cwd" | "branchId">>): RunCtx {
+  return {
+    driverSessionId: null,
+    model: from.model,
+    cwd: from.cwd,
+    branchId: from.branchId,
+    prepend: [],
+    append: [],
+    pendingFork: false,
+    pendingForkNodeId: null,
+    pendingCompact: false,
+    pendingCompactNodeId: null,
   };
 }
 
@@ -203,18 +225,7 @@ export class Engine {
     }
 
     // 3. Walk from root to tip, executing nodes in order against a RunCtx.
-    const initialCtx: RunCtx = {
-      driverSessionId: null,
-      model: session.model,
-      cwd: session.cwd,
-      branchId: session.branchId,
-      prepend: [],
-      append: [],
-      pendingFork: false,
-      pendingForkNodeId: null,
-      pendingCompact: false,
-      pendingCompactNodeId: null,
-    };
+    const initialCtx = freshCtx(session);
 
     try {
       const { value } = await this.runChain(
@@ -357,17 +368,9 @@ export class Engine {
           return { value: upstream, ctx: next };
         }
         case "newSession": {
-          const next = cloneCtx(ctx);
-          next.driverSessionId = null;
-          next.prepend = [];
-          next.append = [];
-          next.pendingFork = false;
-          next.pendingForkNodeId = null;
-          next.pendingCompact = false;
-          next.pendingCompactNodeId = null;
           // The description node always records a model (defaulting to the
           // inherited one). Apply it to the fresh context.
-          next.model = node.input.model;
+          const next = { ...freshCtx(ctx), model: node.input.model };
           graph.finishOk(node.id, { reset: true, model: next.model }, { model: next.model });
           return { value: upstream, ctx: next };
         }
@@ -485,18 +488,7 @@ export class Engine {
         // --- callback-expanding nodes --------------------------------------
         case "pipe": {
           const fn = node.callbacks.fn;
-          const subSession = new Session({
-            sessionId: randomId(),
-            model: ctx.model,
-            cwd: ctx.cwd,
-            graph,
-            tipNodeId: node.id,
-            // Anchor the body's lexical container to THIS node so the UI
-            // nests the pipe's children under it (containerId defaults to
-            // rootId, which would flatten the whole subtree onto the root).
-            containerId: node.id,
-          });
-          const subTip = fn(subSession);
+          const subTip = fn(bodySession({ graph, anchorId: node.id, model: ctx.model, cwd: ctx.cwd }));
           const sub = await this.runChain(graph, node.id, subTip.tipNodeId, ctx, upstream);
           graph.finishOk(node.id, { ok: true });
           return { value: sub.value, ctx: sub.ctx };
@@ -510,16 +502,7 @@ export class Engine {
           // node) stay at the parent's indent level.
           const branchNode = graph.create({ parentId: node.id, kind: "combineBranch", label: "combineBranch" });
           graph.start(branchNode.id);
-          const branchSession = new SessionWithResult<unknown>({
-            sessionId: randomId(),
-            model: ctx.model,
-            cwd: ctx.cwd,
-            graph,
-            tipNodeId: branchNode.id,
-            // Anchor the sub-chain under the combineBranch wrapper (containerId
-            // defaults to rootId) so the UI indents it instead of flattening.
-            containerId: branchNode.id,
-          });
+          const branchSession = bodySessionWithResult<unknown>({ graph, anchorId: branchNode.id, model: ctx.model, cwd: ctx.cwd });
           installResult(branchSession, upstream);
           const subTip = exec(branchSession);
           const sub = await this.runChain(graph, branchNode.id, subTip.tipNodeId, ctx, upstream);
@@ -535,49 +518,18 @@ export class Engine {
           // propagates. Users opt into per-child error-materialization by
           // calling .materializeError(msg) inside their apply (typically from a
           // try/tryMultipleTimes fallback).
+          // Each child inherits model/cwd/branch with a fresh conversation. In
+          // bug_solving the parent is unbranched and each child sets its own
+          // branch via switchBranch inside its apply body.
           const results = await Promise.all(
-            inputs.map(async (input, i) => {
+            inputs.map((input, i) => {
               const childNode = graph.create({
                 parentId: node.id,
                 kind: "parallelChild",
                 label: `child #${i}`,
                 input: { index: i, input },
               });
-              graph.start(childNode.id);
-              const childCtx: RunCtx = {
-                driverSessionId: null,
-                model: ctx.model,
-                cwd: ctx.cwd,
-                // Inherit the parent's branch (like model/cwd). In bug_solving
-                // the parent is unbranched and each child sets its own branch
-                // via switchBranch inside its apply body.
-                branchId: ctx.branchId,
-                prepend: [],
-                append: [],
-                pendingFork: false,
-                pendingForkNodeId: null,
-                pendingCompact: false,
-                pendingCompactNodeId: null,
-              };
-              const childSession = new Session({
-                sessionId: randomId(),
-                model: ctx.model,
-                cwd: ctx.cwd,
-                graph,
-                tipNodeId: childNode.id,
-                // Lexical container anchor = this child node so its subtree
-                // nests under the parallelChild (not the root).
-                containerId: childNode.id,
-              });
-              try {
-                const subTip = apply(childSession, input, i);
-                const sub = await this.runChain(graph, childNode.id, subTip.tipNodeId, childCtx, undefined);
-                graph.finishOk(childNode.id, safeValue(sub.value));
-                return sub.value;
-              } catch (e) {
-                graph.finishErr(childNode.id, e);
-                throw e;
-              }
+              return this.runBranch(graph, childNode.id, ctx, (s) => apply(s, input, i));
             }),
           );
           graph.finishOk(node.id, { count: results.length });
@@ -591,47 +543,16 @@ export class Engine {
           // resolve, the combine lambda joins their positional results.
           const branches = node.callbacks.branches;
           const combine = node.callbacks.combine;
+          // Fresh ctx per branch (mirrors parallelFork) so the concurrent
+          // branches never share mutable prepend/append/pending state.
           const results = await Promise.all(
-            branches.map(async (branchFn, i) => {
+            branches.map((branchFn, i) => {
               const branchNode = graph.create({
                 parentId: node.id,
                 kind: "combineBranch",
                 label: `parallelBranch #${i}`,
               });
-              graph.start(branchNode.id);
-              // Fresh ctx per branch (mirrors parallelFork's childCtx) so the
-              // concurrent branches never share mutable prepend/append/pending
-              // state. model/cwd/branch inherit; a branch sets its own branch via
-              // switchBranch inside its body if it needs one.
-              const branchCtx: RunCtx = {
-                driverSessionId: null,
-                model: ctx.model,
-                cwd: ctx.cwd,
-                branchId: ctx.branchId,
-                prepend: [],
-                append: [],
-                pendingFork: false,
-                pendingForkNodeId: null,
-                pendingCompact: false,
-                pendingCompactNodeId: null,
-              };
-              const branchSession = new Session({
-                sessionId: randomId(),
-                model: ctx.model,
-                cwd: ctx.cwd,
-                graph,
-                tipNodeId: branchNode.id,
-                containerId: branchNode.id,
-              });
-              try {
-                const subTip = branchFn(branchSession);
-                const sub = await this.runChain(graph, branchNode.id, subTip.tipNodeId, branchCtx, undefined);
-                graph.finishOk(branchNode.id, safeValue(sub.value));
-                return sub.value;
-              } catch (e) {
-                graph.finishErr(branchNode.id, e);
-                throw e;
-              }
+              return this.runBranch(graph, branchNode.id, ctx, branchFn);
             }),
           );
           const joint = combine(...results);
@@ -642,31 +563,12 @@ export class Engine {
           const code = node.callbacks.code;
           const fallback = node.callbacks.fallback;
           try {
-            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: node.id, containerId: node.id });
-            const subTip = code(s);
+            const subTip = code(bodySession({ graph, anchorId: node.id, model: ctx.model, cwd: ctx.cwd }));
             const sub = await this.runChain(graph, node.id, subTip.tipNodeId, ctx, upstream);
             graph.finishOk(node.id, { ok: true });
             return { value: sub.value, ctx: sub.ctx };
           } catch (err) {
-            const fbNode = graph.create({
-              parentId: node.id,
-              kind: "tryFallback",
-              label: "fallback",
-              input: { error: describeError(err) },
-            });
-            graph.start(fbNode.id);
-            try {
-              const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id, containerId: fbNode.id });
-              const subTip = fallback(s, err);
-              const sub = await this.runChain(graph, fbNode.id, subTip.tipNodeId, ctx, upstream);
-              graph.finishOk(fbNode.id, safeValue(sub.value));
-              graph.finishOk(node.id, { recovered: true });
-              return { value: sub.value, ctx: sub.ctx };
-            } catch (err2) {
-              graph.finishErr(fbNode.id, err2);
-              graph.finishErr(node.id, err2);
-              throw err2;
-            }
+            return await this.runFallback({ graph, node, ctx, upstream, err, label: "fallback", fallback });
           }
         }
         case "tryMultipleTimes": {
@@ -685,8 +587,7 @@ export class Engine {
             });
             graph.start(attNode.id);
             try {
-              const s = new Session({ sessionId: randomId(), model: attemptCtx.model, cwd: attemptCtx.cwd, graph, tipNodeId: attNode.id, containerId: attNode.id });
-              const subTip = code(s);
+              const subTip = code(bodySession({ graph, anchorId: attNode.id, model: attemptCtx.model, cwd: attemptCtx.cwd }));
               const interruptCtx: RunCtx = {
                 ...attemptCtx,
                 append: [
@@ -727,25 +628,7 @@ export class Engine {
               };
             }
           }
-          const fbNode = graph.create({
-            parentId: node.id,
-            kind: "tryFallback",
-            label: "fallback after retries",
-            input: { error: describeError(lastErr) },
-          });
-          graph.start(fbNode.id);
-          try {
-            const s = new Session({ sessionId: randomId(), model: ctx.model, cwd: ctx.cwd, graph, tipNodeId: fbNode.id, containerId: fbNode.id });
-            const subTip = fallback(s, lastErr);
-            const sub = await this.runChain(graph, fbNode.id, subTip.tipNodeId, ctx, upstream);
-            graph.finishOk(fbNode.id, safeValue(sub.value));
-            graph.finishOk(node.id, { recovered: true });
-            return { value: sub.value, ctx: sub.ctx };
-          } catch (err2) {
-            graph.finishErr(fbNode.id, err2);
-            graph.finishErr(node.id, err2);
-            throw err2;
-          }
+          return await this.runFallback({ graph, node, ctx, upstream, err: lastErr, label: "fallback after retries", fallback });
         }
 
         // --- result-consuming nodes (SessionWithResult API) ----------------
@@ -783,6 +666,64 @@ export class Engine {
     }
     // Exhaustiveness fallthrough — should not happen.
     throw new Error(`unknown node kind: ${(node as { kind?: unknown }).kind}`);
+  }
+
+  /**
+   * Run one concurrent body (a parallelFork child or a parallelCombine
+   * branch) under its anchor node, on a fresh context: a branch never shares
+   * the parent's prepend/append/pending state. Returns the body's value.
+   */
+  private async runBranch(
+    graph: ComputationGraph,
+    anchorId: string,
+    ctx: RunCtx,
+    build: (s: Session) => SessionWithResult<unknown>,
+  ): Promise<unknown> {
+    graph.start(anchorId);
+    try {
+      const subTip = build(bodySession({ graph, anchorId, model: ctx.model, cwd: ctx.cwd }));
+      const sub = await this.runChain(graph, anchorId, subTip.tipNodeId, freshCtx(ctx), undefined);
+      graph.finishOk(anchorId, safeValue(sub.value));
+      return sub.value;
+    } catch (e) {
+      graph.finishErr(anchorId, e);
+      throw e;
+    }
+  }
+
+  /**
+   * The fallback of `try` and `tryMultipleTimes`: run it under a
+   * `tryFallback` node. Recovery finishes the container ok; a throwing
+   * fallback fails both nodes and propagates.
+   */
+  private async runFallback(args: {
+    graph: ComputationGraph;
+    node: RichGraphNode;
+    ctx: RunCtx;
+    upstream: unknown;
+    err: unknown;
+    label: string;
+    fallback: (s: Session, err: unknown) => SessionWithResult<unknown>;
+  }): Promise<{ value: unknown; ctx: RunCtx }> {
+    const { graph, node, ctx, upstream, err, fallback } = args;
+    const fbNode = graph.create({
+      parentId: node.id,
+      kind: "tryFallback",
+      label: args.label,
+      input: { error: describeError(err) },
+    });
+    graph.start(fbNode.id);
+    try {
+      const subTip = fallback(bodySession({ graph, anchorId: fbNode.id, model: ctx.model, cwd: ctx.cwd }), err);
+      const sub = await this.runChain(graph, fbNode.id, subTip.tipNodeId, ctx, upstream);
+      graph.finishOk(fbNode.id, safeValue(sub.value));
+      graph.finishOk(node.id, { recovered: true });
+      return { value: sub.value, ctx: sub.ctx };
+    } catch (err2) {
+      graph.finishErr(fbNode.id, err2);
+      graph.finishErr(node.id, err2);
+      throw err2;
+    }
   }
 
   /**
@@ -840,18 +781,7 @@ export class Engine {
 
     const response = await invoke(resumeSid, applyForkFlag, composed);
 
-    const nextCtx: RunCtx = {
-      driverSessionId: response.sessionId ?? resumeSid,
-      model: ctx.model,
-      cwd: ctx.cwd,
-      branchId: ctx.branchId,
-      prepend: [],
-      append: [],
-      pendingFork: false,
-      pendingForkNodeId: null,
-      pendingCompact: false,
-      pendingCompactNodeId: null,
-    };
+    const nextCtx: RunCtx = { ...freshCtx(ctx), driverSessionId: response.sessionId ?? resumeSid };
     return {
       ctx: nextCtx,
       response,
@@ -890,78 +820,6 @@ function attachNodeMeta(e: unknown, nodeId: string, sessionId: string | null): u
     try { meta.nodeId ??= nodeId; meta.sessionId ??= sessionId; } catch {}
   }
   return e;
-}
-
-/**
- * Typia's `typia.json.schema<T>()` returns a unit with the shape:
- *   { version: "3.1", schema: { $ref: "#/components/schemas/Foo" }, components: {schemas: {...}} }
- * Claude CLI's `--json-schema` flag wants a single self-contained JSON Schema
- * object. This helper inlines a top-level `$ref` against the unit's components
- * so the resulting object is standalone.
- */
-/** A JSON-Schema fragment is an untyped object tree keyed by string. */
-type JsonSchemaObject = Record<string, unknown>;
-
-/** typia's schema unit: a root schema plus the components it may $ref into. */
-interface SchemaUnit {
-  schema: JsonSchemaObject;
-  components?: JsonSchemaObject;
-}
-
-function flattenSchemaUnit(unit: SchemaUnit): JsonSchemaObject {
-  const root = unit.schema;
-  if (!root || typeof root !== "object") return root ?? {};
-  if (typeof root.$ref === "string" && unit.components) {
-    const resolved = resolveRef(root.$ref, unit.components);
-    if (resolved) return resolved;
-  }
-  return root;
-}
-
-function resolveRef(ref: string, components: JsonSchemaObject): JsonSchemaObject | null {
-  // "#/components/schemas/Foo" → components.schemas.Foo
-  const parts = ref.replace(/^#\//, "").split("/");
-  let cur: unknown = { components };
-  for (const p of parts) {
-    if (cur == null || typeof cur !== "object") return null;
-    cur = (cur as Record<string, unknown>)[p];
-  }
-  return cur != null && typeof cur === "object" ? (cur as JsonSchemaObject) : null;
-}
-
-/**
- * A Session API PromptInput<T> is either a string or `(upstream: T) => string`.
- * Evaluate it against the real upstream value at execution time.
- */
-function resolvePrompt(p: unknown, upstream: unknown): string {
-  if (typeof p === "function") {
-    try {
-      const v = (p as (u: unknown) => unknown)(upstream);
-      return typeof v === "string" ? v : String(v);
-    } catch (e) {
-      throw new StructuredError(
-        `prompt function threw: ${e instanceof Error ? e.message : String(e)}`,
-        { cause: e },
-      );
-    }
-  }
-  return typeof p === "string" ? p : "";
-}
-
-function safeValue(v: unknown): unknown {
-  try { JSON.stringify(v); return v; } catch { return String(v); }
-}
-function truncate(s: string, n: number): string {
-  if (!s) return "";
-  return s.length <= n ? s : s.slice(0, n - 1) + "…";
-}
-
-function randomId(): string {
-  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (c && typeof c.randomUUID === "function") {
-    return c.randomUUID();
-  }
-  return "sp_" + Math.random().toString(36).slice(2, 10);
 }
 
 export async function runShell(args: { cmd: string; cwd: string; io: IO; nodeId?: string; branchId?: string }): Promise<string> {

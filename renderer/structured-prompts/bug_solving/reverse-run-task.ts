@@ -1,10 +1,9 @@
 /**
- * reverse-run-task.ts — one REVERSE-direction attempt of a bug_solving fork, as an engine chain.
+ * reverse-run-task.ts — the REVERSE direction of the shared fork chain (fork-chain.ts).
  *
- * It is the reverse twin of main.ts's forward `runTask` and runs in the same place: inside the
- * fork's jailed overlay branch, wrapped by the same `tryMultipleTimes(retry_budget)`, ending in the
- * same rating-outcome marker the final merge phase reads. Only the evidence differs (see
- * reverse-direction.ts for why):
+ * It runs where the forward chain runs: inside the fork's jailed overlay branch, wrapped by the same
+ * `tryMultipleTimes(retry_budget)`, ending in the same rating-outcome marker the final merge phase
+ * reads. Only the evidence differs (see reverse-direction.ts for why):
  *
  *   R2  worker      — the reverse brief (owning files, the user's words verbatim, Google thumbnail
  *                     vs Sasha render vs exported HTML) → analysis.md + the minimal fix.
@@ -17,19 +16,15 @@
  *   R4e highlight   — the user's annotation re-composited over the fork's new render.
  *   R5  verdict     — per slide: Google thumbnail vs the new Sasha render (+ the old one, both
  *                     exported HTML pages, the annotation, the zoom crops, the mismatch numbers).
- *   R6  summary     — fix-summary.md + the TaskResult; R6b fails on a regression, an unsolved
- *                     slide or a failed gate (→ the next attempt).
- *   A1  rating UI   — rating-server.ts --direction reverse on the fork's results, read-only,
- *                     FOREGROUND until every slide is rated (it IS the block); its "Good" click
- *                     blesses into the fork's shared dir, never the user's goldens-reverse.
- *   A2  wait        — wait-for-ratings.ts on ratings-reverse.json → the rating-outcome marker.
- *   A3  fold        — the marker into the TaskResult.
- *
- * Shared pieces of the forward chain (the verdict parser, the marker reader) are passed in rather
- * than imported, so this module and main.ts do not import each other at runtime.
+ *   R6b             — also fails on a failed reverse regression gate.
+ *   A1  rating UI   — rating-server.ts --direction reverse on the fork's results, read-only; its
+ *                     "Good" click blesses into the fork's shared dir, never the user's goldens-reverse.
+ *   A2  wait        — on ratings-reverse.json.
  */
-import type { ClaudeModel, Session, SessionWithResult } from "../../../structured-prompting/src/index.js";
-import type { RatingOutcomeMarker, SlideTask, SlideVerdict, Task, TaskResult } from "./main.js";
+import type { SessionWithResult } from "../../../structured-prompting/src/index.js";
+import type { SlideTask, Task, TaskResult } from "./main.js";
+import { BRANCH_CD_RENDERER, FORK_SCRIPTS, type DirectionChain } from "./fork-chain.js";
+import { acceptDisabled } from "./rating-gate.js";
 import {
   REVERSE_GOLDEN_DRIFT_LIMIT,
   REVERSE_METRIC_RISE_LIMIT,
@@ -42,144 +37,61 @@ import {
 } from "./reverse-direction.js";
 import { readReverseGateResult } from "./reverse-regression-gate.js";
 
-/** What the reverse chain needs from the run and from main.ts. */
+/** What the reverse chain needs from the run. */
 export type ReverseTaskSettings = Readonly<{
   paths: ReversePaths;
   chromePort: number;
-  /** `ROOT="$PWD"; cd "$ROOT/renderer"` — main.ts's branch prefix, so both directions resolve
-   *  repository-relative paths identically inside the branch. */
-  branchCdRenderer: string;
-  parseVerdict: (raw: string, expectedSlideId: string) => SlideVerdict;
-  verdictRetries: number;
-  validationModel: ClaudeModel | undefined;
-  ratingMarkerPath: (task: Task) => string;
-  readRatingMarker: (task: Task) => RatingOutcomeMarker | null;
-  /** Whether BUG_SOLVING_NO_ACCEPT skips the blocking rating (rating-gate.ts). */
-  acceptDisabled: boolean;
-  /** Repository-relative wait-for-ratings.ts and annotation-composite.ts. */
-  waitRatingsScript: string;
-  compositeScript: string;
 }>;
 
-export function reverseRunTask(session: Session, task: Task, settings: ReverseTaskSettings): SessionWithResult<TaskResult> {
+export function reverseChain(task: Task, settings: ReverseTaskSettings): DirectionChain {
   const fork = reverseForkPaths(task.shared_dir);
   const ids = task.slides.map((slide) => slide.slide_id).join(",");
-  const cd = settings.branchCdRenderer;
-  return session
-    // R2 — worker: analysis.md + the fix, nothing else.
-    .prependToNextPrompt(reverseBriefFor({ task, settings }))
-    .send({ prompt: reverseFixPrompt(task) })
-    .assert((acknowledgement: string) => {
-      if (!/FIX_APPLIED/.test(acknowledgement)) throw new Error(`Worker did not confirm fix applied. Response: ${acknowledgement.slice(0, 300)}`);
-    })
-
-    // R3 — the cluster's slides through the fork's importer/renderer/export (fatal on failure).
-    .executeShell(() =>
-      `${cd} && npx tsx "$ROOT/${REVERSE_SCRIPTS.record}" --canonical "${settings.paths.resultsRoot}" ` +
-      `--output "${fork.attempt}" --slides ${ids} --chrome-port ${settings.chromePort}`,
-    )
-
-    // R4 — every set from the fork, then the gate against the run's baseline (the canonical
-    // results when the baseline recording is missing). The gate CLI always writes its JSON and
-    // exits 0; R6b reads the JSON (a missing one is a failed gate).
-    .executeShell(() =>
-      `${cd} && npx tsx "$ROOT/${REVERSE_SCRIPTS.record}" --canonical "${settings.paths.resultsRoot}" ` +
-      `--output "${fork.everySet}" --chrome-port ${settings.chromePort} && ` +
-      `BASELINE="${reverseBaselineDirectory(task.shared_dir)}"; [ -f "$BASELINE/metrics.json" ] || BASELINE="${settings.paths.resultsRoot}"; ` +
-      `npx tsx "$ROOT/${REVERSE_SCRIPTS.gate}" --results "${fork.everySet}" ` +
-      `--baseline "$BASELINE" --goldens "${settings.paths.goldensDirectory}" ` +
-      `--cluster ${ids} --out "${fork.gateResult}" --metric-rise ${REVERSE_METRIC_RISE_LIMIT} --golden-drift ${REVERSE_GOLDEN_DRIFT_LIMIT}`,
-    )
-
-    // R4e — the user's marks over the NEW render, so the verdict sees where they point on it.
-    // Best-effort per slide: a missing render keeps the build-time composite.
-    .executeShell(() => `${cd} && ${highlightCommands({ task, settings, attempt: fork.attempt }).join(" && ")}`)
-
-    // R5 — one verdict per slide, retried until it parses.
-    .parallelFork(task.slides, (child, slide) =>
-      (settings.validationModel ? child.switchModel(settings.validationModel) : child)
-        .tryMultipleTimes<string>(settings.verdictRetries, (attempt) =>
-          attempt
-            .prependToNextPrompt(reverseVerdictHeader({ task, slide, attemptDirectory: fork.attempt, gateResult: fork.gateResult }))
-            .send({ prompt: reverseVerdictPrompt(slide.slide_id) })
-            .assert((raw: string) => { settings.parseVerdict(raw, slide.slide_id); }),
-        ),
-    )
-
-    // R6 — fix summary + the TaskResult.
-    .combineWith<string, TaskResult>(
-      (branch) => branch.send({
-        prompt:
-          `All per-slide verdicts are now in. Write ${task.analysis_dir}/fix-summary.md — one paragraph covering ` +
-          `the root cause and what you changed, with file:line references. After writing the file, reply with its ` +
-          `contents verbatim (just the text, no JSON, no code fence).`,
-      }),
-      (verdictResponses, fixSummary) => ({
-        task_id: task.task_id,
-        workspace_dir: task.workspace_dir,
-        analysis_md: `${task.analysis_dir}/analysis.md`,
-        verdicts: verdictResponses.map((response, index) => verdictOf({ response, slide: task.slides[index], settings })),
-        sxs_server_spec: {
-          port: task.server_port,
-          slides: task.slides.map((slide) => slide.slide_id),
-          analysis_md: `${task.analysis_dir}/analysis.md`,
-          diffs_dir: fork.attempt,
-          thumbnails_dir: fork.attempt,
-          task_title: `bug_solving (reverse): ${task.task_id}`,
-        },
-        fix_summary: fixSummary.trim(),
-        rated: false,
-        green: false,
-        bad_slides: [],
-      }),
-    )
-
-    // R6b — a regression, an unsolved slide or a failed gate sends the fork to its next attempt.
-    .assert((result: TaskResult) => {
-      const lines: string[] = [];
-      const regressions = result.verdicts.filter((verdict) => verdict.isRegression);
-      const unsolved = result.verdicts.filter((verdict) => !verdict.bugSolved);
-      if (regressions.length) lines.push(`REGRESSIONS (${regressions.length}):`, ...regressions.map((verdict) => `  - ${verdict.slide_id}: ${verdict.rationale}`));
-      if (unsolved.length) lines.push(`UNSOLVED (${unsolved.length}):`, ...unsolved.map((verdict) => `  - ${verdict.slide_id}: ${verdict.rationale}`));
+  const cd = BRANCH_CD_RENDERER;
+  return {
+    brief: reverseBriefFor({ task, settings }),
+    fixPrompt: reverseFixPrompt(task),
+    afterFix: (fixed: SessionWithResult<string>) => fixed
+      // R3 — the cluster's slides through the fork's importer/renderer/export (fatal on failure).
+      .executeShell(() =>
+        `${cd} && npx tsx "$ROOT/${REVERSE_SCRIPTS.record}" --canonical "${settings.paths.resultsRoot}" ` +
+        `--output "${fork.attempt}" --slides ${ids} --chrome-port ${settings.chromePort}`,
+      )
+      // R4 — every set from the fork, then the gate against the run's baseline (the canonical
+      // results when the baseline recording is missing). The gate CLI always writes its JSON and
+      // exits 0; R6b reads the JSON (a missing one is a failed gate).
+      .executeShell(() =>
+        `${cd} && npx tsx "$ROOT/${REVERSE_SCRIPTS.record}" --canonical "${settings.paths.resultsRoot}" ` +
+        `--output "${fork.everySet}" --chrome-port ${settings.chromePort} && ` +
+        `BASELINE="${reverseBaselineDirectory(task.shared_dir)}"; [ -f "$BASELINE/metrics.json" ] || BASELINE="${settings.paths.resultsRoot}"; ` +
+        `npx tsx "$ROOT/${REVERSE_SCRIPTS.gate}" --results "${fork.everySet}" ` +
+        `--baseline "$BASELINE" --goldens "${settings.paths.goldensDirectory}" ` +
+        `--cluster ${ids} --out "${fork.gateResult}" --metric-rise ${REVERSE_METRIC_RISE_LIMIT} --golden-drift ${REVERSE_GOLDEN_DRIFT_LIMIT}`,
+      )
+      // R4e — the user's marks over the NEW render, so the verdict sees where they point on it.
+      // Best-effort per slide: a missing render keeps the build-time composite.
+      .executeShell(() => `${cd} && ${highlightCommands({ task, attempt: fork.attempt }).join(" && ")}`),
+    verdictHeader: (slide) => reverseVerdictHeader({ task, slide, attemptDirectory: fork.attempt, gateResult: fork.gateResult }),
+    verdictPrompt: reverseVerdictPrompt,
+    sxsServerSpec: {
+      port: task.server_port,
+      slides: task.slides.map((slide) => slide.slide_id),
+      analysis_md: `${task.analysis_dir}/analysis.md`,
+      diffs_dir: fork.attempt,
+      thumbnails_dir: fork.attempt,
+      task_title: `bug_solving (reverse): ${task.task_id}`,
+    },
+    gateFailures: () => {
       const gate = readReverseGateResult(fork.gateResult);
-      if (!gate.ok) {
-        lines.push(
-          `REVERSE REGRESSION GATE FAILED (${gate.regressions.length}) — slides outside this cluster drifted from the user's goldens-reverse, rose more than ${REVERSE_METRIC_RISE_LIMIT} points, or moved a region away from Google's thumbnail:`,
-          ...gate.findings.map((finding) => `  - ${finding.slide} ${finding.kind}: ${finding.detail}`),
-        );
-      }
-      if (lines.length) throw new Error(lines.join("\n"));
-    })
-
-    // A1 — the fork's own reverse rating UI, foreground until every slide is rated.
-    .combineWith<string, TaskResult>(
-      (branch) => branch.executeShell((result) => ratingServerCommand({ task, settings, result, fork })),
-      (result) => result,
-    )
-
-    // A2 — block on ratings-reverse.json, then write the rating-outcome marker. Always exits 0.
-    .combineWith<string, TaskResult>(
-      (branch) => branch.executeShell(() =>
-        `${cd} && npx tsx "$ROOT/${settings.waitRatingsScript}" --results-dir "${fork.attempt}" ` +
-        `--ratings-file "${fork.attempt}/ratings-reverse.json" --slides ${ids} --task-id ${task.task_id} ` +
-        `--marker "${settings.ratingMarkerPath(task)}" --history-dir ${settings.paths.historyDirectory}`,
-      ),
-      (result) => result,
-    )
-
-    // A3 — fold the marker (missing/malformed = unrated, not green).
-    .combineWith<string, TaskResult>(
-      (branch) => branch.executeShell(() => `echo rating-marker-read ${task.task_id}`),
-      (result) => {
-        const outcome = settings.readRatingMarker(task);
-        return {
-          ...result,
-          rated: outcome?.rated ?? false,
-          green: outcome?.green ?? false,
-          bad_slides: outcome ? [...outcome.bad, ...outcome.unrated] : [],
-        };
-      },
-    );
+      if (gate.ok) return [];
+      return [
+        `REVERSE REGRESSION GATE FAILED (${gate.regressions.length}) — slides outside this cluster drifted from the user's goldens-reverse, rose more than ${REVERSE_METRIC_RISE_LIMIT} points, or moved a region away from Google's thumbnail:`,
+        ...gate.findings.map((finding) => `  - ${finding.slide} ${finding.kind}: ${finding.detail}`),
+      ];
+    },
+    afterVerdict: (passed: SessionWithResult<TaskResult>) => passed,
+    ratingServerCommand: (result) => ratingServerCommand({ task, settings, result, fork }),
+    ratings: { resultsDirectory: fork.attempt, ratingsFile: `${fork.attempt}/ratings-reverse.json`, historyDirectory: settings.paths.historyDirectory },
+  };
 }
 
 /**
@@ -269,14 +181,14 @@ function reverseFixPrompt(task: Task): string {
   ].join("\n");
 }
 
-function highlightCommands(options: Readonly<{ task: Task; settings: ReverseTaskSettings; attempt: string }>): readonly string[] {
+function highlightCommands(options: Readonly<{ task: Task; attempt: string }>): readonly string[] {
   const commands = options.task.slides.flatMap((slide) => {
     const render = reverseRenderOf({ resultsDirectory: options.attempt, slideId: slide.slide_id });
     const annotation = slide.img_annotations ?? slide.annotation_png;
     if (render === null || annotation === undefined) return [];
     const outputDirectory = `${options.task.shared_dir}/images`;
     return [
-      `npx tsx "$ROOT/${options.settings.compositeScript}" refresh "${render.png}" "${outputDirectory}/${slide.slide_id}_after.png" ` +
+      `npx tsx "$ROOT/${FORK_SCRIPTS.composite}" refresh "${render.png}" "${outputDirectory}/${slide.slide_id}_after.png" ` +
         `"${annotation}" "${outputDirectory}/${slide.slide_id}_highlighted_after.png" || true`,
     ];
   });
@@ -317,26 +229,10 @@ function reverseVerdictPrompt(slideId: string): string {
   ].join(" ");
 }
 
-function verdictOf(options: Readonly<{ response: string; slide: SlideTask | undefined; settings: ReverseTaskSettings }>): SlideVerdict {
-  const slideId = options.slide?.slide_id ?? "(unknown)";
-  try {
-    return options.settings.parseVerdict(options.response, slideId);
-  } catch (cause) {
-    // Every response already passed the parsing assert (with retries); this is the all-retries-failed
-    // case, which counts as a regression so the attempt is retried rather than rated.
-    return {
-      slide_id: slideId,
-      rationale: `(verdict unparseable after ${options.settings.verdictRetries} retries: ${cause instanceof Error ? cause.message : String(cause)}) raw=${options.response.slice(0, 200)}`,
-      isRegression: true,
-      bugSolved: false,
-    };
-  }
-}
-
 function ratingServerCommand(options: Readonly<{ task: Task; settings: ReverseTaskSettings; result: TaskResult; fork: ReturnType<typeof reverseForkPaths> }>): string {
   const { task, settings, result, fork } = options;
-  const cd = settings.branchCdRenderer;
-  if (settings.acceptDisabled) return `${cd} && echo "[rating-server] NO_ACCEPT → skipping ${task.task_id} reverse rating UI"`;
+  const cd = BRANCH_CD_RENDERER;
+  if (acceptDisabled(process.env)) return `${cd} && echo "[rating-server] NO_ACCEPT → skipping ${task.task_id} reverse rating UI"`;
   const spec = result.sxs_server_spec;
   const log = `"${task.shared_dir}/reverse/rating-server.log"`;
   return (

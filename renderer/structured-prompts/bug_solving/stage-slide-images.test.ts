@@ -18,12 +18,8 @@ import type { SlideTask } from "./main.js";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
+import { ok, summary } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); }
-  else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 const sameBytes = (a: string, b: string) => existsSync(a) && existsSync(b) && Buffer.compare(readFileSync(a), readFileSync(b)) === 0;
 
 function mkSlide(o: Partial<SlideTask> & Pick<SlideTask, "slide_id" | "rendered_png" | "original_png">): SlideTask {
@@ -106,5 +102,4 @@ if (existsSync("/overlays")) {
 rmSync(src, { recursive: true, force: true });
 if (sharedParent && existsSync(sharedParent)) rmSync(sharedParent, { recursive: true, force: true });
 
-console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-if (failed) process.exit(1);
+summary();

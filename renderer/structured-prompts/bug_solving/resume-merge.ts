@@ -8,7 +8,7 @@
  *   - its rating-outcome.json under `/overlays/shared/<run>/<task>/`.
  *
  * `resumeMerge` enumerates those, rebuilds the GREEN clusters from the markers
- * (demoting the bad, exactly like main.ts's finalMergePhase/selectGreenClusters),
+ * (demoting the bad, exactly like main.ts's finalMergePhase),
  * runs the SAME `llmMerge` on a real engine, promotes onto the working tree, and
  * — via llmMerge's cleanup-on-success — reaps every merged cluster's overlay +
  * shared dir. Rejected / unrated / marker-less overlays are LEFT for inspection.
@@ -19,9 +19,8 @@
  * Testability: `ops` (mock retest) and `io` (MockIO → mock the LLM) are
  * injectable; the overlays, filesystem, promote, and ledger run for real.
  */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   ClaudeEngine,
   CodexEngine,
@@ -42,18 +41,12 @@ import {
   DEFAULT_SHARED_ROOT,
 } from "./startup-detection.js";
 import type { MergeSettings } from "./main.js";
+import { RATING_MARKER_FILE, notGreenReason, readRatingMarkerFile, type RatingOutcomeMarker } from "./rating-marker.js";
 
 const HISTORY_DIR = "/workspaces/sashaslides/.bug-solving-history";
 
-/** Minimal rating-outcome marker shape (matches main.ts's RatingOutcomeMarker). */
-interface Marker {
-  task_id: string;
-  green: boolean;
-  slides: string[];
-  bad: string[];
-  unrated: string[];
-  shared_dir: string;
-}
+/** A marker found on disk, with the shared dir it was found in. */
+type Marker = RatingOutcomeMarker & Readonly<{ shared_dir: string }>;
 
 export interface ResumeMergeArgs {
   /** repo root (base tree every overlay overlays + promotes onto). */
@@ -110,20 +103,9 @@ function readMarkers(sharedRoot: string): Map<string, Marker> {
     try { tasks = readdirSync(runDir); } catch { continue; }
     for (const task of tasks) {
       const shared_dir = join(runDir, task);
-      const f = join(shared_dir, "rating-outcome.json");
-      if (!existsSync(f)) continue;
-      try {
-        const o = JSON.parse(readFileSync(f, "utf8")) as Partial<Marker>;
-        if (typeof o.green !== "boolean") continue;
-        out.set(typeof o.task_id === "string" ? o.task_id : task, {
-          task_id: typeof o.task_id === "string" ? o.task_id : task,
-          green: o.green,
-          slides: Array.isArray(o.slides) ? o.slides.filter((s): s is string => typeof s === "string") : [],
-          bad: Array.isArray(o.bad) ? o.bad.filter((s): s is string => typeof s === "string") : [],
-          unrated: Array.isArray(o.unrated) ? o.unrated.filter((s): s is string => typeof s === "string") : [],
-          shared_dir,
-        });
-      } catch { /* malformed marker → treated as absent */ }
+      // A malformed marker is treated as absent.
+      const marker = readRatingMarkerFile(join(shared_dir, RATING_MARKER_FILE), task);
+      if (marker !== null) out.set(marker.task_id, { ...marker, shared_dir });
     }
   }
   return out;
@@ -178,17 +160,13 @@ export async function resumeMerge(args: ResumeMergeArgs): Promise<ResumeMergeRes
       continue;
     }
     if (marker.green) {
-      green.push({ task, branch_id: id, slides: args.merge ? args.merge.forwardDeckSlides(marker.slides) : marker.slides, shared_dir: marker.shared_dir });
+      green.push({ task, branch_id: id, slides: args.merge ? args.merge.forwardDeckSlides([...marker.slides]) : [...marker.slides], shared_dir: marker.shared_dir });
       log(`[resume-merge] ${task} (${id}) → GREEN — fold candidate (slides ${marker.slides.join(", ") || "(none)"}).`);
     } else {
       demoted.push(task);
-      const reason = marker.bad.length
-        ? `user rated ${marker.bad.join(", ")} bad`
-        : marker.unrated.length
-          ? `rating incomplete — unrated [${marker.unrated.join(", ")}]`
-          : "not green";
+      const reason = notGreenReason(marker);
       log(`[resume-merge] ${task} (${id}) → DEMOTE (${reason}) — overlay LEFT for inspection.`);
-      try { demote(marker.slides.length ? marker.slides : marker.bad, task, reason); }
+      try { demote([...(marker.slides.length ? marker.slides : marker.bad)], task, reason); }
       catch (e) { log(`[resume-merge] demote threw for ${task} (continuing): ${(e as Error)?.message ?? String(e)}`); }
     }
   }

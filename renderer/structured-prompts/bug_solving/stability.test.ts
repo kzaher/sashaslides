@@ -24,12 +24,8 @@ import {
   type RenderRecord,
   type StabilityRecorder,
 } from "./stability.js";
+import { ok, summary } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = ""): void {
-  if (cond) { passed++; console.log(`  \x1b[32m✓\x1b[0m ${name}`); }
-  else { failed++; console.log(`  \x1b[31m✗\x1b[0m ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 
 /** A recorder driven by a per-slide, per-attempt table of records. Counts calls. */
 function tableRecorder(table: Record<string, RenderRecord[]>): { record: StabilityRecorder; calls: Record<string, number> } {
@@ -146,8 +142,7 @@ function main(): void {
     rmSync(dir, { recursive: true, force: true });
   }
 
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) process.exit(1);
+  summary();
 }
 
 main();

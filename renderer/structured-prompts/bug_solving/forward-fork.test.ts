@@ -20,12 +20,8 @@ import {
   writeSxsMeta,
 } from "./forward-fork.js";
 import type { SlideTask, Task } from "./main.js";
+import { ok, summary } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-function ok(name: string, cond: boolean, extra = "") {
-  if (cond) { passed++; console.log(`  ✓ ${name}`); }
-  else { failed++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ""}`); }
-}
 
 const root = mkdtempSync(join(tmpdir(), "forward-fork-"));
 const shared = join(root, "shared", "task-a");
@@ -90,5 +86,4 @@ writeSxsMeta(join(root, "missing", "deep"), [slide]);
 ok("(5c) a fresh results dir is created, never throws", existsSync(join(root, "missing", "deep", "sxs-meta.json")));
 
 rmSync(root, { recursive: true, force: true });
-console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-if (failed) process.exit(1);
+summary();

@@ -18,9 +18,8 @@ import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { createCowWorkspace, cleanupAllCowWorkspaces } from "../../../cow-workspace/cow-workspace.ts";
 import { overlayWorkspaceOptions } from "./cow-options.js";
+import { ok, summary } from "./test-harness.js";
 
-let passed = 0, failed = 0;
-const ok = (n: string, c: boolean, e = "") => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.log(`  ✗ ${n}${e ? ` — ${e}` : ""}`); } };
 
 function skipReason(): string | null {
   if (process.env.RUN_CLAUDE_JAIL !== "1") return "opt-in only — set RUN_CLAUDE_JAIL=1 (makes one real haiku call)";
@@ -62,7 +61,6 @@ function main() {
     rmSync(base, { recursive: true, force: true });
   }
 
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) process.exit(1);
+  summary();
 }
 main();

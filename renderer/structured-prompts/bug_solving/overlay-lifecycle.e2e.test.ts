@@ -36,16 +36,11 @@ import { writeStabilityJson } from "./stability.js";
 import { detectPriorState, decideStartup } from "./startup-detection.js";
 import { resumeMerge } from "./resume-merge.js";
 import { mockLlm, mergeEditor, recordingFromContent, contentRecord, greenCluster, runRealMerge, mergeRateMock, verdictGreenAll, verdictRed } from "./test-support.js";
+import { test, summary } from "./test-harness.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = "/workspaces/sashaslides";
 
-let passed = 0, failed = 0;
-const failures: Array<{ name: string; err: unknown }> = [];
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try { await fn(); passed++; console.log(`  \x1b[32m✓\x1b[0m ${name}`); }
-  catch (e) { failed++; failures.push({ name, err: e }); console.log(`  \x1b[31m✗\x1b[0m ${name}`); console.log(`      ${((e as Error)?.message ?? String(e)).split("\n").slice(0, 8).join("\n      ")}`); }
-}
 function overlayAvailable(): string | null {
   if (!existsSync("/overlays")) return "no /overlays volume";
   try { execSync("unshare -Urm --map-root-user true", { stdio: "ignore" }); }
@@ -305,8 +300,7 @@ async function main(): Promise<void> {
 }
 
 function finishOrExit(): void {
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-  if (failed) { for (const f of failures) console.log(`  ✗ ${f.name}\n    ${(f.err as Error)?.stack ?? String(f.err)}`); process.exit(1); }
+  summary();
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
