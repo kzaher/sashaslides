@@ -190,7 +190,7 @@
  *    c. Slides ≠ PowerPoint. <a:alpha> on text, gradient stops, per-
  *       bullet colours — Slides ignores or rewrites them on import.
  *       We work around each at build time (blendOpacity) or via XML
- *       post-process (injectGradientsIntoZip, injectStrokeAlignmentInZip).
+ *       post-process (postProcessPptx).
  *
  *    d. Conservative gates. Every layout rule above is narrowed by an
  *       extract-dom predicate (`lineHeightMeasured`, `verticallyCentered`,
@@ -3472,88 +3472,37 @@ export async function injectRound2SameRectAdjIntoZip(zip: JSZip): Promise<number
   return patched;
 }
 
-/**
- * Rewrite empty `<a:ln></a:ln>` elements on shapes to `<a:ln><a:noFill/></a:ln>`.
- * pptxgenjs `line: { type: "none" }` on `addShape()` emits a bare `<a:ln>`
- * with no width, no fill, and no children. PowerPoint reads this as
- * "inherit from theme", but Google Slides imports it as a default ~1pt
- * stroke — which paints a hairline around shapes that explicitly asked for
- * NO stroke. On the shape-twice corner-cell underlays for slide_17, the
- * inner-fill rect's empty `<a:ln>` rendered as a thin line on its right
- * and bottom edges, showing up as "border on the inner sides" of every
- * corner cell. Forcing `<a:noFill/>` inside `<a:ln>` is the OOXML-correct
- * way to say "stroke explicitly disabled" and both PowerPoint and Slides
- * agree on that. Idempotent — only matches the literal empty form.
- */
-export async function injectShapeNoLineIntoZip(zip: JSZip): Promise<number> {
-  const slideFiles = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
-  let patched = 0;
-  for (const name of slideFiles) {
-    const xml = await zip.file(name)!.async("string");
-    let slidePatched = 0;
-    const next = xml.replace(/<a:ln><\/a:ln>/g, () => {
-      slidePatched++;
-      return "<a:ln><a:noFill/></a:ln>";
-    });
-    if (slidePatched > 0) { zip.file(name, next); patched += slidePatched; }
-  }
-  return patched;
-}
+// --- The ONE pptx post-processing pipeline ---
+// Every forward path ends here: the command line (convert-pptx-io.ts, which the
+// goldens gate and bug_solving render) and the product (browser/convert-core.ts:
+// sashaslides.com and the html2slides add-on). The patches below are the set the
+// goldens were rated on; a patch added here reaches every path at once.
 
 /**
- * Strip the attribute-heavy form of a "no border" table-cell line so Google
- * Slides actually honours the noFill. pptxgenjs (pptxgen.es.js:5341-5358)
- * emits every cell side as one of two forms — solid path, or, when our
- * BorderOpt is `type:"none"`, the literal:
- *   <a:lnL w="0" cap="flat" cmpd="sng" algn="ctr"><a:noFill/></a:lnL>
- * PowerPoint reads `w="0"` + `<a:noFill/>` as "explicitly disabled". Google
- * Slides reads the same XML as "explicit line, fall back to ~1pt default"
- * and paints a hairline anyway, producing visible column dividers between
- * cells that the CSS doesn't specify — the slide_17 rounded table flagged
- * in wave-21 ("the bottom left cell has border also on top and right…").
- * Same class of bug as the shape-line `<a:ln></a:ln>` rewrite above; same
- * fix shape, just for the lnL/lnR/lnT/lnB cell variants. Idempotent.
+ * Serialise `pres` and apply every OOXML post-patch in ONE zip pass, in order:
+ * gradients, bullet colours, inside stroke alignment, round2SameRect adj names.
+ * Returns the finished .pptx bytes. No fs, no network.
  */
-export async function injectCellNoBorderIntoZip(zip: JSZip): Promise<number> {
-  const slideFiles = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
-  let patched = 0;
-  const re = /<a:(lnL|lnR|lnT|lnB) w="0" cap="flat" cmpd="sng" algn="ctr"><a:noFill\/><\/a:\1>/g;
-  for (const name of slideFiles) {
-    const xml = await zip.file(name)!.async("string");
-    let slidePatched = 0;
-    const next = xml.replace(re, (_m: string, side: string) => {
-      slidePatched++;
-      return `<a:${side}><a:noFill/></a:${side}>`;
-    });
-    if (slidePatched > 0) { zip.file(name, next); patched += slidePatched; }
-  }
-  return patched;
+export async function postProcessPptx(pres: PresentationWithRegistries): Promise<Uint8Array> {
+  const ab = (await pres.write({ outputType: "arraybuffer" })) as ArrayBuffer;
+  const zip = await JSZip.loadAsync(ab);
+  const gradients = await injectGradientsIntoZip(zip, pres.__gradients);
+  const bulletColors = await injectBulletColorsIntoZip(zip, pres.__bulletColors);
+  const strokeAlignment = await injectStrokeAlignmentIntoZip(zip);
+  const round2SameRectAdj = await injectRound2SameRectAdjIntoZip(zip);
+  if (gradients > 0) console.log(`  Gradient injection: ${gradients} shape(s) patched`);
+  if (bulletColors > 0) console.log(`  Bullet colors: ${bulletColors} <a:buClr> insertion(s)`);
+  if (strokeAlignment > 0) console.log(`  Stroke alignment: ${strokeAlignment} <a:ln> rewrite(s) to algn="in"`);
+  if (round2SameRectAdj > 0) console.log(`  round2SameRect adj: ${round2SameRectAdj} prstGeom(s) → adj1/adj2`);
+  return await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }
 
 // --- In-memory build (browser-friendly) ---
-// Returns a fully-patched .pptx as bytes. No fs, no Drive. Same buildPptx core
-// + same gradient/stroke post-processing as runConvertPptx, applied to the
-// JSZip in-memory instead of round-tripping through a file.
+// Returns a fully-patched .pptx as bytes: buildPptx + the shared postProcessPptx.
 export async function buildPptxInMemory(
   slides: readonly SlideInput[],
   title: string,
 ): Promise<Uint8Array> {
   const { pres } = buildPptx(slides, title);
-  const ab = (await pres.write({ outputType: "arraybuffer" })) as ArrayBuffer;
-  const zip = await JSZip.loadAsync(ab);
-
-  const gradPatched = await injectGradientsIntoZip(zip, pres.__gradients || []);
-  const buClrPatched = await injectBulletColorsIntoZip(zip, pres.__bulletColors || []);
-  const strokePatched = await injectStrokeAlignmentIntoZip(zip);
-  const round2Patched = await injectRound2SameRectAdjIntoZip(zip);
-  const noLinePatched = await injectShapeNoLineIntoZip(zip);
-  const cellNoBorderPatched = await injectCellNoBorderIntoZip(zip);
-  if (gradPatched > 0) console.log(`  Gradient injection: ${gradPatched} shape(s) patched`);
-  if (buClrPatched > 0) console.log(`  Bullet colors: ${buClrPatched} <a:buClr> insertion(s)`);
-  if (strokePatched > 0) console.log(`  Stroke alignment: ${strokePatched} <a:ln> rewrite(s) to algn="in"`);
-  if (round2Patched > 0) console.log(`  round2SameRect adj: ${round2Patched} prstGeom(s) → adj1/adj2`);
-  if (noLinePatched > 0) console.log(`  Shape no-line: ${noLinePatched} empty <a:ln> rewrite(s) to <a:noFill/>`);
-  if (cellNoBorderPatched > 0) console.log(`  Cell no-border: ${cellNoBorderPatched} <a:ln[LRTB] w=0> rewrite(s) to <a:noFill/>`);
-
-  return await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+  return await postProcessPptx(pres);
 }

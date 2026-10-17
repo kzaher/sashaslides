@@ -7,14 +7,13 @@
  *
  * Exports:
  *   - extractFromHtml(htmlPath) — open a Chrome tab via CDP, run extract-dom,
- *                                  rasterise visual/image/emoji-text regions,
- *                                  close tab.
- *   - injectGradients(pptxPath, registry) — file-based wrapper for the in-zip
- *                                  helper that writes the patched bytes back.
- *   - injectStrokeAlignment(pptxPath) — file-based wrapper, ditto.
+ *                                  apply the shared post-extraction fixes
+ *                                  (post-extraction.ts), screenshot every
+ *                                  region they mark for rasterising, close tab.
  *   - runConvertPptx(opts) — orchestrator: walk a fixture directory in
- *                                  parallel, build a pptx, post-process, and
- *                                  (unless noUpload) upload to Drive.
+ *                                  parallel, build a pptx, run the shared
+ *                                  postProcessPptx, and (unless noUpload)
+ *                                  upload to Drive.
  */
 
 import CDPraw from "chrome-remote-interface";
@@ -23,10 +22,10 @@ import type { CdpModule } from "../../types/cdp-types.ts";
 import { readFileSync, writeFileSync, readdirSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
 import { Readable } from "stream";
-import JSZip from "jszip";
 
 import { extractorScript } from "./extractor-script.ts";
 import { loadDevOAuthClient } from "./dev-google-auth.ts";
+import { applyPostExtractionFixes, clampOversampling, rasterJobFor, type RasterJob, type TablesFormat } from "./post-extraction.ts";
 
 import {
   buildEditableSvg,
@@ -37,16 +36,11 @@ import {
 } from "./drawio-store.ts";
 import {
   buildPptx,
-  injectGradientsIntoZip,
-  injectBulletColorsIntoZip,
-  injectStrokeAlignmentIntoZip,
-  injectRound2SameRectAdjIntoZip,
+  postProcessPptx,
   SLIDE_W_PX,
   SLIDE_H_PX,
   type Extraction,
   type SlideInput,
-  type Gradient,
-  type BulletColorList,
 } from "./convert-pptx-lib.js";
 
 // The Chrome DevTools port. HTML2SLIDES_CHROME_PORT lets a run use its own browser, so two
@@ -67,22 +61,13 @@ const EXTRACT_JS = extractorScript();
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// Rasterisation oversampling factor (deviceScaleFactor + element capture
-// scale). Clamp to [1,8]; default 2. A non-finite/missing value falls back to 2
-// so unchanged callers stay byte-identical.
-export function clampOversampling(n: number | undefined | null): number {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 2;
-  return Math.min(8, Math.max(1, v));
-}
-
 // --- DOM Extraction ------------------------------------------------------
 // `oversampling` is the rasterisation scale factor (deviceScaleFactor + the
 // per-element capture scale). Defaults to 2 (retina); clamped to [1,8] so an
 // unchanged caller and the default UI value both render byte-identically.
 export async function extractFromHtml(
   htmlPath: string,
-  tablesFormat: "native" | "baked" = "native",
+  tablesFormat: TablesFormat = "native",
   oversampling: number = 2,
 ): Promise<{ extraction: Extraction; visualPngs: Map<number, Buffer> }> {
   const scale = clampOversampling(oversampling);
@@ -138,77 +123,8 @@ export async function extractFromHtml(
   if (typeof result.value !== "string") throw new Error("extract-dom did not return a JSON string");
   const extraction: Extraction = JSON.parse(result.value);
 
-  // Emoji detection: Slides lacks an emoji font, so glyphs like ⚡🔒📊🔍🧐💳
-  // render as tofu boxes. For text elements whose content is primarily emoji
-  // codepoints, rasterize the element region from Chrome and emit as an image.
-  const isEmojiCodepoint = (cp: number): boolean => {
-    // Glyphs that render fine in Slides' standard text fonts must stay TEXT
-    // (selectable/editable) — never rasterise them. User feedback (slide_07
-    // ✓ check icon, slide_13 ▼ conversion-chip arrows): "can't we use fonts
-    // in output?" / "text should never be rendered". These BMP symbol glyphs
-    // are NOT pictographic emoji and have reliable monochrome font coverage.
-    if (cp >= 0x25A0 && cp <= 0x25FF) return false;      // geometric ▲ ▼ ■ ● ○ (text-renderable)
-    if (cp >= 0x2713 && cp <= 0x2718) return false;      // check / cross marks ✓ ✔ ✗ ✘
-    if (cp >= 0x2600 && cp <= 0x27BF) return true;       // Misc symbols & dingbats (pictographs)
-    if (cp === 0x200D || cp === 0xFE0F) return true;     // ZWJ / variation selector
-    if (cp >= 0x1F1E6 && cp <= 0x1F1FF) return true;     // Regional indicators (flags)
-    if (cp >= 0x1F300 && cp <= 0x1FAFF) return true;     // Main emoji blocks
-    if (cp >= 0x2300 && cp <= 0x23FF) return true;       // misc technical (⚙ etc.)
-    return false;
-  };
-  const looksLikeEmojiText = (s: string): boolean => {
-    if (!s) return false;
-    let emoji = 0, total = 0;
-    for (const ch of s) {
-      const cp = ch.codePointAt(0)!;
-      if (cp <= 0x20) continue;
-      total++;
-      if (isEmojiCodepoint(cp)) emoji++;
-    }
-    if (total === 0) return false;
-    return emoji / total >= 0.5 && total <= 4;
-  };
-  // Re-type emoji-text elements as `image` so the rasterisation loop below
-  // captures them. Immutable: build a fresh array instead of mutating in
-  // place (ExtractedElement is readonly at the lib API boundary).
-  // Tight glyph bbox: the original text bounds match the HOST element (e.g.
-  // .stat-icon 42×42, .conversion-badge ::before host 110×30) which makes the
-  // captured PNG fully mask the underlying native rect/text. Shrink to a
-  // glyph-natural box (fontSize × 1.4 per side) positioned at the textbox's
-  // alignment-derived centre so the surrounding native chrome (icon-circle
-  // bg, "32% conversion" sibling text) shows through. User feedback wave-12A:
-  // "make sure that the text is never baked into images" + "Why are bottom
-  // icons rendered?" — the rect was native, only the PNG masked it.
-  const retypedElements = extraction.elements.map((el) => {
-    // tablesFormat=baked: rasterise each <table> as a single image so rounded
-    // corners and every nested element render pixel-perfect (the screenshot
-    // loop below captures it; the lib's image case emits slide.addImage). The
-    // native <a:tbl> path (which can't do rounded corners) is bypassed.
-    if (tablesFormat === "baked" && el.type === "table" && el.bounds.w > 5 && el.bounds.h > 5) {
-      return { ...el, type: "image" as const, _bakedTable: true };
-    }
-    if (el.type !== "text" || !looksLikeEmojiText(el.text || "")) return el;
-    const text = el.text || "";
-    const visibleChars = Array.from(text).filter((c) => c.codePointAt(0)! > 0x20);
-    const numGlyphs = Math.max(1, visibleChars.length);
-    const fontSize = el.style?.fontSize || 20;
-    const align = el.style?.textAlign || "left";
-    const vCentered = el.verticallyCentered === true;
-    const glyphW = Math.min(el.bounds.w, fontSize * 1.4 * numGlyphs);
-    const glyphH = Math.min(el.bounds.h, fontSize * 1.4);
-    let nx: number;
-    if (align === "center") nx = el.bounds.x + (el.bounds.w - glyphW) / 2;
-    else if (align === "right" || align === "end") nx = el.bounds.x + el.bounds.w - glyphW;
-    else nx = el.bounds.x;
-    const ny = vCentered ? el.bounds.y + (el.bounds.h - glyphH) / 2 : el.bounds.y;
-    return {
-      ...el,
-      type: "image" as const,
-      _wasEmojiText: true,
-      bounds: { x: nx, y: ny, w: glyphW, h: glyphH },
-    };
-  });
-  const retypedExtraction: Extraction = { ...extraction, elements: retypedElements };
+  // The shared post-extraction fixes (emoji text and baked tables become images).
+  const retypedExtraction = applyPostExtractionFixes(extraction, { tablesFormat });
 
   // Screenshot visual elements (svg/canvas/images/emoji + the large-radius
   // `clipped-container` device mockups). Captured at `oversampling`× (default
@@ -221,82 +137,34 @@ export async function extractFromHtml(
   const visualPngs = new Map<number, Buffer>();
   for (let i = 0; i < retypedExtraction.elements.length; i++) {
     const el = retypedExtraction.elements[i];
-    if ((el.type === "visual" || el.type === "image") && el.bounds.w > 5 && el.bounds.h > 5) {
-      const clip = { x: el.bounds.x, y: el.bounds.y, width: el.bounds.w, height: el.bounds.h, scale: RETINA_SCALE };
-      // A `text-glow` visual is the halo of a glowing text-shadow ALONE: hide
-      // everything else and make the glyph fill transparent, so the PNG holds
-      // only the shadow over transparency and the native text paints on top.
-      const glowId = el.type === "visual" && el.tag === "text-glow" ? el.glowId : undefined;
-      if (glowId !== undefined) {
-        const sel = `[data-h2s-glow="${glowId}"]`;
-        const css = `html,body{background:transparent !important}*,*::before,*::after{visibility:hidden !important}` +
-          `${sel},${sel} *{visibility:visible !important;color:transparent !important;` +
-          `-webkit-text-fill-color:transparent !important;background:transparent !important;border-color:transparent !important}`;
-        await Runtime.evaluate({ expression: `(() => { const s = document.createElement("style"); s.id = "h2s-glow-capture"; s.textContent = ${JSON.stringify(css)}; document.head.appendChild(s); })()` });
-        // `omitBackground` alone still returns an opaque white PNG here.
-        await Emulation.setDefaultBackgroundColorOverride({ color: { r: 0, g: 0, b: 0, a: 0 } });
-      }
-      const ss = await Page.captureScreenshot({ format: "png", clip, captureBeyondViewport: true, omitBackground: true });
-      if (glowId !== undefined) {
-        await Runtime.evaluate({ expression: `document.getElementById("h2s-glow-capture")?.remove()` });
-        await Emulation.setDefaultBackgroundColorOverride({});
-      }
-      visualPngs.set(i, Buffer.from(ss.data, "base64"));
+    const job = rasterJobFor(el);
+    if (job === null) continue;
+    const clip = { x: el.bounds.x, y: el.bounds.y, width: el.bounds.w, height: el.bounds.h, scale: RETINA_SCALE };
+    // A `text-glow` visual is the halo of a glowing text-shadow ALONE: hide
+    // everything else and make the glyph fill transparent, so the PNG holds
+    // only the shadow over transparency and the native text paints on top.
+    const glowId = glowIdOf(job);
+    if (glowId !== undefined) {
+      const sel = `[data-h2s-glow="${glowId}"]`;
+      const css = `html,body{background:transparent !important}*,*::before,*::after{visibility:hidden !important}` +
+        `${sel},${sel} *{visibility:visible !important;color:transparent !important;` +
+        `-webkit-text-fill-color:transparent !important;background:transparent !important;border-color:transparent !important}`;
+      await Runtime.evaluate({ expression: `(() => { const s = document.createElement("style"); s.id = "h2s-glow-capture"; s.textContent = ${JSON.stringify(css)}; document.head.appendChild(s); })()` });
+      // `omitBackground` alone still returns an opaque white PNG here.
+      await Emulation.setDefaultBackgroundColorOverride({ color: { r: 0, g: 0, b: 0, a: 0 } });
     }
+    const ss = await Page.captureScreenshot({ format: "png", clip, captureBeyondViewport: true, omitBackground: true });
+    if (glowId !== undefined) {
+      await Runtime.evaluate({ expression: `document.getElementById("h2s-glow-capture")?.remove()` });
+      await Emulation.setDefaultBackgroundColorOverride({});
+    }
+    visualPngs.set(i, Buffer.from(ss.data, "base64"));
   }
 
   return { extraction: retypedExtraction, visualPngs };
   } finally {
     try { if (client) await client.close(); } catch { /* */ }
     try { await CDP.Close({ port: CDP_PORT, id: tab.id }); } catch { /* */ }
-  }
-}
-
-// --- File-based wrappers around the pure in-zip injection helpers --------
-
-export async function injectGradients(pptxPath: string, registry: readonly Gradient[]): Promise<void> {
-  if (!registry || registry.length === 0) return;
-  const buf = readFileSync(pptxPath);
-  const zip = await JSZip.loadAsync(buf);
-  const patched = await injectGradientsIntoZip(zip, registry);
-  if (patched > 0) {
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    writeFileSync(pptxPath, out);
-    console.log(`  Gradient injection: ${patched} shape(s) patched`);
-  }
-}
-
-export async function injectBulletColors(pptxPath: string, registry: readonly BulletColorList[]): Promise<void> {
-  if (!registry || registry.length === 0) return;
-  const buf = readFileSync(pptxPath);
-  const zip = await JSZip.loadAsync(buf);
-  const patched = await injectBulletColorsIntoZip(zip, registry);
-  if (patched > 0) {
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    writeFileSync(pptxPath, out);
-    console.log(`  Bullet colors: ${patched} <a:buClr> insertion(s)`);
-  }
-}
-
-export async function injectStrokeAlignment(pptxPath: string): Promise<void> {
-  const buf = readFileSync(pptxPath);
-  const zip = await JSZip.loadAsync(buf);
-  const patched = await injectStrokeAlignmentIntoZip(zip);
-  if (patched > 0) {
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    writeFileSync(pptxPath, out);
-    console.log(`  Stroke alignment: ${patched} <a:ln> rewrite(s) to algn="in"`);
-  }
-}
-
-export async function injectRound2SameRectAdj(pptxPath: string): Promise<void> {
-  const buf = readFileSync(pptxPath);
-  const zip = await JSZip.loadAsync(buf);
-  const patched = await injectRound2SameRectAdjIntoZip(zip);
-  if (patched > 0) {
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    writeFileSync(pptxPath, out);
-    console.log(`  round2SameRect adj: ${patched} prstGeom(s) → adj1/adj2`);
   }
 }
 
@@ -308,7 +176,7 @@ export interface ConvertPptxOpts {
   outPath?: string | null;   // default null → /tmp/<sanitized-title>.pptx
   noUpload?: boolean;        // default false
   only?: string[] | null;    // list of basenames like ["slide_11.html", ...]; default null = all
-  tablesFormat?: "native" | "baked"; // default "native" (editable <a:tbl>, square corners);
+  tablesFormat?: TablesFormat;       // default "native" (editable <a:tbl>, square corners);
                                      // "baked" rasterises tables (rounded corners + full fidelity)
   oversampling?: number;             // rasterisation scale factor, clamped [1,8]; default 2 (retina)
 }
@@ -327,7 +195,7 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   const outPath: string | null = opts.outPath ?? null;
   const noUpload = opts.noUpload ?? false;
   const onlyFiles: readonly string[] | null = opts.only ?? null;
-  const tablesFormat: "native" | "baked" = opts.tablesFormat ?? "native";
+  const tablesFormat: TablesFormat = opts.tablesFormat ?? "native";
   const oversampling = clampOversampling(opts.oversampling);
 
   const htmlFiles = readdirSync(htmlDir)
@@ -369,25 +237,10 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   const { pres, renderedRegions, drawioDiagrams } = buildPptx(slideData as readonly SlideInput[], title);
 
   const pptxPath = outPath || `/tmp/${title.replace(/[^a-zA-Z0-9]/g, "_")}.pptx`;
-  await pres.writeFile({ fileName: pptxPath });
+  // The shared OOXML post-processing (convert-pptx-lib.ts postProcessPptx), the
+  // same pipeline the product's buildPptxInMemory runs.
+  writeFileSync(pptxPath, await postProcessPptx(pres));
   console.log(`  Saved: ${pptxPath}`);
-
-  // OOXML post-patches. The product (sidebar) goes through buildPptxInMemory,
-  // which applies these in-zip; this file-write path (regen/convert-pptx) uses
-  // STOCK pptxgenjs and must apply the same patches so its output matches the
-  // sidebar. Gradient fills (solid placeholder → <a:gradFill>) + inside stroke
-  // alignment were silently dropped when these moved to the (unloaded-here) fork.
-  await injectGradients(pptxPath, pres.__gradients || []);
-  await injectBulletColors(pptxPath, pres.__bulletColors || []);
-  await injectStrokeAlignment(pptxPath);
-  // round2SameRect adj→adj1/adj2 repair was ALSO dropped in the same move:
-  // without it Google ignores the misnamed `adj` guide and renders the
-  // preset DEFAULT adj1=16667 (16.667% of the short side) — slide_12's
-  // device screen re-rounds its bottom corners to ~47px instead of the
-  // intended 32px, opening a dark crescent between the screen and the
-  // frame ring at both bottom corners. Touches only round2SameRect
-  // prstGeoms, so it cannot perturb other slides.
-  await injectRound2SameRectAdj(pptxPath);
 
   // Sidecar: per-slide rasterised regions so the SxS rating UI can warn the
   // reviewer that the output isn't 100% native primitives.
@@ -407,15 +260,6 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
   const regionsPath = join(dirname(pptxPath), "rendered-regions.json");
   writeFileSync(regionsPath, JSON.stringify(regionsBySlide, null, 2));
   console.log(`  Rendered regions: ${totalRegions} total across ${renderedRegions.length} slides → ${regionsPath}`);
-
-  // ALL pptxgenjs OOXML fixes are now NATIVE in the vendored fork
-  // (deps/pptxgenjs/src) — no zip post-patches remain:
-  //   • gradient fills      → fill: { type: 'gradient' } → <a:gradFill>
-  //   • stroke align="in"   → width-bearing <a:ln> default
-  //   • round2SameRect      → adj1/adj2 handle naming
-  //   • empty <a:ln>        → <a:noFill/>
-  //   • table-cell noFill   → minimal border form
-  //   • shape groups        → slide.addGroup(...) → <p:grpSp>
 
   if (noUpload) {
     console.log("Done (no upload).");
@@ -487,4 +331,18 @@ export async function runConvertPptx(opts: ConvertPptxOpts): Promise<ConvertPptx
 
   console.log("Done.");
   return { pptxPath, presId: presId ?? undefined, slideCount: htmlFiles.length, regionsPath };
+}
+
+// The glow id a capture isolates, or undefined for a capture of the region as painted.
+function glowIdOf(job: RasterJob): number | undefined {
+  switch (job.kind) {
+    case "text-glow": return job.glowId;
+    case "emoji":
+    case "baked-table":
+    case "element": return undefined;
+    default: {
+      const unhandled: never = job;
+      throw new Error(`unhandled raster job ${JSON.stringify(unhandled)}`);
+    }
+  }
 }

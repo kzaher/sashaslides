@@ -6,15 +6,17 @@
  *   - addon-main.ts    — Google Slides add-on sidebar (insert-into-deck flow)
  *
  * Everything here is pure browser code: it renders the input HTML into an
- * offscreen 1280×720 iframe, injects the precompiled extract-dom blob, walks
- * the DOM, rasterizes visual elements, and hands the result to
- * buildPptxInMemory. No network, no Node APIs.
+ * offscreen 1280×720 iframe, injects the precompiled extract-dom blob, applies
+ * the post-extraction fixes the command line applies (../post-extraction.ts),
+ * rasterizes the regions they mark, and hands the result to buildPptxInMemory,
+ * whose post-processing is the command line's too. No network, no Node APIs.
  *
  * The only behavioural seam vs. the original main.ts is logging: the functions
  * take an explicit `LogFn` so each front-end can route lines to its own log
  * surface (the page's #log, the sidebar's #log, or the RPC bridge mirror).
  */
 import { buildPptxInMemory, type Extraction, type ExtractedElement, type SlideInput } from "../convert-pptx-lib";
+import { applyPostExtractionFixes, clampOversampling, rasterJobFor, type RasterJob } from "../post-extraction";
 
 // Build-time string substitution. Both build.ts and build-addon.ts replace
 // __EXTRACT_JS_LITERAL__ with the compiled extract-dom.ts source via esbuild
@@ -33,15 +35,6 @@ export { buildPptxInMemory };
 export type { SlideInput };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-// Rasterisation oversampling factor (per-element capture scale). Clamp to
-// [1,8]; default 2 (retina) so unchanged callers / the default UI value render
-// byte-identically. A non-finite/missing value falls back to 2.
-export function clampOversampling(n: number | undefined | null): number {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 2;
-  return Math.min(8, Math.max(1, v));
-}
 
 export async function loadIntoIframe(html: string): Promise<HTMLIFrameElement> {
   const iframe = document.createElement("iframe");
@@ -114,10 +107,11 @@ function runExtractInIframe(iframe: HTMLIFrameElement): Extraction {
 }
 
 /**
- * Rasterize visual/image elements. Walks the iframe DOM to find nodes at the
- * extracted bounds, then renders them to a PNG via canvas. Supports <img>,
- * <canvas>, <svg>. Other tags log a warning and are skipped (renders as a
- * gap in the .pptx). `scale`× capture (default 2) to match the Node CDP path.
+ * Rasterize every element `rasterJobFor` marks, as the command line's
+ * screenshots do: an element region via its DOM node (<img>, <canvas>, <svg>;
+ * other tags log a warning and are skipped, a gap in the .pptx), an emoji glyph
+ * and a text-shadow halo by drawing them on a canvas. `scale`× capture
+ * (default 2) to match the Node CDP path.
  */
 async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: Extraction, log: LogFn, scale: number): Promise<Map<number, Uint8Array>> {
   const out = new Map<number, Uint8Array>();
@@ -128,17 +122,50 @@ async function rasterizeVisuals(iframe: HTMLIFrameElement, extraction: Extractio
   const iwin = iframe.contentWindow! as Window & typeof globalThis;
   for (let i = 0; i < extraction.elements.length; i++) {
     const el = extraction.elements[i];
-    if (el.type !== "visual" && el.type !== "image") continue;
-    if (el.bounds.w <= 5 || el.bounds.h <= 5) continue;
-    const tag = (el.tag || "").toLowerCase();
+    const job = rasterJobFor(el);
+    if (job === null) continue;
     try {
-      const png = await rasterizeElement(idoc, iwin, el, tag, log, scale);
+      const png = await rasterizeJob(idoc, iwin, el, job, log, scale);
       if (png) out.set(i, png);
     } catch (e) {
-      log(`  rasterize fail [#${i}] <${tag}>: ${(e as Error).message}`, "warn");
+      log(`  rasterize fail [#${i}] ${job.kind}: ${(e as Error).message}`, "warn");
     }
   }
   return out;
+}
+
+async function rasterizeJob(
+  idoc: Document,
+  iwin: Window & typeof globalThis,
+  el: ExtractedElement,
+  job: RasterJob,
+  log: LogFn,
+  scale: number,
+): Promise<Uint8Array | null> {
+  switch (job.kind) {
+    case "element": {
+      const tag = el.type === "visual" || el.type === "image" ? (el.tag || "").toLowerCase() : "";
+      return await rasterizeElement(idoc, iwin, el, tag, log, scale);
+    }
+    case "emoji": return await canvasPng(drawEmoji(idoc, el, job.text, scale));
+    case "text-glow": {
+      const canvas = drawTextGlow(idoc, iwin, el.bounds, job.glowId, scale);
+      if (canvas === null) {
+        log(`  no DOM node for text glow #${job.glowId}`, "warn");
+        return null;
+      }
+      return await canvasPng(canvas);
+    }
+    case "baked-table":
+      // The product converts with tablesFormat "native" only; baking a table
+      // needs a page screenshot, which only the command line can take.
+      log(`  baked tables are not supported in the browser — skipping`, "warn");
+      return null;
+    default: {
+      const unhandled: never = job;
+      throw new Error(`unhandled raster job ${JSON.stringify(unhandled)}`);
+    }
+  }
 }
 
 async function rasterizeElement(
@@ -208,9 +235,111 @@ async function rasterizeElement(
     return null;
   }
 
+  return await canvasPng(canvas);
+}
+
+async function canvasPng(canvas: HTMLCanvasElement): Promise<Uint8Array | null> {
   const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), "image/png"));
   if (!blob) return null;
   return new Uint8Array(await blob.arrayBuffer());
+}
+
+/**
+ * An emoji glyph centred in its glyph box (post-extraction.ts sized the box),
+ * on transparency. The canvas belongs to the iframe document so its web fonts
+ * apply; the browser falls back to its emoji font per glyph, as the page did.
+ */
+function drawEmoji(idoc: Document, el: ExtractedElement, text: string, scale: number): HTMLCanvasElement {
+  const b = el.bounds;
+  const canvas = scaledCanvas(idoc, b, scale);
+  const ctx = canvas.getContext("2d")!; // a fresh canvas always has a 2d context
+  const style = el.style;
+  const family = style?.fontFamily ? `${JSON.stringify(style.fontFamily)}, sans-serif` : "sans-serif";
+  ctx.font = `${style?.fontStyle === "italic" ? "italic " : ""}${style?.fontWeight || "normal"} ${style?.fontSize || 20}px ${family}`;
+  ctx.fillStyle = style?.color || "#000";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text.trim(), b.w / 2, b.h / 2);
+  return canvas;
+}
+
+/**
+ * The halo of a glowing text-shadow ALONE, as the command line captures it:
+ * every glyph of the `data-h2s-glow` element and its descendants is drawn far
+ * outside the canvas and only its shadow, offset back over the glyph's real
+ * position, lands on the transparent canvas. Every text-shadow layer is drawn
+ * (back to front, as CSS paints them); the native text paints on top in Slides.
+ * Null when the tagged node is gone.
+ */
+function drawTextGlow(
+  idoc: Document,
+  iwin: Window & typeof globalThis,
+  b: { x: number; y: number; w: number; h: number },
+  glowId: number,
+  scale: number,
+): HTMLCanvasElement | null {
+  const host = idoc.querySelector(`[data-h2s-glow="${glowId}"]`);
+  if (!host) return null;
+  const canvas = scaledCanvas(idoc, b, scale);
+  const ctx = canvas.getContext("2d")!; // a fresh canvas always has a 2d context
+  // Glyphs sit this far to the left of their halo, so none of them is on the canvas.
+  const away = b.x + b.w + 1000;
+  const walker = idoc.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+  const range = idoc.createRange();
+  for (let t = walker.nextNode(); t !== null; t = walker.nextNode()) {
+    const parent = t.parentElement;
+    const data = t.textContent ?? "";
+    if (parent === null || data.trim() === "") continue;
+    const cs = iwin.getComputedStyle(parent);
+    const layers = textShadowLayers(cs.textShadow);
+    if (layers.length === 0) continue;
+    ctx.font = cs.font;
+    let offset = 0;
+    for (const ch of data) {
+      const start = offset;
+      offset += ch.length;
+      if (ch.trim() === "") continue;
+      range.setStart(t, start);
+      range.setEnd(t, offset);
+      const r = range.getClientRects()[0];
+      if (r === undefined || r.width === 0) continue;
+      const glyph = cs.textTransform === "uppercase" ? ch.toUpperCase()
+        : cs.textTransform === "lowercase" ? ch.toLowerCase() : ch;
+      const baseline = r.top + ctx.measureText(glyph).fontBoundingBoxAscent;
+      for (let li = layers.length - 1; li >= 0; li--) {
+        const layer = layers[li];
+        ctx.shadowColor = layer.color;
+        // Canvas shadow offsets and blur are in device pixels, outside the transform.
+        ctx.shadowBlur = layer.blur * scale;
+        ctx.shadowOffsetX = (away + layer.x) * scale;
+        ctx.shadowOffsetY = layer.y * scale;
+        ctx.fillStyle = "#000";
+        ctx.fillText(glyph, r.left - away - b.x, baseline - b.y);
+      }
+    }
+  }
+  return canvas;
+}
+
+/** A transparent canvas covering `b` at `scale`×, in CSS-pixel coordinates relative to `b`. */
+function scaledCanvas(idoc: Document, b: { w: number; h: number }, scale: number): HTMLCanvasElement {
+  const canvas = idoc.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(b.w * scale));
+  canvas.height = Math.max(1, Math.round(b.h * scale));
+  canvas.getContext("2d")!.scale(scale, scale); // a fresh canvas always has a 2d context
+  return canvas;
+}
+
+/** The layers of a computed `text-shadow` ("rgba(…) 0px 0px 20px, …"); empty for "none". */
+function textShadowLayers(textShadow: string): readonly Readonly<{ color: string; x: number; y: number; blur: number }>[] {
+  if (!textShadow || textShadow === "none") return [];
+  const colorRe = /rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}/;
+  return textShadow.split(/,(?![^(]*\))/).flatMap((layer) => {
+    const color = layer.match(colorRe)?.[0];
+    if (color === undefined) return [];
+    const [x = 0, y = 0, blur = 0] = layer.replace(colorRe, "").trim().split(/\s+/).map((v) => parseFloat(v) || 0);
+    return [{ color, x, y, blur }];
+  });
 }
 
 /**
@@ -244,10 +373,12 @@ export async function processFile(file: File, log: LogFn, oversampling: number =
   const html = await file.text();
   const iframe = await loadIntoIframe(html);
   try {
-    const extraction = runExtractInIframe(iframe);
-    if (!extraction || !extraction.elements) {
+    const raw = runExtractInIframe(iframe);
+    if (!raw || !raw.elements) {
       throw new Error("extraction returned no elements");
     }
+    // The command line's post-extraction fixes; the product always emits native tables.
+    const extraction = applyPostExtractionFixes(raw, { tablesFormat: "native" });
     log(`  ${file.name}: ${extraction.elements.length} elements`);
     const visualPngs = await rasterizeVisuals(iframe, extraction, log, scale);
     log(`  ${file.name}: rasterized ${visualPngs.size} visuals`);
