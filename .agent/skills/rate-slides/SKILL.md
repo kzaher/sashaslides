@@ -17,6 +17,6 @@ Keys: `g`=good, `b`=bad, `→`/`n`=next, `←`/`p`=prev
 
 Example:
 ```
-/rate-slides analysis/eval/results/coinbase-seed-2012/candidate_1/reconstruction
-/rate-slides analysis/eval/results/coinbase-seed-2012/candidate_1/reconstruction 1gLq40t9sEKupLDdrBUJMbV0h5kX_tGGyZTwzQOmPO8Y
+/rate-slides renderer/html2slides/e2e/fixtures-basic
+/rate-slides renderer/html2slides/e2e/fixtures-basic 1gLq40t9sEKupLDdrBUJMbV0h5kX_tGGyZTwzQOmPO8Y
 ```

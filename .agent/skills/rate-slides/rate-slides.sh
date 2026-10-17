@@ -18,7 +18,7 @@ if [ ! -d "$SCREENSHOTS_DIR" ] || [ "$(ls "$SCREENSHOTS_DIR"/*.png 2>/dev/null |
   SCREENSHOTS_DIR="/tmp/rate-originals-$$"
   mkdir -p "$SCREENSHOTS_DIR"
   cd "$RENDERER_DIR"
-  npx tsx /workspaces/sashaslides/analysis/scripts/screenshot-html-slides.ts "$HTML_DIR" "$SCREENSHOTS_DIR"
+  npx tsx "$H2S_DIR/shot-originals.ts" "$HTML_DIR" "$SCREENSHOTS_DIR"
 fi
 
 # 2. Get Slides API thumbnails

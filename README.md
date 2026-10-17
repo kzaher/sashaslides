@@ -26,10 +26,9 @@ into your Google Slides deck as native, editable objects. The website is <https:
 | `deploy/` | Publishing the website and the connector. See [DEPLOY.md](deploy/DEPLOY.md) |
 | `types/`, `deps/`, `cow-workspace/` | Shared typings, forked dependencies (pptxgenjs, drawio), copy-on-write workspaces |
 
-Older work still in the tree, outside the product above: `analysis/` (design-extraction eval),
-`sashaslides/` (the first Python chat bot and `claude-composer`), `presentations/` and
-`presentation-templates/` (the whiteboard deck pipeline), `website/` (the first landing page) and
-`bridge/` (the live-display bridge, still offered on the site's `/dev` page).
+Older work still in the tree, outside the product above: `presentations/` and
+`presentation-templates/` (the whiteboard deck pipeline) and `bridge/` (the live-display bridge,
+still offered on the site's `/dev` page).
 
 ## Development
 

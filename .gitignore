@@ -1,21 +1,13 @@
 # Node
 node_modules/
 
-# Bazel outputs
-bazel-*
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
+# Build outputs
 dist/
 build/
-*.egg
 
-# Generated protobuf code (non-Bazel)
-proto/sashaslides_pb2.py
-proto/sashaslides_pb2.pyi
+# Python (bridge/)
+__pycache__/
+*.py[cod]
 
 # IDE
 .vscode/
@@ -42,20 +34,12 @@ venv/
 
 # Data
 data/
-*.db
-
-# Presentation-analysis render/copy outputs (regenerate with the analysis pipeline)
-/analysis/scripts/slide_*.png
-/analysis/eval/results/*/extraction/slide_*.png
 
 # Docker
 .docker/
 .claude/worktrees/*
 .claude/scheduled_tasks.lock
 
-# html2slides local ratings backups
-analysis/renderer/html2slides/e2e/.ratings-complex.json
-analysis/renderer/html2slides/e2e/.ratings-basics.json
 .bug-solving-scratch/
 
 # Google-table reverse-engineering fuzz outputs (regenerable; bulky PNGs + measured data)

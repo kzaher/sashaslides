@@ -18,9 +18,7 @@
     "types/**/*.d.ts",
     "renderer/**/*.ts",
     "structured-prompting/**/*.ts",
-    "analysis/**/*.ts",
-    "presentations/**/*.ts",
-    "sashaslides/**/*.ts"
+    "presentations/**/*.ts"
   ],
   "exclude": [
     "node_modules",

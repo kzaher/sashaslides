@@ -41,7 +41,7 @@ for (let i = 2; i < args.length; i++) {
     console.error(
       "ERROR: --bless is disabled. Goldens can only be updated through the " +
       "SxS rating UI when the USER rates a slide as 'good'. See " +
-      "analysis/renderer/html2slides/README.md → 'Blessing goldens'."
+      "renderer/html2slides/README.md → 'Blessing goldens'."
     );
     process.exit(2);
   }

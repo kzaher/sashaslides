@@ -25,23 +25,33 @@ jobs:
           submodules: recursive
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
+      # Suites that need Chrome on :9222, Google credentials or a real model are left out:
+      # renderer/html2slides/drawio-store.e2e.test.ts (Google Drive) and
+      # renderer/html2slides/reverse/chrome-capture.e2e.test.ts (headless Chrome).
+      # bug_solving's overlay e2e tests skip themselves when /overlays is unavailable.
+      # structured-prompting is type-checked by the root tsconfig; its own `npm run typecheck` fails on
+      # chrome-remote-interface typings it cannot see.
       - name: Build devcontainer and run CI
         uses: devcontainers/ci@v0.3
         with:
           configFile: .devcontainer/ci/devcontainer.json
           push: never
           runCmd: |
+            set -euo pipefail
             npm ci
-            python3 -m pip install -r requirements.txt
-            python3 -m grpc_tools.protoc -I. --python_out=. --pyi_out=. proto/sashaslides.proto
-            npm run typecheck
-            npm run renderer:build
+            npm ci --prefix mcp/sasha-slides/engine
+            npm ci --prefix mcp/sasha-slides/addon
             npm ci --prefix structured-prompting
-            npm run typecheck --prefix structured-prompting
+            npx tsc --noEmit -p tsconfig.json
+            npm test --prefix mcp/sasha-slides/engine
+            npm test --prefix mcp/sasha-slides/addon
+            npm run build --prefix mcp/sasha-slides/addon
+            (cd mcp/sasha-slides && npx tsc -p . && npx tsc -p e2e \
+              && npx tsx --test test/*.test.ts decks/*.test.ts deck-tools/*.test.ts deck-tools/model-tests/*.test.ts \
+              && node --test --import tsx 'google-slides/*.test.ts')
             npm run build --prefix structured-prompting -- example/main-scaffolding.ts
             npm test --prefix structured-prompting
-            npm ci --prefix sashaslides/claude-composer
-            npm run build --prefix sashaslides/claude-composer
-            npm test --prefix sashaslides/claude-composer
-            python3 -m mypy sashaslides
-            python3 -m pytest
+            npm run -s renderer:solver:all-tests
+            npx tsx --test $(ls renderer/html2slides/*.test.ts renderer/html2slides/reverse/*.test.ts \
+              | grep -v -e drawio-store.e2e.test.ts -e chrome-capture.e2e.test.ts)
+            node --test report-service/test/*.test.ts
