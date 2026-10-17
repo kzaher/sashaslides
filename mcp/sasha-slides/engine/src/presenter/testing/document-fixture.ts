@@ -8,22 +8,19 @@ import {
   type BuiltinTransitionEffect,
   type DocumentSnapshot,
   type ElementSnapshot,
-  type PlaceholderRole,
-  type PlaceholderStyle,
   type GroupElement,
   type LineElement,
   type ScriptPurpose,
   type SlideSnapshot,
   type SlideTransition,
   type TextBody,
-  type ThemeSnapshot,
   type TransitionScriptRecord,
 } from "../../contracts/document.ts";
 import type { Frame } from "../../contracts/geometry.ts";
-import { isObjectId, parseAnimationStepId, parseElementId, parsePersonId, parseSlideId, type AnimationStepId, type DeckId, type ElementId, type SlideId, type TransitionScriptId } from "../../contracts/ids.ts";
+import { isObjectId, parseAnimationStepId, parseElementId, parsePersonId, parseSlideId, type AnimationStepId, type ElementId, type SlideId, type TransitionScriptId } from "../../contracts/ids.ts";
 import type { SerialisableObject } from "../../contracts/serialisable.ts";
-import { literalColour, type HexadecimalColour, type ThemeColourSlot } from "../../contracts/style.ts";
-import { lineElement, shapeElement } from "../../contracts/testing/snapshot-builders.ts";
+import { literalColour, type HexadecimalColour } from "../../contracts/style.ts";
+import { documentSnapshot, fixtureDeckId, lineElement, plainBody, plainTheme, requireParsed, SAMPLE_COLOURS, shapeElement, slideSnapshot } from "../../contracts/testing/snapshot-builders.ts";
 
 export type FixtureElement = Readonly<{
   id: string;
@@ -58,31 +55,26 @@ export type FixtureScript = Readonly<{
 }>;
 
 export function fixtureDocument(options: Readonly<{ slides: readonly FixtureSlide[]; scripts?: readonly FixtureScript[]; revision?: number }>): DocumentSnapshot {
-  return {
+  return documentSnapshot({
     deckId: fixtureDeckId("deck_fixture"),
-    schemaVersion: 1,
-    revision: options.revision ?? 1,
     title: "Fixture deck",
-    pageSize: { width: 1280, height: 720 },
     theme: FIXTURE_THEME,
-    layouts: [],
     slides: options.slides.map(fixtureSlide),
-    assets: [],
     transitionScripts: (options.scripts ?? []).map(fixtureScript),
-  };
+    revision: options.revision ?? 1,
+  });
 }
 
 export function fixtureSlide(slide: FixtureSlide): SlideSnapshot {
-  return {
+  return slideSnapshot({
     id: slideIdOf(slide.id),
-    layoutId: null,
     background: slide.background === undefined ? null : { kind: "solid", colour: literalColour({ hexadecimal: slide.background, alpha: 1 }) },
     skipped: slide.skipped ?? false,
     speakerNotes: textBodyOf(slide.notes ?? ""),
     transition: slide.transition ?? null,
     animations: slide.animations ?? [],
     elements: [...(slide.elements ?? []).map(fixtureShape), ...(slide.extraElements ?? [])],
-  };
+  });
 }
 
 export function fixtureShape(element: FixtureElement): ElementSnapshot {
@@ -160,15 +152,11 @@ export function scriptedTransition(scriptId: string, durationMilliseconds = 1000
 }
 
 export function slideIdOf(text: string): SlideId {
-  const id = parseSlideId(text);
-  if (id === null) throw new Error(`Not a valid fixture slide id: ${text}`);
-  return id;
+  return requireParsed(parseSlideId, text);
 }
 
 export function elementIdOf(text: string): ElementId {
-  const id = parseElementId(text);
-  if (id === null) throw new Error(`Not a valid fixture element id: ${text}`);
-  return id;
+  return requireParsed(parseElementId, text);
 }
 
 export function scriptIdOf(text: string): TransitionScriptId {
@@ -178,68 +166,11 @@ export function scriptIdOf(text: string): TransitionScriptId {
 }
 
 export function stepIdOf(text: string): AnimationStepId {
-  const id = parseAnimationStepId(text);
-  if (id === null) throw new Error(`Not a valid fixture step id: ${text}`);
-  return id;
+  return requireParsed(parseAnimationStepId, text);
 }
 
 export function textBodyOf(text: string): TextBody {
-  return { paragraphs: text.split("\n").map((line) => ({ style: {}, runs: line === "" ? [] : [{ kind: "text", text: line, style: {} }] })) };
+  return plainBody(text);
 }
 
-function fixtureDeckId(text: string): DeckId {
-  if (!isObjectId(text)) throw new Error(`Not a valid fixture deck id: ${text}`);
-  // The pattern check above is the runtime invariant the brand records (contracts/ids.ts).
-  return text as DeckId;
-}
-
-const EMPTY_PLACEHOLDER_STYLE: PlaceholderStyle = { run: {}, paragraph: {}, textBox: {} };
-
-const PLACEHOLDER_STYLES: Readonly<Record<PlaceholderRole, PlaceholderStyle>> = {
-  title: EMPTY_PLACEHOLDER_STYLE,
-  centredTitle: EMPTY_PLACEHOLDER_STYLE,
-  subtitle: EMPTY_PLACEHOLDER_STYLE,
-  body: EMPTY_PLACEHOLDER_STYLE,
-  slideNumber: EMPTY_PLACEHOLDER_STYLE,
-  footer: EMPTY_PLACEHOLDER_STYLE,
-  date: EMPTY_PLACEHOLDER_STYLE,
-  picture: EMPTY_PLACEHOLDER_STYLE,
-};
-
-const FIXTURE_COLOURS: Readonly<Record<ThemeColourSlot, HexadecimalColour>> = {
-  dark1: "#1c2333",
-  light1: "#ffffff",
-  dark2: "#3d4659",
-  light2: "#eef1f6",
-  accent1: "#4338ca",
-  accent2: "#0e7490",
-  accent3: "#be185d",
-  accent4: "#047857",
-  accent5: "#b45309",
-  accent6: "#7c3aed",
-  hyperlink: "#4338ca",
-  followedHyperlink: "#7c3aed",
-};
-
-const FIXTURE_THEME: ThemeSnapshot = {
-  name: "Fixture",
-  colours: FIXTURE_COLOURS,
-  headingFontFamily: "Manrope",
-  bodyFontFamily: "Manrope",
-  background: { kind: "solid", colour: literalColour({ hexadecimal: "#ffffff", alpha: 1 }) },
-  placeholderStyles: PLACEHOLDER_STYLES,
-  defaultRunStyle: {
-    fontFamily: "Manrope",
-    fontSize: 32,
-    fontWeight: 400,
-    fontStyle: "normal",
-    underline: false,
-    strikethrough: false,
-    colour: literalColour({ hexadecimal: "#1c2333", alpha: 1 }),
-    highlight: { kind: "none" },
-    link: { kind: "none" },
-    baselineOffset: "none",
-    letterSpacing: 0,
-    textCase: "none",
-  },
-};
+const FIXTURE_THEME = plainTheme({ colours: SAMPLE_COLOURS });

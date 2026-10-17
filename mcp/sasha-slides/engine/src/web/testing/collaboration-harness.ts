@@ -9,6 +9,7 @@ import type { CollaborationNotice, CollaborationStatus } from "../../contracts/c
 import type { Person } from "../../contracts/discussion.ts";
 import type { DocumentChangeOrigin, DocumentStore } from "../../contracts/document-store.ts";
 import { mintId, parseDeckId, parsePersonId, type DeckId, type RandomSource } from "../../contracts/ids.ts";
+import { requireParsed } from "../../contracts/testing/snapshot-builders.ts";
 import { createDocumentStore, reduceDiscussionLog } from "../../model/index.ts";
 import { createVirtualScheduler, type VirtualScheduler } from "../../state/testing/virtual-scheduler.ts";
 import { createDeckCollaboration, type DeckCollaboration, type SessionRefreshOutcome } from "../collaboration/deck-collaboration.ts";
@@ -128,13 +129,9 @@ export function createCollaborationHarness(options: Readonly<{
 }
 
 function deckIdOf(text: string): DeckId {
-  const deckId = parseDeckId(text);
-  if (deckId === null) throw new Error(`Not a deck id: ${text}`);
-  return deckId;
+  return requireParsed(parseDeckId, text);
 }
 
 function personOf(options: Readonly<{ id: string; displayName: string }>): Person {
-  const personId = parsePersonId(options.id);
-  if (personId === null) throw new Error(`Not a person id: ${options.id}`);
-  return { id: personId, displayName: options.displayName, colourIndex: 1, kind: "person" };
+  return { id: requireParsed(parsePersonId, options.id), displayName: options.displayName, colourIndex: 1, kind: "person" };
 }

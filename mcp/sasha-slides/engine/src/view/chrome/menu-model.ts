@@ -20,7 +20,7 @@
 //    its `disabledReason`.
 
 import { assertNever } from "../../contracts/assert-never.ts";
-import type { ShapePreset } from "../../contracts/document.ts";
+import { scriptedSlideTransitionOf, type ShapePreset } from "../../contracts/document.ts";
 import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { ContextMenu, EditorState, MenuName } from "../../contracts/editor-state.ts";
 import type { HostMenuItem } from "../../contracts/editor-system.ts";
@@ -263,7 +263,7 @@ const INSERTABLE_SHAPES: readonly Readonly<{ label: string; preset: ShapePreset 
 function slideEntries(options: Readonly<{ state: EditorState; key: ShortcutWriter }>): readonly MenuEntry[] {
   const { state, key } = options;
   const current = state.document.slides.find((slide) => slide.id === state.currentSlideId) ?? null;
-  const scriptId = current?.transition !== null && current?.transition !== undefined ? scriptedTransitionId(current.transition) : null;
+  const scriptId = scriptedSlideTransitionOf(current?.transition ?? null)?.scriptId ?? null;
   return [
     item({ label: "New slide", event: { kind: "newSlideRequested", layoutId: null }, shortcut: key({ primary: true, key: "M" }) }),
     item({ label: "New slide from a layout", event: { kind: "dialogOpened", dialog: { kind: "newSlideFromLayout", layoutIds: state.document.layouts.map((layout) => layout.id) } }, disabled: state.document.layouts.length === 0, hint: state.document.layouts.length === 0 ? "This deck has no layouts" : null }),
@@ -277,16 +277,6 @@ function slideEntries(options: Readonly<{ state: EditorState; key: ShortcutWrite
   ];
 }
 
-function scriptedTransitionId(transition: NonNullable<EditorState["document"]["slides"][number]["transition"]>): NonNullable<Extract<typeof transition, { kind: "scripted" }>["scriptId"]> | null {
-  switch (transition.kind) {
-    case "scripted":
-      return transition.scriptId;
-    case "builtin":
-      return null;
-    default:
-      return assertNever(transition);
-  }
-}
 
 /** An entry that dispatches `event`; `refusal` (why this person cannot do it now) disables it with that hint. */
 function item(options: Readonly<{ label: string; event: EditorEvent; shortcut?: string; disabled?: boolean; hint?: string | null; refusal?: string | null }>): MenuEntry {

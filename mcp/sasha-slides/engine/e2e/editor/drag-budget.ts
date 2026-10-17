@@ -10,7 +10,8 @@
 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildHarness, evaluate, serveDirectory, settle, withPage } from "./editor-session.ts";
+import { serveDirectory } from "../../serve-directory.ts";
+import { buildHarness, settle, withPage } from "./editor-session.ts";
 
 const BUDGET_MILLISECONDS = 4;
 const STEPS = 80;
@@ -19,26 +20,26 @@ const WARM_UP_STEPS = 5;
 // A directory of this run's own (argument 1), so parallel runs never serve each other's bundle.
 const bundle = process.argv[2] ?? join(tmpdir(), "sasha-editor-harness");
 await buildHarness(bundle);
-await using server = await serveDirectory(bundle);
+await using server = await serveDirectory({ directory: bundle, host: "127.0.0.1" });
 
-const result = await withPage({ address: `${server.address}?scenario=drag`, scheme: "light", reducedMotion: false }, async (client) => {
-  await settle(client);
-  const elementCount = await evaluate(client, `document.querySelectorAll(".sasha-view-canvas-area .sasha-slide-root [data-sasha-element-id]").length`);
-  const start = await evaluate(client, `(() => { const box = document.querySelectorAll(".sasha-view-canvas-area .sasha-slide-root [data-sasha-element-kind='shape']")[44].getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()`);
+const result = await withPage({ address: `${server.address}?scenario=drag`, scheme: "light", reducedMotion: false }, async (tab) => {
+  await settle(tab);
+  const elementCount = await tab.evaluate(`document.querySelectorAll(".sasha-view-canvas-area .sasha-slide-root [data-sasha-element-id]").length`);
+  const start = await tab.evaluate(`(() => { const box = document.querySelectorAll(".sasha-view-canvas-area .sasha-slide-root [data-sasha-element-kind='shape']")[44].getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()`);
   if (typeof start !== "object" || start === null) throw new Error("No element to drag");
   const x = Number(Reflect.get(start, "x"));
   const y = Number(Reflect.get(start, "y"));
-  await evaluate(client, `performance.clearMeasures(); true`);
-  await client.Input.dispatchMouseEvent({ type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+  await tab.evaluate(`performance.clearMeasures(); true`);
+  await tab.mouse({ type: "mousePressed", point: { x, y }, buttons: 1 });
   let gestureDuringDrag = "";
   for (let step = 1; step <= STEPS; step += 1) {
-    await client.Input.dispatchMouseEvent({ type: "mouseMoved", x: x + step * 3, y: y + step * 1.5, button: "left", buttons: 1 });
-    if (step === STEPS / 2) gestureDuringDrag = String(await evaluate(client, `document.querySelector(".sasha-engine").getAttribute("data-gesture")`));
+    await tab.mouse({ type: "mouseMoved", point: { x: x + step * 3, y: y + step * 1.5 }, buttons: 1 });
+    if (step === STEPS / 2) gestureDuringDrag = String(await tab.evaluate(`document.querySelector(".sasha-engine").getAttribute("data-gesture")`));
   }
-  await client.Input.dispatchMouseEvent({ type: "mouseReleased", x: x + STEPS * 3, y: y + STEPS * 1.5, button: "left", buttons: 0, clickCount: 1 });
-  const durations = await evaluate(client, `performance.getEntriesByName("sasha-pointer-move").map((entry) => entry.duration)`);
-  const wash = await evaluate(client, `getComputedStyle(document.querySelector(".sasha-calm-ground"), "::before").animationName`);
-  const gestureAfter = await evaluate(client, `document.querySelector(".sasha-engine").getAttribute("data-gesture")`);
+  await tab.mouse({ type: "mouseReleased", point: { x: x + STEPS * 3, y: y + STEPS * 1.5 }, buttons: 0 });
+  const durations = await tab.evaluate(`performance.getEntriesByName("sasha-pointer-move").map((entry) => entry.duration)`);
+  const wash = await tab.evaluate(`getComputedStyle(document.querySelector(".sasha-calm-ground"), "::before").animationName`);
+  const gestureAfter = await tab.evaluate(`document.querySelector(".sasha-engine").getAttribute("data-gesture")`);
   return { elementCount, durations: Array.isArray(durations) ? durations.map(Number) : [], wash, gestureDuringDrag, gestureAfter };
 });
 

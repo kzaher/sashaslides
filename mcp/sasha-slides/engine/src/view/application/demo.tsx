@@ -139,7 +139,7 @@ function DemoProblem(properties: Readonly<{ message: string }>): ReactElement {
       <div className={TIDEPOOL_CLASS.livelyCard} style={{ maxInlineSize: 560 }} role="alert">
         <h1 style={{ marginBlockStart: 0 }}>The editor could not start</h1>
         <p>{properties.message}</p>
-        <p className={TIDEPOOL_CLASS.muted}>The demo needs the model, state and presenter modules. While one of them is still a stub, the chrome harness (e2e/editor/) shows the editor on a stand-in.</p>
+        <p className={TIDEPOOL_CLASS.muted}>The demo needs the model, state and presenter modules; the chrome harness (e2e/editor/) shows the editor without them.</p>
       </div>
     </div>
   );

@@ -16,18 +16,15 @@
 //    returns once both ports answer. Stop it with the process id it prints.
 //  * THE RUNNER'S ADDRESS IS CONFIGURATION, written into the page as an inert JSON block and parsed
 //    by the demo at its boundary, so the editor never guesses the other site.
-//  * A PRESENTER STILL A STUB DOES NOT BLOCK THE EDITOR. If `buildPresenterAssets` refuses, the demo
-//    is still built and served with the runner address left blank (scripted transitions then fall
-//    back to a fade), and the build says so; `--require-runner` turns that into a failure.
 
 import { build } from "esbuild";
 import { spawn } from "node:child_process";
-import { existsSync, openSync } from "node:fs";
+import { openSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
-import { extname, join, normalize } from "node:path";
+import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildPresenterAssets, type RunnerBuild } from "./build-presenter.ts";
+import { serveDirectory } from "./serve-directory.ts";
 import { editorPageMarkup, editorStylesheet } from "./src/view/application/editor-page.ts";
 
 export const EDITOR_SITE = { host: "127.0.0.1", port: 8790 } as const;
@@ -39,11 +36,13 @@ const DEMO_DIRECTORY = join(DIST, "demo");
 const RUNNER_DIRECTORY = join(DIST, "runner");
 const RUNNER_POLICY_FILE = join(RUNNER_DIRECTORY, "policy.json");
 
-/** Builds dist/demo and dist/runner; returns the runner build, or null when the presenter refused. */
-export async function buildDemo(options: Readonly<{ minify: boolean; requireRunner: boolean }>): Promise<RunnerBuild | null> {
+/** Builds dist/demo and dist/runner; returns the runner build. */
+export async function buildDemo(options: Readonly<{ minify: boolean }>): Promise<RunnerBuild> {
   await mkdir(DEMO_DIRECTORY, { recursive: true });
-  const runner = await buildRunner(options);
-  const runnerAddress = runner === null ? "about:blank" : `http://${RUNNER_SITE.host}:${RUNNER_SITE.port}/${runner.runnerPagePath}`;
+  await mkdir(RUNNER_DIRECTORY, { recursive: true });
+  const runner = await buildPresenterAssets({ outputDirectory: RUNNER_DIRECTORY, minify: options.minify });
+  await writeFile(RUNNER_POLICY_FILE, JSON.stringify(runner));
+  const runnerAddress = `http://${RUNNER_SITE.host}:${RUNNER_SITE.port}/${runner.runnerPagePath}`;
   await build({
     entryPoints: [join(ENGINE_DIRECTORY, "src/view/application/demo.tsx")],
     bundle: true,
@@ -59,19 +58,6 @@ export async function buildDemo(options: Readonly<{ minify: boolean; requireRunn
   await writeFile(join(DEMO_DIRECTORY, "editor.css"), editorStylesheet());
   await writeFile(join(DEMO_DIRECTORY, "index.html"), editorPageMarkup({ title: "Sasha editor", stylesheetPath: "editor.css", scriptPath: "editor.js", configuration: { runnerAddress } }));
   return runner;
-}
-
-async function buildRunner(options: Readonly<{ minify: boolean; requireRunner: boolean }>): Promise<RunnerBuild | null> {
-  await mkdir(RUNNER_DIRECTORY, { recursive: true });
-  try {
-    const built = await buildPresenterAssets({ outputDirectory: RUNNER_DIRECTORY, minify: options.minify });
-    await writeFile(RUNNER_POLICY_FILE, JSON.stringify(built));
-    return built;
-  } catch (error) {
-    if (options.requireRunner) throw error;
-    console.warn(`The transition runner was not built (${error instanceof Error ? error.message : String(error)}); the demo plays a fade for scripted transitions.`);
-    return null;
-  }
 }
 
 /** Starts the servers in their own session (see the header) and waits until both answer. */
@@ -98,47 +84,16 @@ export async function serveDetached(): Promise<void> {
 
 /** The two servers, in this process (run by `serveDetached` in its own session). */
 export async function serveForeground(): Promise<void> {
-  const runner = existsSync(RUNNER_POLICY_FILE) ? parseRunnerBuild(await readFile(RUNNER_POLICY_FILE, "utf8")) : null;
-  const editor = staticServer({ directory: DEMO_DIRECTORY, headers: () => ({ "cache-control": "no-store" }) });
-  const runnerServer = staticServer({
+  const runner = parseRunnerBuild(await readFile(RUNNER_POLICY_FILE, "utf8"));
+  await serveDirectory({ directory: DEMO_DIRECTORY, ...EDITOR_SITE });
+  await serveDirectory({
     directory: RUNNER_DIRECTORY,
-    headers: (path) => ({
-      "cache-control": "no-store",
-      ...(runner !== null && extname(path) === ".html" ? { "content-security-policy": runner.runnerContentSecurityPolicy } : {}),
-    }),
+    // "::" answers both families: "localhost" alone binds one, and fetch may resolve the other.
+    host: "::",
+    port: RUNNER_SITE.port,
+    headers: (path) => (runner !== null && extname(path) === ".html" ? { "content-security-policy": runner.runnerContentSecurityPolicy } : {}),
   });
-  await listen(editor, EDITOR_SITE);
-  await listen(runnerServer, RUNNER_SITE);
-  console.log(`editor on ${EDITOR_SITE.host}:${EDITOR_SITE.port}, runner on ${RUNNER_SITE.host}:${RUNNER_SITE.port}${runner === null ? " (no runner built)" : ""}`);
-}
-
-function staticServer(options: Readonly<{ directory: string; headers: (path: string) => Readonly<Record<string, string>> }>): Server {
-  return createServer((request, response) => {
-    const requested = normalize(decodeURIComponent((request.url ?? "/").split("?")[0] ?? "/")).replace(/^(\.\.[/\\])+/, "");
-    const path = join(options.directory, requested === "/" || requested === "\\" ? "index.html" : requested);
-    if (!path.startsWith(options.directory)) {
-      response.writeHead(403);
-      response.end();
-      return;
-    }
-    readFile(path).then(
-      (bytes) => {
-        response.writeHead(200, { "content-type": CONTENT_TYPES[extname(path)] ?? "application/octet-stream", ...options.headers(path) });
-        response.end(bytes);
-      },
-      () => {
-        response.writeHead(404, { "content-type": "text/plain" });
-        response.end("Not found");
-      },
-    );
-  });
-}
-
-function listen(server: Server, site: Readonly<{ host: string; port: number }>): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(site.port, site.host, () => resolve());
-  });
+  console.log(`editor on ${EDITOR_SITE.host}:${EDITOR_SITE.port}, runner on ${RUNNER_SITE.host}:${RUNNER_SITE.port}`);
 }
 
 async function answers(site: Readonly<{ host: string; port: number }>): Promise<boolean> {
@@ -158,23 +113,12 @@ function parseRunnerBuild(text: string): RunnerBuild | null {
   return typeof runnerPagePath === "string" && typeof runnerContentSecurityPolicy === "string" ? { runnerPagePath, runnerContentSecurityPolicy } : null;
 }
 
-const CONTENT_TYPES: Readonly<Record<string, string>> = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".map": "application/json",
-  ".json": "application/json",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".woff2": "font/woff2",
-};
-
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
   const flags = new Set(process.argv.slice(2));
   if (flags.has("--serve-foreground")) {
     await serveForeground();
   } else {
-    await buildDemo({ minify: !flags.has("--no-minify"), requireRunner: flags.has("--require-runner") });
+    await buildDemo({ minify: !flags.has("--no-minify") });
     console.log("Built dist/demo and dist/runner.");
     if (flags.has("--serve")) await serveDetached();
   }

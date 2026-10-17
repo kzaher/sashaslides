@@ -34,7 +34,7 @@ import type {
 } from "../../contracts/index.ts";
 import { DEFAULT_TEXT_BOX_STYLE, identityFrame, parseAssetId, parseElementId, parsePersonId, themeColour } from "../../contracts/index.ts";
 import { createDocumentStore } from "../document-store.ts";
-import { imageElement, lineElement, shapeElement } from "../../contracts/testing/snapshot-builders.ts";
+import { imageElement, lineElement, requireParsed, shapeElement } from "../../contracts/testing/snapshot-builders.ts";
 import { createPrefixedIdMinter } from "../../shared/id-minter.ts";
 
 /** Mulberry32: a small, well-mixed 32-bit generator; the same seed always gives the same sequence. */
@@ -92,15 +92,11 @@ export function idMinter(sessionPrefix: string): <TKind extends ObjectIdKind>(ki
 }
 
 export function personId(text: string): PersonId {
-  const parsed = parsePersonId(text);
-  if (parsed === null) throw new Error(`not a person id: ${text}`);
-  return parsed;
+  return requireParsed(parsePersonId, text);
 }
 
 export function elementId(text: string): ElementId {
-  const parsed = parseElementId(text);
-  if (parsed === null) throw new Error(`not an element id: ${text}`);
-  return parsed;
+  return requireParsed(parseElementId, text);
 }
 
 export const ALICE: CommandAuthor = { kind: "person", personId: personId("pe_alice01") };

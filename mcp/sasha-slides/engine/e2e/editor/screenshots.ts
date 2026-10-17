@@ -11,7 +11,8 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { HarnessScenario } from "../../src/view/testing/chrome-harness.tsx";
-import { buildHarness, evaluate, screenshot, serveDirectory, settle, withPage } from "./editor-session.ts";
+import { serveDirectory } from "../../serve-directory.ts";
+import { buildHarness, settle, withPage } from "./editor-session.ts";
 
 const SHOTS: readonly Readonly<{ scenario: HarnessScenario; scheme: "light" | "dark" }>[] = [
   { scenario: "editor", scheme: "light" },
@@ -32,26 +33,26 @@ const output = process.argv[2] ?? join(tmpdir(), "sasha-engine-e2e");
 await mkdir(output, { recursive: true });
 const bundle = join(tmpdir(), "sasha-editor-harness");
 await buildHarness(bundle);
-await using server = await serveDirectory(bundle);
+await using server = await serveDirectory({ directory: bundle, host: "127.0.0.1" });
 
 const report: Record<string, unknown>[] = [];
 for (const shot of SHOTS) {
   const address = `${server.address}?scenario=${shot.scenario}`;
-  const facts = await withPage({ address, scheme: shot.scheme, reducedMotion: false }, async (client) => {
-    await settle(client);
+  const facts = await withPage({ address, scheme: shot.scheme, reducedMotion: false }, async (tab) => {
+    await settle(tab);
     const path = join(output, `${shot.scenario}-${shot.scheme}.png`);
-    await screenshot(client, path);
-    const blurred = await evaluate(client, `[...document.querySelectorAll(".sasha-panel, .sasha-popover, .sasha-dialog, .sasha-card")].map((element) => getComputedStyle(element).backdropFilter).filter((value) => value !== "none")`);
-    const wash = await evaluate(client, `getComputedStyle(document.querySelector(".sasha-calm-ground"), "::before").animationName`);
-    const thumbnails = await evaluate(client, `document.querySelectorAll("[data-sasha-thumbnail]").length`);
+    await tab.screenshot(path);
+    const blurred = await tab.evaluate(`[...document.querySelectorAll(".sasha-panel, .sasha-popover, .sasha-dialog, .sasha-card")].map((element) => getComputedStyle(element).backdropFilter).filter((value) => value !== "none")`);
+    const wash = await tab.evaluate(`getComputedStyle(document.querySelector(".sasha-calm-ground"), "::before").animationName`);
+    const thumbnails = await tab.evaluate(`document.querySelectorAll("[data-sasha-thumbnail]").length`);
     return { path, blurred, wash, thumbnails };
   });
   report.push({ ...shot, ...facts });
 }
 
-const reduced = await withPage({ address: `${server.address}?scenario=editor`, scheme: "light", reducedMotion: true }, async (client) => {
-  await settle(client);
-  return { wash: await evaluate(client, `getComputedStyle(document.querySelector(".sasha-calm-ground"), "::before").animationName`) };
+const reduced = await withPage({ address: `${server.address}?scenario=editor`, scheme: "light", reducedMotion: true }, async (tab) => {
+  await settle(tab);
+  return { wash: await tab.evaluate(`getComputedStyle(document.querySelector(".sasha-calm-ground"), "::before").animationName`) };
 });
 
 console.log(JSON.stringify({ shots: report, reducedMotion: reduced }, null, 2));

@@ -28,11 +28,12 @@ import type {
   TextBody,
   TextRun,
   ThemeSnapshot,
+  TransitionScriptRecord,
   UnsupportedElement,
 } from "../document.ts";
 import { DOCUMENT_SCHEMA_VERSION, EMPTY_TEXT_BODY } from "../document.ts";
 import { identityFrame, lineFrame, type Box, type Frame, type Point } from "../geometry.ts";
-import type { AssetId, DeckId, ElementId, SlideId } from "../ids.ts";
+import type { AssetId, DeckId, ElementId, LayoutId, SlideId } from "../ids.ts";
 import { createPrefixedIdMinter, type IdMinter } from "../../shared/id-minter.ts";
 import {
   DEFAULT_TEXT_BOX_STYLE,
@@ -46,6 +47,8 @@ import {
   type RunStylePatch,
   type Stroke,
   type TextBoxStyle,
+  type HexadecimalColour,
+  type ThemeColourSlot,
 } from "../style.ts";
 
 /** A deck id for fixtures and the demo. */
@@ -60,6 +63,52 @@ export function fixtureAssetId(seed: string): AssetId {
   const digits = Array.from(seed).map((character) => character.charCodeAt(0).toString(16)).join("");
   // An asset id is the hexadecimal SHA-256 of the bytes; any 64 hexadecimal digits have its shape.
   return digits.padEnd(64, "0").slice(0, 64) as AssetId;
+}
+
+/** `parse(text)`, or an error naming the parser: a fixture step, never the behaviour under test. */
+export function requireParsed<TValue>(parse: (text: string) => TValue | null, text: string): TValue {
+  const parsed = parse(text);
+  if (parsed === null) throw new Error(`${parse.name} refused ${JSON.stringify(text)}`);
+  return parsed;
+}
+
+export const SAMPLE_COLOURS: Readonly<Record<ThemeColourSlot, HexadecimalColour>> = {
+  dark1: "#1c2333",
+  light1: "#ffffff",
+  dark2: "#3d4659",
+  light2: "#eef1f6",
+  accent1: "#4338ca",
+  accent2: "#0e7490",
+  accent3: "#be185d",
+  accent4: "#047857",
+  accent5: "#b45309",
+  accent6: "#7c3aed",
+  hyperlink: "#4338ca",
+  followedHyperlink: "#7c3aed",
+};
+
+const EMPTY_PLACEHOLDER_STYLE: PlaceholderStyle = { run: {}, paragraph: {}, textBox: {} };
+
+/** A theme named "Fixture": Manrope, literal colours (white background, #1c2333 text), no placeholder styling. */
+export function plainTheme(options: Readonly<{ colours: Readonly<Record<ThemeColourSlot, HexadecimalColour>> }>): ThemeSnapshot {
+  return {
+    name: "Fixture",
+    colours: options.colours,
+    headingFontFamily: "Manrope",
+    bodyFontFamily: "Manrope",
+    background: { kind: "solid", colour: literalColour({ hexadecimal: "#ffffff", alpha: 1 }) },
+    placeholderStyles: {
+      title: EMPTY_PLACEHOLDER_STYLE,
+      centredTitle: EMPTY_PLACEHOLDER_STYLE,
+      subtitle: EMPTY_PLACEHOLDER_STYLE,
+      body: EMPTY_PLACEHOLDER_STYLE,
+      slideNumber: EMPTY_PLACEHOLDER_STYLE,
+      footer: EMPTY_PLACEHOLDER_STYLE,
+      date: EMPTY_PLACEHOLDER_STYLE,
+      picture: EMPTY_PLACEHOLDER_STYLE,
+    },
+    defaultRunStyle: { ...SAMPLE_DEFAULT_RUN_STYLE, colour: literalColour({ hexadecimal: "#1c2333", alpha: 1 }) },
+  };
 }
 
 export const SAMPLE_DEFAULT_RUN_STYLE: RunStyle = {
@@ -91,20 +140,7 @@ export function sampleTheme(): ThemeSnapshot {
   };
   return {
     name: "Tidepool sample",
-    colours: {
-      dark1: "#1c2333",
-      light1: "#ffffff",
-      dark2: "#3d4659",
-      light2: "#eef1f6",
-      accent1: "#4338ca",
-      accent2: "#0e7490",
-      accent3: "#be185d",
-      accent4: "#047857",
-      accent5: "#b45309",
-      accent6: "#7c3aed",
-      hyperlink: "#4338ca",
-      followedHyperlink: "#7c3aed",
-    },
+    colours: SAMPLE_COLOURS,
     headingFontFamily: "Manrope",
     bodyFontFamily: "Manrope",
     background: { kind: "solid", colour: themeColour({ slot: "light1", alpha: 1 }) },
@@ -278,13 +314,30 @@ export function tableElement(options: Readonly<{ ids: IdMinter; id: ElementId; b
   };
 }
 
-export function slideSnapshot(options: Readonly<{ ids: IdMinter; id?: SlideId; elements: readonly ElementSnapshot[]; background?: SlideSnapshot["background"]; notes?: string; skipped?: boolean; transition?: SlideSnapshot["transition"]; animations?: readonly AnimationStep[] }>): SlideSnapshot {
+/** A slide; its id is `id`, or the next one `ids` mints. */
+export function slideSnapshot(
+  options: Readonly<{
+    ids?: IdMinter;
+    id?: SlideId;
+    elements: readonly ElementSnapshot[];
+    layoutId?: LayoutId | null;
+    background?: SlideSnapshot["background"];
+    /** Plain notes in 24-unit runs; `speakerNotes` takes a body as it is. */
+    notes?: string;
+    speakerNotes?: TextBody;
+    skipped?: boolean;
+    transition?: SlideSnapshot["transition"];
+    animations?: readonly AnimationStep[];
+  }>,
+): SlideSnapshot {
+  const id = options.id ?? options.ids?.next("slide");
+  if (id === undefined) throw new Error("slideSnapshot needs an id or an id minter");
   return {
-    id: options.id ?? options.ids.next("slide"),
-    layoutId: null,
+    id,
+    layoutId: options.layoutId ?? null,
     background: options.background ?? null,
     skipped: options.skipped ?? false,
-    speakerNotes: options.notes === undefined ? EMPTY_TEXT_BODY : plainBody(options.notes, { fontSize: 24 }),
+    speakerNotes: options.speakerNotes ?? (options.notes === undefined ? EMPTY_TEXT_BODY : plainBody(options.notes, { fontSize: 24 })),
     transition: options.transition ?? null,
     animations: options.animations ?? [],
     elements: options.elements,
@@ -305,18 +358,28 @@ export function animationStep(options: Readonly<{ ids: IdMinter; elementId: Elem
   };
 }
 
-export function documentSnapshot(options: Readonly<{ deckId: DeckId; title: string; slides: readonly SlideSnapshot[]; layouts?: readonly LayoutSnapshot[]; theme?: ThemeSnapshot }>): DocumentSnapshot {
+export function documentSnapshot(
+  options: Readonly<{
+    deckId: DeckId;
+    title: string;
+    slides: readonly SlideSnapshot[];
+    layouts?: readonly LayoutSnapshot[];
+    theme?: ThemeSnapshot;
+    revision?: number;
+    transitionScripts?: readonly TransitionScriptRecord[];
+  }>,
+): DocumentSnapshot {
   return {
     deckId: options.deckId,
     schemaVersion: DOCUMENT_SCHEMA_VERSION,
-    revision: 1,
+    revision: options.revision ?? 1,
     title: options.title,
     pageSize: { width: 1280, height: 720 },
     theme: options.theme ?? sampleTheme(),
     layouts: options.layouts ?? [],
     slides: options.slides,
     assets: [],
-    transitionScripts: [],
+    transitionScripts: options.transitionScripts ?? [],
   };
 }
 

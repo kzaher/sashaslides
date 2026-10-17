@@ -352,6 +352,44 @@ export type EditorDialog =
   | Readonly<{ kind: "renameDeck" }>
   | Readonly<{ kind: "newSlideFromLayout"; layoutIds: readonly LayoutId[] }>;
 
+export type ScriptEditorDialog = Extract<EditorDialog, { kind: "transitionScriptEditor" }>;
+
+/** The open dialog when it is the script editor, else null. */
+export function scriptEditorOf(dialog: EditorDialog): ScriptEditorDialog | null {
+  switch (dialog.kind) {
+    case "transitionScriptEditor":
+      return dialog;
+    case "none":
+    case "insertImage":
+    case "insertTable":
+    case "linkEditor":
+    case "keyboardShortcuts":
+    case "renameDeck":
+    case "newSlideFromLayout":
+      return null;
+    default:
+      return assertNever(dialog);
+  }
+}
+
+/** True while any dialog is open. */
+export function dialogIsOpen(dialog: EditorDialog): boolean {
+  switch (dialog.kind) {
+    case "none":
+      return false;
+    case "insertImage":
+    case "insertTable":
+    case "linkEditor":
+    case "transitionScriptEditor":
+    case "keyboardShortcuts":
+    case "renameDeck":
+    case "newSlideFromLayout":
+      return true;
+    default:
+      return assertNever(dialog);
+  }
+}
+
 export type CommentComposer =
   | Readonly<{ kind: "closed" }>
   | Readonly<{
@@ -436,6 +474,30 @@ export function marqueeBox(gesture: Readonly<{ origin: Point; current: Point }>)
     width: Math.abs(gesture.current.x - gesture.origin.x),
     height: Math.abs(gesture.current.y - gesture.origin.y),
   };
+}
+
+export type SlideDragGesture = Extract<Gesture, { kind: "draggingSlides" }>;
+
+/** The gesture when slides are being dragged in the filmstrip, else null. */
+export function slideDragOf(gesture: Gesture): SlideDragGesture | null {
+  switch (gesture.kind) {
+    case "draggingSlides":
+      return gesture;
+    case "idle":
+    case "pressed":
+    case "moving":
+    case "resizing":
+    case "rotating":
+    case "movingLineEnd":
+    case "marquee":
+    case "creating":
+    case "resizingTableLine":
+    case "drawingMarking":
+    case "panning":
+      return null;
+    default:
+      return assertNever(gesture);
+  }
 }
 
 /**

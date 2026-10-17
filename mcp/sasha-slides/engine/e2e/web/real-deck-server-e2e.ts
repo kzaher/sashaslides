@@ -17,7 +17,7 @@
 //
 //   npx tsx e2e/web/real-deck-server-e2e.ts [screenshot directory]
 //
-// It needs dist/web (`npm run -s build:web`) and Chrome on 127.0.0.1:9223 (browser-session.ts), so it
+// It needs dist/web (`npm run -s build:web`) and Chrome on 127.0.0.1:9223 (e2e/shared/chrome-session.ts), so it
 // is not part of `npm test`. Whole run, measured 2026-10-15: about 8 s wall, 3.5 s of it the run itself.
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -36,7 +36,7 @@ import { storeAccountDirectory } from "../../../http/account-directory.ts";
 import { createAccountVault, openFileBackedDataKeyStore } from "../../../http/account-keys.ts";
 import { randomAccountId, withSealedGoogleIdentities } from "../../../http/accounts.ts";
 import { fileBackedAuthStore } from "../../../http/oauth-store.ts";
-import { connectBrowser, type Tab } from "./browser-session.ts";
+import { connectBrowser, type Tab } from "../shared/chrome-session.ts";
 
 const CONNECTOR_DIRECTORY = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const GOOGLE_CLIENT_PATH = join(CONNECTOR_DIRECTORY, "..", "..", ".auth", "google_oauth.json");
@@ -189,7 +189,7 @@ function fieldOf(options: Readonly<{ value: unknown; name: string }>): unknown {
 }
 
 async function openPerson(options: Readonly<{ address: string; cookie: string }>): Promise<Tab> {
-  const tab = await browser.openPerson({ ...VIEWPORT, reducedMotion: false });
+  const tab = await browser.openTab({ ...VIEWPORT, reducedMotion: false });
   const separator = options.cookie.indexOf("=");
   await tab.setCookie({ url: `${options.address}${DECK_SESSION_COOKIE_PATH}`, name: options.cookie.slice(0, separator), value: options.cookie.slice(separator + 1) });
   return tab;

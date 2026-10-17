@@ -7,6 +7,7 @@
 import {
   assertNever,
   EMPTY_TEXT_BODY,
+  slideDragOf,
   type DocumentCommand,
   type EditorState,
   type ElementSnapshot,
@@ -155,54 +156,20 @@ export function startSlideDrag(state: EditorState, slideIds: readonly SlideId[])
 }
 
 export function dragSlidesOver(state: EditorState, dropAfter: SlideId | null): EditorState {
-  const gesture = state.gesture;
-  switch (gesture.kind) {
-    case "draggingSlides":
-      return { ...state, gesture: { ...gesture, dropAfter } };
-    case "idle":
-    case "pressed":
-    case "moving":
-    case "resizing":
-    case "rotating":
-    case "movingLineEnd":
-    case "marquee":
-    case "creating":
-    case "resizingTableLine":
-    case "drawingMarking":
-    case "panning":
-      return state;
-    default:
-      return assertNever(gesture);
-  }
+  const gesture = slideDragOf(state.gesture);
+  return gesture === null ? state : { ...state, gesture: { ...gesture, dropAfter } };
 }
 
 export function endSlideDrag(state: EditorState, dropped: boolean): EditorState {
-  const gesture = state.gesture;
-  switch (gesture.kind) {
-    case "draggingSlides": {
-      const idle: EditorState = { ...state, gesture: { kind: "idle" } };
-      if (!dropped || orderUnchanged({ order: state.document.slides.map((slide) => slide.id), moving: gesture.slideIds, after: gesture.dropAfter })) return idle;
-      return queueEnvelope(idle, {
-        commands: [{ kind: "moveSlides", slideIds: gesture.slideIds, after: gesture.dropAfter }],
-        selectionAfter: { kind: "slides", slideIds: gesture.slideIds },
-        mergeWithPrevious: false,
-      });
-    }
-    case "idle":
-    case "pressed":
-    case "moving":
-    case "resizing":
-    case "rotating":
-    case "movingLineEnd":
-    case "marquee":
-    case "creating":
-    case "resizingTableLine":
-    case "drawingMarking":
-    case "panning":
-      return state;
-    default:
-      return assertNever(gesture);
-  }
+  const gesture = slideDragOf(state.gesture);
+  if (gesture === null) return state;
+  const idle: EditorState = { ...state, gesture: { kind: "idle" } };
+  if (!dropped || orderUnchanged({ order: state.document.slides.map((slide) => slide.id), moving: gesture.slideIds, after: gesture.dropAfter })) return idle;
+  return queueEnvelope(idle, {
+    commands: [{ kind: "moveSlides", slideIds: gesture.slideIds, after: gesture.dropAfter }],
+    selectionAfter: { kind: "slides", slideIds: gesture.slideIds },
+    mergeWithPrevious: false,
+  });
 }
 
 /** Slide properties for the selected slides, or the current one. */

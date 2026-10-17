@@ -16,7 +16,7 @@ import { assertNever } from "../../contracts/assert-never.ts";
 import type { TransitionScriptDraft } from "../../contracts/commands.ts";
 import { scriptFingerprint, type DocumentSnapshot, type ScriptPurpose, type TransitionScriptRecord } from "../../contracts/document.ts";
 import type { EditorEvent } from "../../contracts/editor-events.ts";
-import type { EditorDialog, EditorState, TransitionScriptEditor } from "../../contracts/editor-state.ts";
+import { dialogIsOpen, type EditorDialog, type EditorState, type TransitionScriptEditor } from "../../contracts/editor-state.ts";
 import type { LayoutId, SlideId } from "../../contracts/ids.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { shallowEqual, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
@@ -38,23 +38,6 @@ export function DialogLayer(): ReactElement | null {
       </div>
     </>
   );
-}
-
-function dialogIsOpen(dialog: EditorDialog): boolean {
-  switch (dialog.kind) {
-    case "none":
-      return false;
-    case "insertImage":
-    case "insertTable":
-    case "linkEditor":
-    case "transitionScriptEditor":
-    case "keyboardShortcuts":
-    case "renameDeck":
-    case "newSlideFromLayout":
-      return true;
-    default:
-      return assertNever(dialog);
-  }
 }
 
 function DialogBody(properties: Readonly<{ dialog: EditorDialog; close: () => void }>): ReactElement | null {

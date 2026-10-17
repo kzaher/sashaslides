@@ -16,7 +16,7 @@
 //  * A SCRIPTED STEP'S PARAMETERS are the script's defaults, then the step's own, then what the step
 //    is about -- `targetElementId` and `category` -- which a script cannot be configured out of.
 
-import { effectiveDurationMilliseconds, type BuildSegment } from "../../contracts/animations.ts";
+import { effectiveDurationMilliseconds, scriptedEffectOf, type BuildSegment } from "../../contracts/animations.ts";
 import { assertNever } from "../../contracts/assert-never.ts";
 import { scriptFingerprint, type ScriptPurpose, type TransitionScriptRecord } from "../../contracts/document.ts";
 import type { ResolvedTransition } from "../../contracts/presenter.ts";
@@ -35,29 +35,8 @@ export function resolveBuildSegment(
   const first = options.segment.steps[0];
   if (first === undefined) return { kind: "instant", substitution: null };
   const step = first.step;
-  const effect = step.effect;
-  switch (effect.kind) {
-    case "scripted":
-      break;
-    case "appear":
-    case "fadeIn":
-    case "flyIn":
-    case "zoomIn":
-    case "floatIn":
-    case "wipe":
-    case "pulse":
-    case "growShrink":
-    case "spin":
-    case "colourChange":
-    case "disappear":
-    case "fadeOut":
-    case "flyOut":
-    case "zoomOut":
-    case "motionPath":
-      return { kind: "play", transition: { kind: "build", segment: options.segment } };
-    default:
-      return assertNever(effect);
-  }
+  const effect = scriptedEffectOf(step.effect);
+  if (effect === null) return { kind: "play", transition: { kind: "build", segment: options.segment } };
   const record = options.scripts.find((script) => script.id === effect.scriptId);
   if (record === undefined || !servesBuildSteps(record.purpose)) return { kind: "instant", substitution: "scriptMissing" };
   const fingerprint = scriptFingerprint(record);

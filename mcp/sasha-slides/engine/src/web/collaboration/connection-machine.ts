@@ -149,6 +149,25 @@ export function reduceConnection(state: DeckConnectionState, event: DeckConnecti
   }
 }
 
+type GenerationPhaseKind = Extract<ConnectionPhase, Readonly<{ generation: number }>>["kind"];
+
+/** The phase's socket generation when its kind is one of `kinds`, else null. */
+function generationIn(phase: ConnectionPhase, kinds: readonly GenerationPhaseKind[]): number | null {
+  switch (phase.kind) {
+    case "connecting":
+    case "synchronising":
+    case "online":
+    case "waiting":
+    case "refreshingSession":
+      return kinds.includes(phase.kind) ? phase.generation : null;
+    case "networkLost":
+    case "closed":
+      return null;
+    default:
+      return assertNever(phase);
+  }
+}
+
 /** The connection as the editor shows it (collaboration.ts `CollaborationStatus`). */
 export function collaborationStatusOf(state: DeckConnectionState): CollaborationStatus {
   return { connection: connectionStateOf(state), role: state.role, members: state.members, unsentChanges: state.unsentChanges };
@@ -156,19 +175,7 @@ export function collaborationStatusOf(state: DeckConnectionState): Collaboration
 
 /** The socket generation that should be open now, or null when no socket should exist. */
 export function socketGenerationOf(phase: ConnectionPhase): number | null {
-  switch (phase.kind) {
-    case "connecting":
-    case "synchronising":
-    case "online":
-      return phase.generation;
-    case "waiting":
-    case "networkLost":
-    case "refreshingSession":
-    case "closed":
-      return null;
-    default:
-      return assertNever(phase);
-  }
+  return generationIn(phase, ["connecting", "synchronising", "online"]);
 }
 
 function connectionStateOf(state: DeckConnectionState): ConnectionState {
@@ -194,69 +201,21 @@ function connectionStateOf(state: DeckConnectionState): ConnectionState {
 
 /** The generation of a socket whose welcome has arrived (synchronising or online), else null. */
 function welcomedGenerationOf(phase: ConnectionPhase): number | null {
-  switch (phase.kind) {
-    case "synchronising":
-    case "online":
-      return phase.generation;
-    case "connecting":
-    case "waiting":
-    case "networkLost":
-    case "refreshingSession":
-    case "closed":
-      return null;
-    default:
-      return assertNever(phase);
-  }
+  return generationIn(phase, ["synchronising", "online"]);
 }
 
 function synchronisingGenerationOf(phase: ConnectionPhase): number | null {
-  switch (phase.kind) {
-    case "synchronising":
-      return phase.generation;
-    case "connecting":
-    case "online":
-    case "waiting":
-    case "networkLost":
-    case "refreshingSession":
-    case "closed":
-      return null;
-    default:
-      return assertNever(phase);
-  }
+  return generationIn(phase, ["synchronising"]);
 }
 
 /** The generation of a running retry timer, else null. */
 function retryTimerGenerationOf(phase: ConnectionPhase): number | null {
-  switch (phase.kind) {
-    case "waiting":
-      return phase.generation;
-    case "connecting":
-    case "synchronising":
-    case "online":
-    case "networkLost":
-    case "refreshingSession":
-    case "closed":
-      return null;
-    default:
-      return assertNever(phase);
-  }
+  return generationIn(phase, ["waiting"]);
 }
 
 /** The generation of the session refresh in flight; null in every other phase. */
 export function refreshGenerationOf(phase: ConnectionPhase): number | null {
-  switch (phase.kind) {
-    case "refreshingSession":
-      return phase.generation;
-    case "connecting":
-    case "synchronising":
-    case "online":
-    case "waiting":
-    case "networkLost":
-    case "closed":
-      return null;
-    default:
-      return assertNever(phase);
-  }
+  return generationIn(phase, ["refreshingSession"]);
 }
 
 function isOnline(phase: ConnectionPhase): boolean {

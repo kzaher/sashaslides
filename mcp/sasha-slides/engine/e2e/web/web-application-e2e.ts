@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildWeb, DEFAULT_WEB_OUTPUT_DIRECTORY } from "../../build-web.ts";
 import { parseDeckId } from "../../src/contracts/ids.ts";
-import { connectBrowser, type Tab } from "./browser-session.ts";
+import { connectBrowser, type Tab } from "../shared/chrome-session.ts";
 import { startFakeDeckSite } from "./fake-deck-site.ts";
 
 const output = process.argv[2] ?? join(tmpdir(), "sasha-web-end-to-end");
@@ -46,7 +46,7 @@ const check = (condition: boolean, failure: string): void => {
 
 // --- Ada: sign in, the list page, New deck -------------------------------------------------------
 step("Ada: opening /decks");
-const ada = await browser.openPerson(VIEWPORT);
+const ada = await browser.openTab(VIEWPORT);
 await ada.navigate(`${site.address}/decks`);
 await ada.waitFor(`document.getElementById("name") !== null`, 5_000);
 facts["signedOutWentToSignIn"] = await ada.evaluate("location.pathname");
@@ -77,7 +77,7 @@ facts["invite"] = await ada.evaluate(`(async () => {
 
 // --- Grace: the same deck in her own browser context ------------------------------------------------
 step("Grace: opening the deck");
-const grace = await browser.openPerson(VIEWPORT);
+const grace = await browser.openTab(VIEWPORT);
 await grace.navigate(`${site.address}${deckPath}`);
 await grace.waitFor(`document.getElementById("name") !== null`, 8_000);
 await signIn({ tab: grace, name: "Grace Hopper", email: "grace@example.com" });
@@ -154,7 +154,7 @@ await ada.screenshot(join(output, "08-import-needs-google.png"));
 
 step("the embedded editor, signed in with a ticket");
 facts["policyViolationsOnTheListPage"] = await ada.evaluate(`window.sashaPolicyViolations ?? []`);
-const addon = await browser.openPerson(VIEWPORT);
+const addon = await browser.openTab(VIEWPORT);
 await addon.navigate(`${site.address}${deckPath}?embed=addon#ticket=${site.mintTicket("grace@example.com")}`);
 facts["embeddedOpenedInMilliseconds"] = await addon.waitFor(`${CONNECTION("online")} && document.querySelector(".sasha-view-canvas-area .sasha-slide-root") !== null`, 15_000).catch(() => -1);
 facts["embeddedAddressAfterExchange"] = await addon.evaluate("location.pathname + location.search + location.hash");

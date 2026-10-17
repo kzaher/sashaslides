@@ -20,6 +20,7 @@ import {
   ANIMATION_TRIGGER_LABELS,
   animationCategoryOf,
   defaultAnimationEffect,
+  scriptedEffectOf,
   type AnimationEdge,
   type AnimationEffect,
   type AnimationEffectKind,
@@ -122,28 +123,7 @@ export function animationScripts(document: DocumentSnapshot): readonly Transitio
 
 /** True for a step whose effect is a script from the deck's store. */
 export function isScriptedEffect(effect: AnimationEffect): boolean {
-  switch (effect.kind) {
-    case "scripted":
-      return true;
-    case "appear":
-    case "fadeIn":
-    case "flyIn":
-    case "zoomIn":
-    case "floatIn":
-    case "wipe":
-    case "pulse":
-    case "growShrink":
-    case "spin":
-    case "colourChange":
-    case "disappear":
-    case "fadeOut":
-    case "flyOut":
-    case "zoomOut":
-    case "motionPath":
-      return false;
-    default:
-      return assertNever(effect);
-  }
+  return scriptedEffectOf(effect) !== null;
 }
 
 /** The effect after choosing `kind` for a step whose effect was `previous` (see the header); null when it cannot exist yet. */

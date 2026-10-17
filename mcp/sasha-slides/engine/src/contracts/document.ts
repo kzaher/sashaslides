@@ -381,6 +381,21 @@ export type SlideTransition =
   | Readonly<{ kind: "builtin"; effect: BuiltinTransitionEffect; durationMilliseconds: number; easing: TransitionEasing }>
   | Readonly<{ kind: "scripted"; scriptId: TransitionScriptId; durationMilliseconds: number; parameters: SerialisableObject }>;
 
+export type ScriptedSlideTransition = Extract<SlideTransition, { kind: "scripted" }>;
+
+/** The transition when it runs a script from the deck's store, else null (also for no transition). */
+export function scriptedSlideTransitionOf(transition: SlideTransition | null): ScriptedSlideTransition | null {
+  if (transition === null) return null;
+  switch (transition.kind) {
+    case "scripted":
+      return transition;
+    case "builtin":
+      return null;
+    default:
+      return assertNever(transition);
+  }
+}
+
 /** Who wrote a script. An agent session is identified so a person can find and revert its work. */
 export type TransitionAuthor =
   | Readonly<{ kind: "agent"; name: string; agentSessionId: string }>

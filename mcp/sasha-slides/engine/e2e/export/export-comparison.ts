@@ -19,7 +19,8 @@ import { fileURLToPath } from "node:url";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 import { EXPORT_PAGE_SIZE, EXPORT_READY_ATTRIBUTE, renderSlideHtml } from "../../src/export/slide-html.ts";
-import { evaluate, screenshot, serveDirectory, waitFor, withPage } from "../editor/editor-session.ts";
+import { serveDirectory } from "../../serve-directory.ts";
+import { withPage } from "../editor/editor-session.ts";
 import { comparisonAssetAddress, comparisonDeck } from "./comparison-deck.ts";
 
 /** A slide may differ from the editor by at most this share of its pixels (anti-aliasing noise). */
@@ -43,7 +44,7 @@ const output = process.argv[2] ?? join(tmpdir(), "sasha-export-comparison");
 await mkdir(output, { recursive: true });
 const site = join(tmpdir(), "sasha-export-comparison-site");
 await buildSite(site);
-await using server = await serveDirectory(site);
+await using server = await serveDirectory({ directory: site, host: "127.0.0.1" });
 
 const deck = comparisonDeck();
 const comparisons: SlideComparison[] = [];
@@ -92,11 +93,11 @@ async function buildSite(directory: string): Promise<void> {
 
 /** Screenshots a page once it says it is ready; returns every text run's computed font size. */
 async function shoot(options: Readonly<{ address: string; readyAttribute: string; path: string }>): Promise<readonly string[]> {
-  return await withPage({ address: options.address, scheme: "light", reducedMotion: true, viewport: EXPORT_PAGE_SIZE }, async (client) => {
-    await waitFor(client, `document.documentElement.getAttribute(${JSON.stringify(options.readyAttribute)}) === "true"`, 8000);
-    await evaluate(client, `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
-    await screenshot(client, options.path);
-    const sizes = await evaluate(client, `[...document.querySelectorAll("[data-sasha-text-content] span")].map((run) => getComputedStyle(run).fontSize)`);
+  return await withPage({ address: options.address, scheme: "light", reducedMotion: true, viewport: EXPORT_PAGE_SIZE }, async (tab) => {
+    await tab.waitFor(`document.documentElement.getAttribute(${JSON.stringify(options.readyAttribute)}) === "true"`, 8000);
+    await tab.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
+    await tab.screenshot(options.path);
+    const sizes = await tab.evaluate(`[...document.querySelectorAll("[data-sasha-text-content] span")].map((run) => getComputedStyle(run).fontSize)`);
     return Array.isArray(sizes) ? sizes.map(String) : [];
   });
 }

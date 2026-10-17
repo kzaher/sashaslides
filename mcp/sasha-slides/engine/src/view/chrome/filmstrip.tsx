@@ -16,7 +16,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragE
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { CommentThread } from "../../contracts/discussion.ts";
 import type { DocumentSnapshot, SlideSnapshot } from "../../contracts/document.ts";
-import type { Gesture } from "../../contracts/editor-state.ts";
+import { slideDragOf } from "../../contracts/editor-state.ts";
 import type { SlideId } from "../../contracts/ids.ts";
 import type { PeerPresence } from "../../contracts/presence.ts";
 import type { Selection } from "../../contracts/selection.ts";
@@ -62,7 +62,7 @@ export const Filmstrip = memo(function Filmstrip(): ReactElement {
       document: state.document,
       currentSlideId: state.currentSlideId,
       selection: state.selection,
-      dragging: draggingSlides(state.gesture),
+      dragging: slideDragOf(state.gesture),
       peers: state.peers,
       discussion: state.discussion,
       editing: editingRefusal(state),
@@ -252,27 +252,6 @@ function selectedSlides(options: Readonly<{ selection: Selection; currentSlideId
       return options.currentSlideId === null ? [] : [options.currentSlideId];
     default:
       return assertNever(selection);
-  }
-}
-
-function draggingSlides(gesture: Gesture): Readonly<{ dropAfter: SlideId | null }> | null {
-  switch (gesture.kind) {
-    case "draggingSlides":
-      return gesture;
-    case "idle":
-    case "pressed":
-    case "moving":
-    case "resizing":
-    case "rotating":
-    case "movingLineEnd":
-    case "marquee":
-    case "creating":
-    case "resizingTableLine":
-    case "drawingMarking":
-    case "panning":
-      return null;
-    default:
-      return assertNever(gesture);
   }
 }
 

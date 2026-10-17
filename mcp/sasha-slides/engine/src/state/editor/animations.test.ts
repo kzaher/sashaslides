@@ -25,6 +25,7 @@ import {
   type TransitionScriptRecord,
 } from "../../contracts/index.ts";
 import { createEditorHarness } from "../testing/editor-harness.ts";
+import { requireParsed } from "../../contracts/testing/snapshot-builders.ts";
 import { animationStep, editorStateFor, elementId, group, ME, shape, slide, slideId, testDocument } from "../testing/document-fixtures.ts";
 import { NOTHING_TO_ANIMATE_MESSAGE } from "./animations.ts";
 import { reduceEditor } from "./reduce-editor.ts";
@@ -346,7 +347,5 @@ describe("a new script takes the purpose it was opened for", () => {
 });
 
 function scriptId(text: string): TransitionScriptRecord["id"] {
-  const parsed = parseTransitionScriptId(text);
-  if (parsed === null) throw new Error(`Not a script id: ${text}`);
-  return parsed;
+  return requireParsed(parseTransitionScriptId, text);
 }

@@ -17,8 +17,8 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Client } from "chrome-remote-interface";
-import { evaluate, screenshot, waitFor, withPage } from "./editor-session.ts";
+import type { Tab } from "../shared/chrome-session.ts";
+import { withPage } from "./editor-session.ts";
 
 const DEMO_ADDRESS = "http://127.0.0.1:8790/";
 const STYLES_SLIDE_INDEX = 2;
@@ -29,7 +29,7 @@ await mkdir(output, { recursive: true });
 
 const report: Record<string, unknown>[] = [];
 for (const scheme of ["light", "dark"] as const) {
-  report.push(await withPage({ address: DEMO_ADDRESS, scheme, reducedMotion: false }, (client) => photographScheme({ client, scheme })));
+  report.push(await withPage({ address: DEMO_ADDRESS, scheme, reducedMotion: false }, (tab) => photographScheme({ tab, scheme })));
 }
 console.log(JSON.stringify(report, null, 2));
 const problems = report.flatMap((entry) => (Array.isArray(entry["problems"]) ? entry["problems"].map(String) : []));
@@ -38,37 +38,36 @@ if (problems.length > 0) {
   process.exitCode = 1;
 }
 
-async function photographScheme(options: Readonly<{ client: Client; scheme: "light" | "dark" }>): Promise<Record<string, unknown>> {
-  const { client, scheme } = options;
+async function photographScheme(options: Readonly<{ tab: Tab; scheme: "light" | "dark" }>): Promise<Record<string, unknown>> {
+  const { tab, scheme } = options;
   const problems: string[] = [];
-  await waitFor(client, `document.querySelectorAll("[data-sasha-thumbnail]").length > ${STYLES_SLIDE_INDEX + 1}`, 8000);
-  await evaluate(client, `Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, 2000))]).then(() => true)`);
-  const thumbnails = (await evaluate(client, `[...document.querySelectorAll("[data-sasha-thumbnail]")].map((thumbnail) => thumbnail.getAttribute("data-sasha-thumbnail"))`)) as readonly string[];
+  await tab.waitFor(`document.querySelectorAll("[data-sasha-thumbnail]").length > ${STYLES_SLIDE_INDEX + 1}`, 8000);
+  await tab.evaluate(`Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, 2000))]).then(() => true)`);
+  const thumbnails = (await tab.evaluate(`[...document.querySelectorAll("[data-sasha-thumbnail]")].map((thumbnail) => thumbnail.getAttribute("data-sasha-thumbnail"))`)) as readonly string[];
   const stylesSlide = thumbnails[STYLES_SLIDE_INDEX] ?? "";
   const nextSlide = thumbnails[STYLES_SLIDE_INDEX + 1] ?? "";
 
   // The next slide gets a slow Push, so the show can be photographed mid-transition.
-  await clickAt({ client, selector: `[data-sasha-thumbnail="${nextSlide}"]` });
-  await waitFor(client, `document.querySelector('[data-sasha-slide-id="${nextSlide}"]') !== null`);
-  await clickText({ client, selector: `[role="tab"]`, text: "Transition" });
-  await chooseOption({ client, label: "Transition", value: "push" });
-  await waitFor(client, `document.querySelector('input[aria-label="Duration"]') !== null`);
-  await typeNumber({ client, label: "Duration", value: PUSH_MILLISECONDS });
+  await clickAt({ tab, selector: `[data-sasha-thumbnail="${nextSlide}"]` });
+  await tab.waitFor(`document.querySelector('[data-sasha-slide-id="${nextSlide}"]') !== null`, 4000);
+  await clickText({ tab, selector: `[role="tab"]`, text: "Transition" });
+  await chooseOption({ tab, label: "Transition", value: "push" });
+  await tab.waitFor(`document.querySelector('input[aria-label="Duration"]') !== null`, 4000);
+  await typeNumber({ tab, label: "Duration", value: PUSH_MILLISECONDS });
 
   // The Styles slide: a gradient background, then the rounded gradient rectangle selected and bordered.
-  await clickAt({ client, selector: `[data-sasha-thumbnail="${stylesSlide}"]` });
-  await waitFor(client, `document.querySelector('[data-sasha-slide-id="${stylesSlide}"]') !== null`);
-  await clickText({ client, selector: `[role="tab"]`, text: "Slide" });
-  await clickText({ client, selector: `[role="radiogroup"][aria-label="Fill kind"] [role="radio"]`, text: "Linear" });
-  await clickAt({ client, selector: `[data-sasha-element-id]`, containingText: "Gradient, corners, shadow" });
-  await waitFor(client, `document.querySelectorAll("[data-sasha-handle]").length > 0`);
-  await clickText({ client, selector: `[role="tab"]`, text: "Border" });
-  await clickText({ client, selector: `[role="radiogroup"][aria-label="Border kind"] [role="radio"]`, text: "All sides" });
-  await settleFrames(client);
+  await clickAt({ tab, selector: `[data-sasha-thumbnail="${stylesSlide}"]` });
+  await tab.waitFor(`document.querySelector('[data-sasha-slide-id="${stylesSlide}"]') !== null`, 4000);
+  await clickText({ tab, selector: `[role="tab"]`, text: "Slide" });
+  await clickText({ tab, selector: `[role="radiogroup"][aria-label="Fill kind"] [role="radio"]`, text: "Linear" });
+  await clickAt({ tab, selector: `[data-sasha-element-id]`, containingText: "Gradient, corners, shadow" });
+  await tab.waitFor(`document.querySelectorAll("[data-sasha-handle]").length > 0`, 4000);
+  await clickText({ tab, selector: `[role="tab"]`, text: "Border" });
+  await clickText({ tab, selector: `[role="radiogroup"][aria-label="Border kind"] [role="radio"]`, text: "All sides" });
+  await settleFrames(tab);
   const editorShot = join(output, `demo-editor-${scheme}.png`);
-  await screenshot(client, editorShot);
-  const facts = (await evaluate(
-    client,
+  await tab.screenshot(editorShot);
+  const facts = (await tab.evaluate(
     `(() => {
       const slide = document.querySelector('.sasha-view-canvas-stage [data-sasha-slide-id]');
       const selected = [...document.querySelectorAll('[data-sasha-element-id]')].find((element) => element.textContent.includes("Gradient, corners, shadow"));
@@ -89,25 +88,23 @@ async function photographScheme(options: Readonly<{ client: Client; scheme: "lig
   if (Number(facts["blurredChrome"]) > 0) problems.push(`${scheme}: chrome with a backdrop filter`);
 
   // Present (a trusted click, so full screen is allowed), then the right arrow, then the shot mid-Push.
-  await clickText({ client, selector: `button.sasha-pill-primary`, text: "Present", trusted: true });
-  await waitFor(client, `document.querySelector('[data-screen="slide"][data-slide-id="${stylesSlide}"]') !== null`, 6000);
-  await settleFrames(client);
-  await client.Input.dispatchKeyEvent({ type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
-  await client.Input.dispatchKeyEvent({ type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
-  await waitFor(client, `document.querySelector('[data-screen="transition"]') !== null`, 3000);
-  await evaluate(client, `new Promise((resolve) => setTimeout(() => resolve(true), ${PUSH_MILLISECONDS / 2}))`);
+  await clickText({ tab, selector: `button.sasha-pill-primary`, text: "Present", trusted: true });
+  await tab.waitFor(`document.querySelector('[data-screen="slide"][data-slide-id="${stylesSlide}"]') !== null`, 6000);
+  await settleFrames(tab);
+  await tab.press({ key: "ArrowRight", code: "ArrowRight", keyCode: 39 });
+  await tab.waitFor(`document.querySelector('[data-screen="transition"]') !== null`, 3000);
+  await tab.evaluate(`new Promise((resolve) => setTimeout(() => resolve(true), ${PUSH_MILLISECONDS / 2}))`);
   const presenterShot = join(output, `demo-presenter-mid-transition-${scheme}.png`);
-  await screenshot(client, presenterShot);
-  const midScreen = await evaluate(client, `document.querySelector("[data-screen]")?.getAttribute("data-screen") ?? ""`);
+  await tab.screenshot(presenterShot);
+  const midScreen = await tab.evaluate(`document.querySelector("[data-screen]")?.getAttribute("data-screen") ?? ""`);
   if (midScreen !== "transition") problems.push(`${scheme}: the presenter shot was taken on "${String(midScreen)}", not mid-transition`);
-  await waitFor(client, `document.querySelector('[data-screen="slide"][data-slide-id="${nextSlide}"]') !== null`, PUSH_MILLISECONDS + 3000);
+  await tab.waitFor(`document.querySelector('[data-screen="slide"][data-slide-id="${nextSlide}"]') !== null`, PUSH_MILLISECONDS + 3000);
   return { scheme, editorShot, presenterShot, facts, midScreen, problems };
 }
 
 /** A trusted mouse click at the centre of the first element matching `selector` (and containing `containingText`). */
-async function clickAt(options: Readonly<{ client: Client; selector: string; containingText?: string }>): Promise<void> {
-  const centre = (await evaluate(
-    options.client,
+async function clickAt(options: Readonly<{ tab: Tab; selector: string; containingText?: string }>): Promise<void> {
+  const centre = (await options.tab.evaluate(
     `(() => {
       const candidates = [...document.querySelectorAll(${JSON.stringify(options.selector)})];
       const element = ${options.containingText === undefined ? "candidates[0]" : `candidates.filter((candidate) => candidate.textContent.includes(${JSON.stringify(options.containingText)})).at(-1)`};
@@ -118,30 +115,26 @@ async function clickAt(options: Readonly<{ client: Client; selector: string; con
     })()`,
   )) as Readonly<{ x: number; y: number }> | null;
   if (centre === null) throw new Error(`Nothing to click: ${options.selector} ${options.containingText ?? ""}`);
-  await options.client.Input.dispatchMouseEvent({ type: "mouseMoved", x: centre.x, y: centre.y });
-  await options.client.Input.dispatchMouseEvent({ type: "mousePressed", x: centre.x, y: centre.y, button: "left", clickCount: 1 });
-  await options.client.Input.dispatchMouseEvent({ type: "mouseReleased", x: centre.x, y: centre.y, button: "left", clickCount: 1 });
+  await options.tab.click({ x: centre.x, y: centre.y });
 }
 
 /** Clicks the element matching `selector` whose text is `text`: through the DOM, or as a trusted click. */
-async function clickText(options: Readonly<{ client: Client; selector: string; text: string; trusted?: boolean }>): Promise<void> {
+async function clickText(options: Readonly<{ tab: Tab; selector: string; text: string; trusted?: boolean }>): Promise<void> {
   const finder = `[...document.querySelectorAll(${JSON.stringify(options.selector)})].find((element) => element.textContent.trim() === ${JSON.stringify(options.text)})`;
-  await waitFor(options.client, `${finder} !== undefined`);
+  await options.tab.waitFor(`${finder} !== undefined`, 4000);
   if (options.trusted === true) {
-    const box = (await evaluate(options.client, `(() => { const box = ${finder}.getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()`)) as Readonly<{ x: number; y: number }>;
-    await options.client.Input.dispatchMouseEvent({ type: "mousePressed", x: box.x, y: box.y, button: "left", clickCount: 1 });
-    await options.client.Input.dispatchMouseEvent({ type: "mouseReleased", x: box.x, y: box.y, button: "left", clickCount: 1 });
+    const box = (await options.tab.evaluate(`(() => { const box = ${finder}.getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()`)) as Readonly<{ x: number; y: number }>;
+    await options.tab.click({ x: box.x, y: box.y });
     return;
   }
-  await evaluate(options.client, `(${finder}).click(), true`);
+  await options.tab.evaluate(`(${finder}).click(), true`);
 }
 
 /** Chooses `value` in the select labelled `label`, as React sees a person's choice. */
-async function chooseOption(options: Readonly<{ client: Client; label: string; value: string }>): Promise<void> {
+async function chooseOption(options: Readonly<{ tab: Tab; label: string; value: string }>): Promise<void> {
   const select = `document.querySelector('select[aria-label=${JSON.stringify(options.label)}]')`;
-  await waitFor(options.client, `${select} !== null`);
-  await evaluate(
-    options.client,
+  await options.tab.waitFor(`${select} !== null`, 4000);
+  await options.tab.evaluate(
     `(() => {
       const select = ${select};
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(select, ${JSON.stringify(options.value)});
@@ -152,14 +145,13 @@ async function chooseOption(options: Readonly<{ client: Client; label: string; v
 }
 
 /** Types `value` into the number field labelled `label` and commits it with Enter. */
-async function typeNumber(options: Readonly<{ client: Client; label: string; value: number }>): Promise<void> {
-  await evaluate(options.client, `(() => { const input = document.querySelector('input[aria-label=${JSON.stringify(options.label)}]'); input.focus(); input.select(); return true; })()`);
-  await options.client.Input.insertText({ text: String(options.value) });
-  await options.client.Input.dispatchKeyEvent({ type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-  await options.client.Input.dispatchKeyEvent({ type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+async function typeNumber(options: Readonly<{ tab: Tab; label: string; value: number }>): Promise<void> {
+  await options.tab.evaluate(`(() => { const input = document.querySelector('input[aria-label=${JSON.stringify(options.label)}]'); input.focus(); input.select(); return true; })()`);
+  await options.tab.insertText(String(options.value));
+  await options.tab.press({ key: "Enter", code: "Enter", keyCode: 13 });
 }
 
 /** Two animation frames, so the last state change is painted before a shot. */
-async function settleFrames(client: Client): Promise<void> {
-  await evaluate(client, `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
+async function settleFrames(tab: Tab): Promise<void> {
+  await tab.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
 }

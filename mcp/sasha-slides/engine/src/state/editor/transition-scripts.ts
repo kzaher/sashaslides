@@ -6,7 +6,7 @@
 // save approves the text it saved; "Approve" approves an agent's or a pasted script's exact
 // fingerprint.
 
-import { assertNever, type EditorState, type ScriptPurpose, type SlideId, type TransitionScriptDraft, type TransitionScriptId } from "../../contracts/index.ts";
+import { scriptEditorOf, type EditorState, type ScriptPurpose, type SlideId, type TransitionScriptDraft, type TransitionScriptId } from "../../contracts/index.ts";
 import { queueCommands } from "./editor-queue.ts";
 import { createIdMinter } from "./id-minter.ts";
 
@@ -111,21 +111,7 @@ export function previewTransition(state: EditorState, slideId: SlideId): EditorS
 type ScriptEditorState = Extract<EditorState["chrome"]["dialog"], { kind: "transitionScriptEditor" }>["editor"];
 
 function currentEditor(state: EditorState): ScriptEditorState | null {
-  const dialog = state.chrome.dialog;
-  switch (dialog.kind) {
-    case "transitionScriptEditor":
-      return dialog.editor;
-    case "none":
-    case "insertImage":
-    case "insertTable":
-    case "linkEditor":
-    case "keyboardShortcuts":
-    case "renameDeck":
-    case "newSlideFromLayout":
-      return null;
-    default:
-      return assertNever(dialog);
-  }
+  return scriptEditorOf(state.chrome.dialog)?.editor ?? null;
 }
 
 function withEditor(state: EditorState, editor: ScriptEditorState): EditorState {

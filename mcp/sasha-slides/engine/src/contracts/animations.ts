@@ -326,9 +326,16 @@ function finishedSegment(open: OpenSegment): BuildSegment {
 }
 
 function hostOf(effect: AnimationEffect): "inPage" | "sandbox" {
+  return scriptedEffectOf(effect) === null ? "inPage" : "sandbox";
+}
+
+export type ScriptedAnimationEffect = Extract<AnimationEffect, { kind: "scripted" }>;
+
+/** The effect when it is a script from the deck's store, else null: the one place a new effect kind decides that. */
+export function scriptedEffectOf(effect: AnimationEffect): ScriptedAnimationEffect | null {
   switch (effect.kind) {
     case "scripted":
-      return "sandbox";
+      return effect;
     case "appear":
     case "fadeIn":
     case "flyIn":
@@ -344,7 +351,7 @@ function hostOf(effect: AnimationEffect): "inPage" | "sandbox" {
     case "flyOut":
     case "zoomOut":
     case "motionPath":
-      return "inPage";
+      return null;
     default:
       return assertNever(effect);
   }

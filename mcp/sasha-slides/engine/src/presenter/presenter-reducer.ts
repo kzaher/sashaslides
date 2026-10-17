@@ -66,7 +66,7 @@ import {
 import { BUILD_SUBSTITUTION_MESSAGES, resolveBuildSegment } from "./builds/build-resolution.ts";
 import { clampBuild, finalBuildOf, slideBuildSegments } from "./builds/build-states.ts";
 import { presenterKeyIntent, type PresenterKeyIntent } from "./navigation-keys.ts";
-import { hostRunnerId, isBlankScreen, phaseDeadline, playlistUsesSandbox, slotRunnerId } from "./presenter-queries.ts";
+import { hostRunnerId, isBlankScreen, phaseDeadline, playlistUsesSandbox, scriptedTransitionOf, slotRunnerId } from "./presenter-queries.ts";
 import {
   CONTROLS_HIDE_AFTER_MILLISECONDS,
   MAXIMUM_DIAGNOSTICS,
@@ -614,16 +614,7 @@ function placeRun(
   options: Readonly<{ state: PresenterSystemState; transition: ResolvedTransition }>,
 ): Readonly<{ state: PresenterSystemState; host: TransitionRunHost; phase: TransitionRunPhase }> {
   const state = options.state;
-  switch (options.transition.kind) {
-    case "builtin":
-    case "substitutedFade":
-    case "build":
-      return { state, host: { kind: "inPage" }, phase: "running" };
-    case "scripted":
-      break;
-    default:
-      return assertNever(options.transition);
-  }
+  if (scriptedTransitionOf(options.transition) === null) return { state, host: { kind: "inPage" }, phase: "running" };
   const spare = state.spareRunner;
   switch (spare.kind) {
     case "ready":

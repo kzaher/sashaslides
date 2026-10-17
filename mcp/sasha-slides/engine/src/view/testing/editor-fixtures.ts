@@ -15,6 +15,7 @@ import { STANDALONE_EDITOR_HOST, type ArrangeThreads, type BrowserCapabilities, 
 import { parsePersonId, type AssetId } from "../../contracts/ids.ts";
 import type { PresenterDependencies } from "../../contracts/presenter.ts";
 import type { LoggedEvent, RunningSystem } from "../../contracts/rxfeedback.ts";
+import { requireParsed } from "../../contracts/testing/snapshot-builders.ts";
 import type { EditorServices } from "../application/editor-services.tsx";
 
 export const FIXTURE_PERSON: Person = { id: personId("person_ada"), displayName: "Ada Lovelace", colourIndex: 0, kind: "person" };
@@ -188,7 +189,5 @@ function inertPresenterDependencies(): PresenterDependencies {
 }
 
 function personId(text: string): Person["id"] {
-  const parsed = parsePersonId(text);
-  if (parsed === null) throw new Error(`Not a person id: ${text}`);
-  return parsed;
+  return requireParsed(parsePersonId, text);
 }

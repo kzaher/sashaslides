@@ -12,7 +12,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, normalize } from "node:path";
+import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import { asyncScheduler } from "rxjs";
 import * as decoding from "lib0/decoding";
@@ -28,6 +28,7 @@ import type { DiscussionLogEntry, Person } from "../../src/contracts/discussion.
 import type { DocumentStore } from "../../src/contracts/document-store.ts";
 import { mintId, parseDeckId, parsePersonId, type DeckId } from "../../src/contracts/ids.ts";
 import { createDocumentStore } from "../../src/model/index.ts";
+import { sendFile, type HeadersOf } from "../../serve-directory.ts";
 import { acceptWebSocket, offeredProtocolsOf, type ServerSocket } from "./minimal-websocket.ts";
 
 export type FakeDeckSite = AsyncDisposable &
@@ -158,10 +159,11 @@ export async function startFakeDeckSite(options: Readonly<{ port: number; webDir
     const method = request.method ?? "GET";
     const account = accountOf(request);
 
-    if (path === "/decks" || path === "/decks/") return sendFile({ response, file: join(options.webDirectory, manifest.listPage), policy: manifest.contentSecurityPolicy });
-    if (path.startsWith("/deck/")) return sendFile({ response, file: join(options.webDirectory, manifest.deckPage), policy: requestAddress.searchParams.get("embed") === "addon" ? manifest.embeddedContentSecurityPolicy : manifest.contentSecurityPolicy });
-    if (path.startsWith("/deck-app/runner/")) return sendFile({ response, file: safeJoin(join(options.webDirectory, "runner"), path.slice("/deck-app/runner/".length)), policy: manifest.runnerContentSecurityPolicy });
-    if (path.startsWith("/deck-app/")) return sendFile({ response, file: safeJoin(join(options.webDirectory, "assets"), path.slice("/deck-app/".length)), policy: null });
+    const policy = (value: string): HeadersOf => () => ({ "content-security-policy": value });
+    if (path === "/decks" || path === "/decks/") return sendFile({ response, directory: options.webDirectory, path: manifest.listPage, headers: policy(manifest.contentSecurityPolicy) });
+    if (path.startsWith("/deck/")) return sendFile({ response, directory: options.webDirectory, path: manifest.deckPage, headers: policy(requestAddress.searchParams.get("embed") === "addon" ? manifest.embeddedContentSecurityPolicy : manifest.contentSecurityPolicy) });
+    if (path.startsWith("/deck-app/runner/")) return sendFile({ response, directory: join(options.webDirectory, "runner"), path: path.slice("/deck-app/runner/".length), headers: policy(manifest.runnerContentSecurityPolicy) });
+    if (path.startsWith("/deck-app/")) return sendFile({ response, directory: join(options.webDirectory, "assets"), path: path.slice("/deck-app/".length) });
     if (path === "/account/deck-session" && method === "GET") return sendSignIn({ response, returnPath: requestAddress.searchParams.get("return") ?? "/decks" });
     if (path === "/account/deck-session/sign-in" && method === "POST") return signIn({ request, response });
     if (path === "/account") return sendText({ response, status: 200, text: "The account page (not part of the fake)." });
@@ -424,20 +426,6 @@ function readBody(request: IncomingMessage): Promise<Buffer> {
   });
 }
 
-function safeJoin(directory: string, file: string): string {
-  return join(directory, normalize(decodeURIComponent(file)).replace(/^(\.\.[/\\])+/, ""));
-}
-
-async function sendFile(options: Readonly<{ response: ServerResponse; file: string; policy: string | null }>): Promise<void> {
-  try {
-    const bytes = await readFile(options.file);
-    options.response.writeHead(200, { "Content-Type": CONTENT_TYPES[extname(options.file)] ?? "application/octet-stream", "Cache-Control": "no-store", ...(options.policy === null ? {} : { "Content-Security-Policy": options.policy }) });
-    options.response.end(bytes);
-  } catch {
-    sendText({ response: options.response, status: 404, text: "Not found" });
-  }
-}
-
 function sendSignIn(options: Readonly<{ response: ServerResponse; returnPath: string }>): void {
   options.response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
   options.response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Sign in (test identity provider)</title></head>
@@ -460,11 +448,3 @@ function sendText(options: Readonly<{ response: ServerResponse; status: number; 
   options.response.writeHead(options.status, { "Content-Type": "text/plain; charset=utf-8" });
   options.response.end(options.text);
 }
-
-const CONTENT_TYPES: Readonly<Record<string, string>> = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".map": "application/json",
-  ".svg": "image/svg+xml",
-};

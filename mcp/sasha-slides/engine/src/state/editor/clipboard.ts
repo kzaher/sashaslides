@@ -21,6 +21,8 @@
 import {
   assertNever,
   plainText,
+  scriptedEffectOf,
+  scriptedSlideTransitionOf,
   type AnimationEffect,
   type AssetRecord,
   type ClipboardContent,
@@ -227,44 +229,15 @@ function withScriptRenamed(slide: SlideSnapshot, renamed: ReadonlyMap<Transition
 }
 
 function transitionWithScriptRenamed(transition: SlideTransition | null, renamed: ReadonlyMap<TransitionScriptId, TransitionScriptId>): SlideTransition | null {
-  if (transition === null) return null;
-  switch (transition.kind) {
-    case "builtin":
-      return transition;
-    case "scripted": {
-      const scriptId = renamed.get(transition.scriptId);
-      return scriptId === undefined ? transition : { ...transition, scriptId };
-    }
-    default:
-      return assertNever(transition);
-  }
+  const scripted = scriptedSlideTransitionOf(transition);
+  const scriptId = scripted === null ? undefined : renamed.get(scripted.scriptId);
+  return scripted === null || scriptId === undefined ? transition : { ...scripted, scriptId };
 }
 
 function effectWithScriptRenamed(effect: AnimationEffect, renamed: ReadonlyMap<TransitionScriptId, TransitionScriptId>): AnimationEffect {
-  switch (effect.kind) {
-    case "scripted": {
-      const scriptId = renamed.get(effect.scriptId);
-      return scriptId === undefined ? effect : { ...effect, scriptId };
-    }
-    case "appear":
-    case "fadeIn":
-    case "flyIn":
-    case "zoomIn":
-    case "floatIn":
-    case "wipe":
-    case "pulse":
-    case "growShrink":
-    case "spin":
-    case "colourChange":
-    case "disappear":
-    case "fadeOut":
-    case "flyOut":
-    case "zoomOut":
-    case "motionPath":
-      return effect;
-    default:
-      return assertNever(effect);
-  }
+  const scripted = scriptedEffectOf(effect);
+  const scriptId = scripted === null ? undefined : renamed.get(scripted.scriptId);
+  return scripted === null || scriptId === undefined ? effect : { ...scripted, scriptId };
 }
 
 /** The cascade after this paste: one step further when the same payload lands on the same slide again. */
@@ -308,48 +281,15 @@ function scriptsUsedBy(state: EditorState, slides: readonly SlideSnapshot[]): re
   const used = new Set<TransitionScriptId>();
   for (const slide of slides) {
     for (const step of slide.animations) {
-      const scriptId = scriptIdOfEffect(step.effect);
-      if (scriptId !== null) used.add(scriptId);
+      const scripted = scriptedEffectOf(step.effect);
+      if (scripted !== null) used.add(scripted.scriptId);
     }
-    const transition = slide.transition;
-    if (transition === null) continue;
-    switch (transition.kind) {
-      case "scripted":
-        used.add(transition.scriptId);
-        break;
-      case "builtin":
-        break;
-      default:
-        assertNever(transition);
-    }
+    const transition = scriptedSlideTransitionOf(slide.transition);
+    if (transition !== null) used.add(transition.scriptId);
   }
   return state.document.transitionScripts.filter((script) => used.has(script.id));
 }
 
-function scriptIdOfEffect(effect: AnimationEffect): TransitionScriptId | null {
-  switch (effect.kind) {
-    case "scripted":
-      return effect.scriptId;
-    case "appear":
-    case "fadeIn":
-    case "flyIn":
-    case "zoomIn":
-    case "floatIn":
-    case "wipe":
-    case "pulse":
-    case "growShrink":
-    case "spin":
-    case "colourChange":
-    case "disappear":
-    case "fadeOut":
-    case "flyOut":
-    case "zoomOut":
-    case "motionPath":
-      return null;
-    default:
-      return assertNever(effect);
-  }
-}
 
 function plainTextOfElements(elements: readonly ElementSnapshot[], slideNumber: number | null): string {
   return elements

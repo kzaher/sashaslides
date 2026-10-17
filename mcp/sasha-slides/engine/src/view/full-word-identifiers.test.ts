@@ -33,15 +33,6 @@ const DICTATED_IN_FILE: Readonly<Record<string, readonly string[]>> = {
   "export/slide-html.ts": ["renderSlideHtml"],
 };
 
-/**
- * Files this module does not own, whose names its owner must still change. The presenter is frozen
- * for milestone 2 (SPEC.md 21.17); the architect clears this entry with the presenter's next
- * change. The test also fails when an entry no longer occurs, so the list can only shrink.
- */
-const KNOWN_ELSEWHERE: Readonly<Record<string, readonly string[]>> = {
-  "presenter/testing/demo-renderer.tsx": ["cornerRadiusCss", "fillCss", "colourCss"],
-};
-
 type Finding = Readonly<{ file: string; line: number; name: string }>;
 
 describe("the identifier scanner", () => {
@@ -72,15 +63,9 @@ describe("full-word identifiers in src/", () => {
   const sourceRoot = fileURLToPath(new URL("..", import.meta.url));
   const findings = sourceFiles(sourceRoot).flatMap((file) => forbiddenDeclarations({ file: relative(sourceRoot, file), text: readFileSync(file, "utf8") }));
 
-  it("no declared name contains an abbreviation as a word, outside the known list", () => {
-    const unexpected = findings.filter((finding) => !(KNOWN_ELSEWHERE[finding.file] ?? []).includes(finding.name) && !(DICTATED_IN_FILE[finding.file] ?? []).includes(finding.name));
+  it("no declared name contains an abbreviation as a word", () => {
+    const unexpected = findings.filter((finding) => !(DICTATED_IN_FILE[finding.file] ?? []).includes(finding.name));
     assert.deepEqual(unexpected.map((finding) => `${finding.file}:${finding.line} ${finding.name}`), []);
-  });
-
-  it("every entry of the known list still occurs (fixed names leave the list)", () => {
-    for (const [file, names] of Object.entries(KNOWN_ELSEWHERE)) {
-      for (const name of names) assert.ok(findings.some((finding) => finding.file === file && finding.name === name), `${file} no longer declares ${name}: remove it from KNOWN_ELSEWHERE`);
-    }
   });
 });
 

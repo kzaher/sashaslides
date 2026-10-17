@@ -25,7 +25,8 @@ import { tidepoolStylesheet } from "../../theme/tidepool-stylesheet.ts";
 import { TIDEPOOL_TOKENS } from "../../theme/tidepool-theme.ts";
 import { INK_WIPE_EXAMPLE_SCRIPT } from "./ink-wipe.ts";
 import { Presentation, TransitionPreview } from "../index.ts";
-import { demoRenderSlideMarkup, DemoStaticSlide } from "./demo-renderer.tsx";
+import { renderSlideMarkup } from "../../view/render/slide-markup.tsx";
+import { StaticSlide } from "../../view/render/static-slide.tsx";
 import { builtinTransition, fixtureDocument, scriptedTransition, slideIdOf, type FixtureElement } from "./document-fixture.ts";
 import { testRxFeedbackToolkit } from "./rxfeedback-toolkit.ts";
 
@@ -83,8 +84,8 @@ function presentationOf(options: Readonly<{ document: DocumentSnapshot; start: s
 function dependencies(): PresenterDependencies {
   return {
     rxFeedback: testRxFeedbackToolkit,
-    StaticSlide: DemoStaticSlide,
-    renderSlideMarkup: demoRenderSlideMarkup,
+    StaticSlide,
+    renderSlideMarkup,
     assetStore: NO_ASSETS,
     fontFiles: () => Promise.resolve([]),
     runnerAddress,

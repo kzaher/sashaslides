@@ -18,7 +18,6 @@
 //    a scripted transition out of a built slide starts from what the audience saw, and a scripted
 //    build step animates from the slide before it to the slide after it.
 
-import { assertNever } from "../../contracts/assert-never.ts";
 import type { AssetStore } from "../../contracts/document-store.ts";
 import { scriptFingerprint, type DocumentSnapshot } from "../../contracts/document.ts";
 import type { AssetId } from "../../contracts/ids.ts";
@@ -32,6 +31,7 @@ import {
   type TransitionFallbackReason,
 } from "../../contracts/transition-protocol.ts";
 import { slideOnSide } from "../builds/run-slides.ts";
+import { scriptedTransitionOf } from "../presenter-queries.ts";
 import { deckSlideNumber } from "../presenter-state.ts";
 
 export type PrepareMessage = Extract<HostToRunnerMessage, Readonly<{ kind: "prepare" }>>;
@@ -50,17 +50,8 @@ export async function gatherPrepare(
     fontFiles: PresenterDependencies["fontFiles"];
   }>,
 ): Promise<PrepareOutcome> {
-  const transition = options.run.transition;
-  switch (transition.kind) {
-    case "scripted":
-      break;
-    case "builtin":
-    case "substitutedFade":
-    case "build":
-      return fallBack("protocolViolation", "Only scripted transitions are prepared in the runner.");
-    default:
-      return assertNever(transition);
-  }
+  const transition = scriptedTransitionOf(options.run.transition);
+  if (transition === null) return fallBack("protocolViolation", "Only scripted transitions are prepared in the runner.");
   const record = options.document.transitionScripts.find((script) => script.id === transition.scriptId);
   if (record === undefined) return fallBack("scriptFailed", "The transition script was removed before it could run.");
   if (scriptFingerprint(record) !== transition.fingerprint) return fallBack("scriptFailed", "The transition script changed after it was approved; it was not run.");

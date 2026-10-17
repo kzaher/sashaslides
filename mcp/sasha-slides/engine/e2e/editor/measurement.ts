@@ -9,16 +9,17 @@
 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildHarness, evaluate, serveDirectory, settle, waitFor, withPage } from "./editor-session.ts";
+import { serveDirectory } from "../../serve-directory.ts";
+import { buildHarness, settle, withPage } from "./editor-session.ts";
 
 const bundle = join(tmpdir(), "sasha-editor-harness");
 await buildHarness(bundle);
-await using server = await serveDirectory(bundle);
+await using server = await serveDirectory({ directory: bundle, host: "127.0.0.1" });
 
-const measured = await withPage({ address: `${server.address}?scenario=measure`, scheme: "light", reducedMotion: true }, async (client) => {
-  await settle(client);
-  await waitFor(client, `window.sashaHarness.dispatched.filter((event) => event.kind === "layoutMeasured").length >= 2`);
-  return evaluate(client, `(() => {
+const measured = await withPage({ address: `${server.address}?scenario=measure`, scheme: "light", reducedMotion: true }, async (tab) => {
+  await settle(tab);
+  await tab.waitFor(`window.sashaHarness.dispatched.filter((event) => event.kind === "layoutMeasured").length >= 2`, 4000);
+  return tab.evaluate(`(() => {
     const state = window.sashaHarness.state();
     const slide = state.document.slides[0];
     const table = slide.elements[0];

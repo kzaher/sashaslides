@@ -23,6 +23,7 @@
 import {
   assertNever,
   queuedEditId,
+  scriptEditorOf,
   scriptFingerprint,
   textTargetKey,
   transformIndex,
@@ -238,26 +239,13 @@ function composerSurvives(state: EditorState, composer: EditorState["chrome"]["c
 
 /** The script dialog's base moves to the saved record once OUR text is what the document holds. */
 function followScriptSave(state: EditorState): EditorState["chrome"]["dialog"] {
-  const dialog = state.chrome.dialog;
-  switch (dialog.kind) {
-    case "transitionScriptEditor": {
-      const record = state.document.transitionScripts.find((script) => script.id === dialog.editor.draft.id);
-      if (record === undefined || record.updatedAt === dialog.editor.basedOnUpdatedAt) return dialog;
-      const ours = scriptFingerprint(record) === scriptFingerprint(dialog.editor.draft);
-      if (!ours) return dialog;
-      return { ...dialog, editor: { ...dialog.editor, basedOnUpdatedAt: record.updatedAt, conflict: false } };
-    }
-    case "none":
-    case "insertImage":
-    case "insertTable":
-    case "linkEditor":
-    case "keyboardShortcuts":
-    case "renameDeck":
-    case "newSlideFromLayout":
-      return dialog;
-    default:
-      return assertNever(dialog);
-  }
+  const dialog = scriptEditorOf(state.chrome.dialog);
+  if (dialog === null) return state.chrome.dialog;
+  const record = state.document.transitionScripts.find((script) => script.id === dialog.editor.draft.id);
+  if (record === undefined || record.updatedAt === dialog.editor.basedOnUpdatedAt) return dialog;
+  const ours = scriptFingerprint(record) === scriptFingerprint(dialog.editor.draft);
+  if (!ours) return dialog;
+  return { ...dialog, editor: { ...dialog.editor, basedOnUpdatedAt: record.updatedAt, conflict: false } };
 }
 
 function rejectEnvelope(state: EditorState, commandId: QueuedEditCommandId, rejection: CommandRejection): EditorState {
@@ -279,25 +267,11 @@ function rejectEnvelope(state: EditorState, commandId: QueuedEditCommandId, reje
     inFlightCommandIds: state.inFlightCommandIds.filter((inFlight) => inFlight !== commandId),
   };
   const survived: EditorState = { ...withoutEdit, selection: surviveDocument({ ...withoutEdit, selection }) };
-  const dialog = survived.chrome.dialog;
+  const dialog = scriptEditorOf(survived.chrome.dialog);
   switch (rejection.reason) {
     case "staleScript":
-      switch (dialog.kind) {
-        case "transitionScriptEditor":
-          if (dialog.editor.draft.id === rejection.scriptId) {
-            return { ...survived, chrome: { ...survived.chrome, dialog: { ...dialog, editor: { ...dialog.editor, conflict: true } } } };
-          }
-          break;
-        case "none":
-        case "insertImage":
-        case "insertTable":
-        case "linkEditor":
-        case "keyboardShortcuts":
-        case "renameDeck":
-        case "newSlideFromLayout":
-          break;
-        default:
-          assertNever(dialog);
+      if (dialog !== null && dialog.editor.draft.id === rejection.scriptId) {
+        return { ...survived, chrome: { ...survived.chrome, dialog: { ...dialog, editor: { ...dialog.editor, conflict: true } } } };
       }
       break;
     case "slideMissing":

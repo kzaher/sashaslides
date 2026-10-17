@@ -13,7 +13,6 @@ import {
   parseElementId,
   parsePersonId,
   parseSlideId,
-  PLACEHOLDER_ROLES,
   THEME_COLOUR_SLOTS,
   boundsOfBoxes,
   identityFrame,
@@ -22,7 +21,6 @@ import {
   type AnimationStep,
   type AnimationStepId,
   type AnimationTrigger,
-  type DeckId,
   type DocumentSnapshot,
   type EditorState,
   type ElementId,
@@ -33,8 +31,6 @@ import {
   type LineElement,
   type Person,
   type PlaceholderReference,
-  type PlaceholderRole,
-  type PlaceholderStyle,
   type ShapeElement,
   type ShapePreset,
   type SlideId,
@@ -45,24 +41,17 @@ import {
 } from "../../contracts/index.ts";
 import { isTextBoxPreset } from "../../shared/element-defaults.ts";
 import { initialEditorState } from "../editor/initial-editor-state.ts";
-import { lineElement, shapeElement } from "../../contracts/testing/snapshot-builders.ts";
+import { documentSnapshot, fixtureDeckId, lineElement, plainTheme, requireParsed, shapeElement, slideSnapshot } from "../../contracts/testing/snapshot-builders.ts";
 
 export function elementId(text: string): ElementId {
-  const parsed = parseElementId(text);
-  if (parsed === null) throw new Error(`Not an element id: ${text}`);
-  return parsed;
+  return requireParsed(parseElementId, text);
 }
 
 export function slideId(text: string): SlideId {
-  const parsed = parseSlideId(text);
-  if (parsed === null) throw new Error(`Not a slide id: ${text}`);
-  return parsed;
+  return requireParsed(parseSlideId, text);
 }
 
-export function deckId(text: string): DeckId {
-  // Deck ids have no parse function in the contracts; fixtures use object-id-shaped constants only.
-  return text as DeckId;
-}
+export const deckId = fixtureDeckId;
 
 export function layoutId(text: string): LayoutId {
   // Layout ids have no parse function in the contracts; minted the way the editor mints them.
@@ -72,9 +61,7 @@ export function layoutId(text: string): LayoutId {
 export const ME: Person = { id: personId("person_me"), displayName: "Me", colourIndex: 0, kind: "person" };
 
 export function personId(text: string): Person["id"] {
-  const parsed = parsePersonId(text);
-  if (parsed === null) throw new Error(`Not a person id: ${text}`);
-  return parsed;
+  return requireParsed(parsePersonId, text);
 }
 
 export function textBody(...paragraphs: readonly string[]): TextBody {
@@ -170,22 +157,11 @@ export function table(options: Readonly<{ id: string; x: number; y: number; colu
 }
 
 export function slide(options: Readonly<{ id: string; elements: readonly ElementSnapshot[]; layoutId?: LayoutId; animations?: readonly AnimationStep[] }>): SlideSnapshot {
-  return {
-    id: slideId(options.id),
-    layoutId: options.layoutId ?? null,
-    background: null,
-    skipped: false,
-    speakerNotes: EMPTY_TEXT_BODY,
-    transition: null,
-    animations: options.animations ?? [],
-    elements: options.elements,
-  };
+  return slideSnapshot({ id: slideId(options.id), elements: options.elements, layoutId: options.layoutId ?? null, animations: options.animations ?? [] });
 }
 
 export function animationStepId(text: string): AnimationStepId {
-  const parsed = parseAnimationStepId(text);
-  if (parsed === null) throw new Error(`Not an animation step id: ${text}`);
-  return parsed;
+  return requireParsed(parseAnimationStepId, text);
 }
 
 /** A build step on `elementId`: a fade in on click unless stated. */
@@ -209,18 +185,14 @@ export function layout(options: Readonly<{ id: LayoutId; elements: readonly Elem
 export function testDocument(
   options: Readonly<{ slides: readonly SlideSnapshot[]; layouts?: readonly LayoutSnapshot[]; deckId?: string; revision?: number }>,
 ): DocumentSnapshot {
-  return {
+  return documentSnapshot({
     deckId: deckId(options.deckId ?? "deck_first"),
-    schemaVersion: 1,
-    revision: options.revision ?? 1,
     title: "Fixture",
-    pageSize: { width: 1280, height: 720 },
     theme: TEST_THEME,
-    layouts: options.layouts ?? [],
     slides: options.slides,
-    assets: [],
-    transitionScripts: [],
-  };
+    layouts: options.layouts ?? [],
+    revision: options.revision ?? 1,
+  });
 }
 
 /** The editor's starting state over a document, in a 1360 x 800 canvas (scale 1: 5 client pixels = 5 units). */
@@ -242,29 +214,5 @@ function sum(values: readonly number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
 
-const EMPTY_PLACEHOLDER_STYLE: PlaceholderStyle = { run: {}, paragraph: {}, textBox: {} };
-
-const TEST_THEME: ThemeSnapshot = {
-  name: "Fixture",
-  // Object.fromEntries widens to a string-keyed record; THEME_COLOUR_SLOTS lists every slot exactly once.
-  colours: Object.fromEntries(THEME_COLOUR_SLOTS.map((slot) => [slot, "#1c2333"])) as ThemeSnapshot["colours"],
-  headingFontFamily: "Manrope",
-  bodyFontFamily: "Manrope",
-  background: { kind: "solid", colour: { kind: "literal", hexadecimal: "#ffffff", alpha: 1 } },
-  // Object.fromEntries widens to a string-keyed record; PLACEHOLDER_ROLES lists every role exactly once.
-  placeholderStyles: Object.fromEntries(PLACEHOLDER_ROLES.map((role: PlaceholderRole) => [role, EMPTY_PLACEHOLDER_STYLE])) as ThemeSnapshot["placeholderStyles"],
-  defaultRunStyle: {
-    fontFamily: "Manrope",
-    fontSize: 32,
-    fontWeight: 400,
-    fontStyle: "normal",
-    underline: false,
-    strikethrough: false,
-    colour: { kind: "literal", hexadecimal: "#1c2333", alpha: 1 },
-    highlight: { kind: "none" },
-    link: { kind: "none" },
-    baselineOffset: "none",
-    letterSpacing: 0,
-    textCase: "none",
-  },
-};
+// Object.fromEntries widens to a string-keyed record; THEME_COLOUR_SLOTS lists every slot exactly once.
+const TEST_THEME = plainTheme({ colours: Object.fromEntries(THEME_COLOUR_SLOTS.map((slot) => [slot, "#1c2333"])) as ThemeSnapshot["colours"] });

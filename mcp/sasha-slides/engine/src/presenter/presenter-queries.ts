@@ -79,14 +79,15 @@ export function playlistUsesSandbox(state: PresenterSystemState): boolean {
   });
 }
 
-export function isScripted(transition: ResolvedTransition): boolean {
+/** The transition when it runs a script in the sandbox, else null. */
+export function scriptedTransitionOf(transition: ResolvedTransition): Extract<ResolvedTransition, { kind: "scripted" }> | null {
   switch (transition.kind) {
     case "scripted":
-      return true;
+      return transition;
     case "builtin":
     case "substitutedFade":
     case "build":
-      return false;
+      return null;
     default:
       return assertNever(transition);
   }
@@ -97,7 +98,7 @@ function runsInSandbox(resolution: TransitionResolution): boolean {
     case "cut":
       return false;
     case "play":
-      return isScripted(resolution.transition);
+      return scriptedTransitionOf(resolution.transition) !== null;
     default:
       return assertNever(resolution);
   }
@@ -108,7 +109,7 @@ function buildRunsInSandbox(resolution: BuildResolution): boolean {
     case "instant":
       return false;
     case "play":
-      return isScripted(resolution.transition);
+      return scriptedTransitionOf(resolution.transition) !== null;
     default:
       return assertNever(resolution);
   }

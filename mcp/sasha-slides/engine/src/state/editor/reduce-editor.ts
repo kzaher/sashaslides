@@ -9,6 +9,7 @@
 
 import {
   assertNever,
+  dialogIsOpen,
   type EditorEvent,
   type EditorState,
   type ElementPatch,
@@ -392,7 +393,7 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
 function escape(state: EditorState): EditorState {
   if (!gestureIsIdle(state.gesture)) return cancelGesture(state);
   if (state.chrome.openMenu !== null || state.chrome.contextMenu !== null) return { ...state, chrome: { ...state.chrome, openMenu: null, contextMenu: null } };
-  if (dialogIsOpen(state)) return { ...state, chrome: { ...state.chrome, dialog: { kind: "none" } } };
+  if (dialogIsOpen(state.chrome.dialog)) return { ...state, chrome: { ...state.chrome, dialog: { kind: "none" } } };
   if (composerIsOpen(state)) return { ...state, chrome: { ...state.chrome, composer: { kind: "closed" } } };
   if (textSelectionOf(state.selection) !== null) return endTextEditing(state);
   if (state.enteredGroupId !== null) return leaveGroup(state, state.enteredGroupId);
@@ -581,23 +582,6 @@ function openInNewTabAction(state: EditorState): EditorState["notices"][number][
       return null;
     default:
       return assertNever(state.embedding);
-  }
-}
-
-function dialogIsOpen(state: EditorState): boolean {
-  switch (state.chrome.dialog.kind) {
-    case "none":
-      return false;
-    case "insertImage":
-    case "insertTable":
-    case "linkEditor":
-    case "transitionScriptEditor":
-    case "keyboardShortcuts":
-    case "renameDeck":
-    case "newSlideFromLayout":
-      return true;
-    default:
-      return assertNever(state.chrome.dialog);
   }
 }
 
