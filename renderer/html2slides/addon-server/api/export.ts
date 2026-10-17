@@ -4,13 +4,12 @@
  * POST /api/export  {presentationId, range?, excludeHidden?} → application/zip
  *   1. parse `range` ("1-5, 8, 11-13") → set of 1-based indices (blank = all)
  *   2. presentations.get → slide list (+ slideProperties.isSkipped per slide)
- *   3. for each included slide: Google's LARGE thumbnail PNG → JSZip entry
- *      slide_<NN>.png, through reverse/google-slides-source.ts (quota pacing,
- *      backoff on 429)
+ *   3. for each included slide: getThumbnail PNG → fetch bytes → JSZip entry
+ *      slide_<NN>.png
  *   4. zip.generateAsync({type:'nodebuffer'}) → application/zip attachment
  *
  * Auth: in the dev/server path we reuse the project's stored OAuth tokens
- * (dev-google-auth.ts, the loader every developer harness uses). In the
+ * (getAuth, same loader as export-thumbs-lib / convert-pptx-io). In the
  * add-on path Code.gs does the equivalent with UrlFetchApp + the user's
  * OAuth — see ./export-appsscript.gs.txt for the parallel implementation.
  *
@@ -19,9 +18,9 @@
  */
 import { get as httpsGet } from "https";
 import { get as httpGet } from "http";
+import { readFileSync, writeFileSync } from "fs";
 import { google } from "googleapis";
-import { loadDevOAuthClient } from "../../dev-google-auth.ts";
-import { createGoogleSlidesSource, developerSourceDependencies } from "../../reverse/google-slides-source.ts";
+import type { Credentials } from "google-auth-library";
 import JSZip from "jszip";
 import { registerApi } from "../registry.js";
 
@@ -74,6 +73,26 @@ export function parseRange(range: string | undefined | null): Set<number> | null
   return out;
 }
 
+// Load the project's stored OAuth (same files as convert-pptx-io.getAuth /
+// export-thumbs-lib). Kept local so api/export.ts has no import cycle back
+// into the converter pipeline. In add-on mode this is replaced by the
+// signed-in user's OAuth token (Apps Script path).
+function getAuth() {
+  const creds = JSON.parse(
+    readFileSync("/workspaces/sashaslides/.auth/google_oauth.json", "utf-8"),
+  ).installed;
+  const tokens = JSON.parse(
+    readFileSync("/workspaces/sashaslides/.auth/tokens.json", "utf-8"),
+  );
+  const oauth2 = new google.auth.OAuth2(creds.client_id, creds.client_secret, "http://localhost");
+  oauth2.setCredentials(tokens);
+  oauth2.on("tokens", (newTokens: Credentials) => {
+    const merged = { ...tokens, ...newTokens };
+    writeFileSync("/workspaces/sashaslides/.auth/tokens.json", JSON.stringify(merged, null, 2));
+  });
+  return oauth2;
+}
+
 interface ExportBody {
   presentationId?: string;
   range?: string;
@@ -107,10 +126,8 @@ registerApi("POST", "/api/export", async (req, res, _url, body) => {
       return true;
     }
 
-    // In add-on mode this is replaced by the signed-in user's OAuth token (Apps Script path).
-    const auth = loadDevOAuthClient({ persistRefreshedTokens: true });
+    const auth = getAuth();
     const slidesApi = google.slides({ version: "v1", auth });
-    const thumbnails = createGoogleSlidesSource({ ...developerSourceDependencies((line) => console.log(line)), auth });
 
     const pres = await slidesApi.presentations.get({ presentationId });
     const slides = pres.data.slides || [];
@@ -145,7 +162,16 @@ registerApi("POST", "/api/export", async (req, res, _url, body) => {
       const slideId = slide.objectId;
       if (!slideId) continue;
 
-      const buf = await thumbnails.downloadThumbnail({ presentationId, pageObjectId: slideId });
+      const thumb = await slidesApi.presentations.pages.getThumbnail({
+        presentationId,
+        pageObjectId: slideId,
+        "thumbnailProperties.mimeType": "PNG",
+        "thumbnailProperties.thumbnailSize": "LARGE",
+      });
+      const contentUrl = thumb.data.contentUrl;
+      if (!contentUrl) continue;
+      const resp = await fetch(contentUrl);
+      const buf = Buffer.from(await resp.arrayBuffer());
 
       const name = "slide_" + String(oneBased).padStart(2, "0") + ".png";
       zip.file(name, buf);
