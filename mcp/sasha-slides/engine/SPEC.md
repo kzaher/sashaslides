@@ -163,10 +163,10 @@ renderer and the state module's RxFeedback toolkit by injection; the view's appl
 composition root and wires the real implementations together. `model` is free of the page so the
 deck server and Claude's tools can run it on Node.
 
-Each module's `index.ts` exists from day one as an architect-written stub that satisfies its surface
-(`contracts/module-surfaces.ts`) and throws "not built yet"; `src/module-surfaces-check.ts` fails the
-typecheck if any module stops exporting its whole surface. So the four modules compose and typecheck
-before any of them is built.
+In milestone 1 each module's `index.ts` began as an architect-written stub that satisfied its surface
+and threw "not built yet", so the four modules composed and typechecked before any of them was built.
+With the modules built, the stubs' surface types and their compile-time check were retired: each
+caller imports what it uses, and the typecheck proves every use where it is made.
 
 ## 5. The document (Yjs)
 
@@ -552,7 +552,7 @@ fire; milestone 1 proves it with a busy-loop script. A host that cannot serve a 
 file) falls back to `srcdoc` and says so in diagnostics.
 
 **Writing a transition** (what Claude does). The repository keeps this example as a string constant
-in `src/presenter/examples/ink-wipe.ts`, because the engine ships no hand-written JavaScript files; a
+in `src/presenter/testing/ink-wipe.ts`, because the engine ships no hand-written JavaScript files; a
 script is data the runner evaluates:
 
 ```js
@@ -815,7 +815,7 @@ Plan (milestone 3):
 - `build-demo.ts` (view module): esbuild bundles `src/view/application/demo.tsx` ->
   `dist/demo/editor.js` (minified, with a source map), writes `dist/demo/index.html` and `editor.css`
   (`tidepoolStylesheet(TIDEPOOL_TOKENS)` plus the view's own rules), and calls
-  `buildPresenterAssets` from the presenter's `build-presenter.ts` (`module-surfaces.ts`), which
+  `buildPresenterAssets` from the presenter's `build-presenter.ts`, which
   bundles the runner bootstrap (`src/presenter/runner/`) into `dist/runner/index.html` and returns
   the runner's content security policy. Built-in transitions are ordinary modules in the editor
   bundle. `--serve` serves the editor on `http://127.0.0.1:8790` and the runner, with its policy
@@ -1019,7 +1019,7 @@ client                                                          server
 - **Reconnection**: full-jitter exponential backoff from 0.5 seconds doubling to 30
   (`RECONNECT_POLICY`); immediately on the browser's `online` event, on the page becoming visible
   after being hidden past a heartbeat, or on "Try now". After each close the client follows
-  `RECONNECT_AFTER_CLOSE`.
+  `CLOSE_HANDLING` (`src/web/collaboration/reconnect-policy.ts`).
 - **Offline edits**: the Y.Doc keeps them; the sync step 2 after reconnecting sends them, and
   merging is Yjs's. `unsentChanges` is true from a local transaction while not online until the
   client has sent its step 2 after the next welcome and the socket's `bufferedAmount` is 0. Nothing
@@ -1430,7 +1430,7 @@ scripted build steps) are reviewed by a person.
 ### 21.17 Modules
 
 Five modules with disjoint owned paths. The architect keeps `src/contracts/**`,
-`src/platform/**`, `src/module-surfaces-check.ts`, the engine's `package.json`,
+`src/platform/**`, the engine's `package.json`,
 `package-lock.json` and `tsconfig*.json`, `mcp/sasha-slides/deck-contracts/**`,
 `mcp/sasha-slides/tsconfig.json` and this document. Milestone 2 hands `src/theme/**` to the
 discussion module and `src/model/**` to the collaboration server module. The presenter is frozen.

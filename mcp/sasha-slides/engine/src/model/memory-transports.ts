@@ -17,13 +17,17 @@
 
 import { Subject } from "rxjs";
 import * as Y from "yjs";
-import type { ConnectInMemory, CreateMemoryAssetStore } from "../contracts/document-store.ts";
+import type { AssetStore } from "../contracts/document-store.ts";
 import type { AssetMediaType } from "../contracts/document.ts";
 import type { AssetId } from "../contracts/ids.ts";
-import type { CreateMemoryPresenceHub, PeerPresence, PresenceChannel } from "../contracts/presence.ts";
+import type { PeerPresence, PresenceChannel } from "../contracts/presence.ts";
 import { REMOTE_SYNC_ORIGIN } from "../contracts/yjs-schema.ts";
 
-export const createMemoryAssetStore: CreateMemoryAssetStore = (options) => {
+/** In-memory asset store for the demo and tests. `createAddress` wraps `URL.createObjectURL` in the browser. */
+export const createMemoryAssetStore = (options: Readonly<{
+  createAddress: (bytes: ArrayBuffer, mediaType: AssetMediaType) => string;
+  digest: (bytes: ArrayBuffer) => Promise<string>;
+}>): AssetStore => {
   const entries = new Map<AssetId, Readonly<{ bytes: ArrayBuffer; mediaType: AssetMediaType; address: string }>>();
   const available = new Subject<AssetId>();
   return {
@@ -45,7 +49,8 @@ export const createMemoryAssetStore: CreateMemoryAssetStore = (options) => {
   };
 };
 
-export const connectInMemory: ConnectInMemory = (options) => {
+/** The two-replica loopback for tests and the side-by-side demo. */
+export const connectInMemory = (options: Readonly<{ first: Y.Doc; second: Y.Doc }>): Disposable => {
   const { first, second } = options;
   let applying = false;
   const forward = (target: Y.Doc) => (update: Uint8Array): void => {
@@ -72,7 +77,8 @@ export const connectInMemory: ConnectInMemory = (options) => {
   };
 };
 
-export const createMemoryPresenceHub: CreateMemoryPresenceHub = (options) => {
+/** The in-memory hub: every channel it creates sees every other channel's presence. */
+export const createMemoryPresenceHub = (options: Readonly<{ now: () => number }>): Readonly<{ channelFor: (clientId: number) => PresenceChannel }> => {
   const presences = new Map<number, PeerPresence>();
   const listeners = new Map<number, Set<(peers: readonly PeerPresence[]) => void>>();
   const peersFor = (clientId: number): readonly PeerPresence[] => [...presences.values()].filter((peer) => peer.clientId !== clientId);

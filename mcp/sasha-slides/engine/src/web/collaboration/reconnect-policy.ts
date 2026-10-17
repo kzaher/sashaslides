@@ -1,5 +1,5 @@
 // WHEN TO TRY AGAIN, AND WHAT A CLOSE MEANS (collaboration.ts `RECONNECT_POLICY`,
-// `CLOSE_CODE_BY_REASON`, `RECONNECT_AFTER_CLOSE`).
+// `CLOSE_CODE_BY_REASON`).
 //
 // Key decisions:
 //
@@ -9,9 +9,9 @@
 //  * A CLOSE CODE THE CONTRACT DOES NOT NAME (1006 when the network drops, 1001 when a proxy goes
 //    away, anything a newer server invents) is "the server could not be reached": back off and try
 //    again. Only the named application codes may stop the client for good.
-//  * WHAT THE EDITOR SHOWS FOR EACH REASON is one total table (`CLOSE_HANDLING`), whose `kind`
-//    must agree with the contract's `RECONNECT_AFTER_CLOSE` (reconnect-policy.test.ts checks every
-//    reason), so the decision lives in the contract and the wording beside it.
+//  * WHAT THE CLIENT DOES AND THE EDITOR SHOWS FOR EACH REASON is one total table
+//    (`CLOSE_HANDLING`): the decision (`kind`) and its wording side by side, so a new close reason
+//    fails to compile until it decides both (deck-collaboration.test.ts drives every reason).
 
 import {
   CLOSE_CODE_BY_REASON,
@@ -41,7 +41,7 @@ export type CloseHandling =
   | Readonly<{ kind: "reconnectWithBackoff"; offlineReason: OfflineReason }>
   | Readonly<{ kind: "stop"; closedReason: ClosedReason }>;
 
-/** Total over close reasons; each `kind` equals `RECONNECT_AFTER_CLOSE[reason]` (tested). */
+/** Total over close reasons, so a new reason must decide. */
 export const CLOSE_HANDLING: Readonly<Record<CloseReason, CloseHandling>> = {
   unauthenticated: { kind: "refreshSessionThenReconnect" },
   accessRevoked: { kind: "stop", closedReason: "accessRevoked" },

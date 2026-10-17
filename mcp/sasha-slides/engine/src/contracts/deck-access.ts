@@ -19,7 +19,6 @@
 //    `ag_<the same 32>`. Stable across sessions and secret rotations, unguessable from outside,
 //    and both match ids.ts OBJECT_ID_PATTERN.
 
-import { assertNever } from "./assert-never.ts";
 import type { Person } from "./discussion.ts";
 
 export type DeckRole = "owner" | "editor" | "commenter" | "viewer";
@@ -99,22 +98,6 @@ export const DECK_PERMISSIONS_BY_ROLE: Readonly<Record<DeckRole, Readonly<Record
 export function roleAllows(options: Readonly<{ role: DeckRole | null; permission: DeckPermission }>): boolean {
   if (options.role === null) return false;
   return DECK_PERMISSIONS_BY_ROLE[options.role][options.permission];
-}
-
-/** For "at least commenter" comparisons, e.g. which role link sharing may grant. */
-export function roleRank(role: DeckRole): number {
-  switch (role) {
-    case "owner":
-      return 3;
-    case "editor":
-      return 2;
-    case "commenter":
-      return 1;
-    case "viewer":
-      return 0;
-    default:
-      return assertNever(role);
-  }
 }
 
 /** Anyone signed in who opens the deck's address gets this role, unless they are a member. */

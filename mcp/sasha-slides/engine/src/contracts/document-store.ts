@@ -46,11 +46,11 @@
 // scheduled on the injected scheduler AFTER the transaction that revealed them, never inside an
 // `observeDeep` callback.
 
-import type { Observable, SchedulerLike } from "rxjs";
+import type { Observable } from "rxjs";
 import type { Doc } from "yjs";
 import type { CommandEnvelope, CommandOutcome } from "./commands.ts";
 import type { AssetMediaType, DocumentSnapshot } from "./document.ts";
-import type { AssetId, CommandId, RandomSource, SlideId } from "./ids.ts";
+import type { AssetId, CommandId, SlideId } from "./ids.ts";
 import type { Selection, TextTarget } from "./selection.ts";
 import type { TextDelta, TextTargetKey } from "./text-delta.ts";
 
@@ -151,22 +151,6 @@ export type ValidationIssue = Readonly<{
 
 export type RepairPolicy = "repairAfterTransaction" | "reportOnly";
 
-/** The model's factory. `seed` decides what an empty Y.Doc becomes. */
-export type CreateDocumentStore = (options: Readonly<{
-  sharedDocument: Doc;
-  /** "blankDeck": default theme, layouts and one title slide, with this deck id. "none": a joining replica. */
-  seed: Readonly<{ kind: "blankDeck"; deckId: string }> | Readonly<{ kind: "none" }>;
-  /** Clock for `updatedAt` stamps and the typing merge window; injected for determinism. */
-  now: () => number;
-  /** For the random suffix of new order keys only (yjs-schema.ts). */
-  random: RandomSource;
-  /** Where repairs are scheduled, after the transaction that revealed them. */
-  scheduler: SchedulerLike;
-  repairPolicy: RepairPolicy;
-  /** Typing in the same body within this window is one undo step (500 in the editor). */
-  typingMergeWindowMilliseconds: number;
-}>) => DocumentStore;
-
 /**
  * Asset BYTES (document.ts `AssetRecord` holds only metadata). Milestone 1: in memory with object
  * addresses (`URL.createObjectURL`). Milestone 2: the deck server's content-addressed blob store.
@@ -189,12 +173,3 @@ export interface AssetStore {
    */
   copyBytesOf(assetId: AssetId): Promise<ArrayBuffer | null>;
 }
-
-/** The two-replica loopback the model provides for tests and the side-by-side demo. */
-export type ConnectInMemory = (options: Readonly<{ first: Doc; second: Doc }>) => Disposable;
-
-/** In-memory asset store for milestone 1 and tests. `createAddress` wraps `URL.createObjectURL` in the browser. */
-export type CreateMemoryAssetStore = (options: Readonly<{
-  createAddress: (bytes: ArrayBuffer, mediaType: AssetMediaType) => string;
-  digest: (bytes: ArrayBuffer) => Promise<string>;
-}>) => AssetStore;

@@ -55,8 +55,6 @@ export const ASSISTANT_DECK_TOOL_NAMES = [
   "deck_await_comments",
 ] as const;
 
-export type AssistantDeckToolName = (typeof ASSISTANT_DECK_TOOL_NAMES)[number];
-
 /** Text as a model writes it: paragraphs of runs, styles optional. */
 export type AssistantParagraph = Readonly<{
   text: string;

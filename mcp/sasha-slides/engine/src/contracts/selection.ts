@@ -36,5 +36,3 @@ export type TextTarget =
   | Readonly<{ kind: "element"; slideId: SlideId; elementId: ElementId }>
   | Readonly<{ kind: "tableCell"; slideId: SlideId; elementId: ElementId; cell: CellAddress }>
   | Readonly<{ kind: "speakerNotes"; slideId: SlideId }>;
-
-export const NO_SELECTION: Selection = { kind: "none" };

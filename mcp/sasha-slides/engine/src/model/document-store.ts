@@ -21,11 +21,11 @@
 //  * REPAIRS RUN ON THE SCHEDULER, after the transaction that revealed them and only over what it
 //    touched, in one REPAIR_ORIGIN transaction; never on a document from a newer schema.
 
-import { Subject, type Subscription } from "rxjs";
+import { Subject, type SchedulerLike, type Subscription } from "rxjs";
 import * as Y from "yjs";
 import type { CommandEnvelope, CommandOutcome } from "../contracts/commands.ts";
-import type { CreateDocumentStore, DocumentChange, DocumentChangeOrigin, HistoryAvailability, HistoryOutcome } from "../contracts/document-store.ts";
-import type { ElementId, SlideId } from "../contracts/ids.ts";
+import type { DocumentChange, DocumentChangeOrigin, DocumentStore, HistoryAvailability, HistoryOutcome, RepairPolicy } from "../contracts/document-store.ts";
+import type { ElementId, RandomSource, SlideId } from "../contracts/ids.ts";
 import type { TextDelta, TextDeltaOperation, TextTargetKey } from "../contracts/text-delta.ts";
 import { assertNever } from "../contracts/assert-never.ts";
 import { DOCUMENT_SCHEMA_VERSION } from "../contracts/document.ts";
@@ -41,7 +41,21 @@ import { isRecord } from "./stored-values.ts";
 import { encodeTextAnchor, NO_STORED_SELECTION, resolveTextAnchors, restoreSelection, storeSelection, type StoredSelection } from "./text-positions.ts";
 import { applyRepairs, findIssues, hasRepairs, issuesOf, type ValidationScope } from "./validation.ts";
 
-export const createDocumentStore: CreateDocumentStore = (options) => {
+/** The model's factory. `seed` decides what an empty Y.Doc becomes. */
+export const createDocumentStore = (options: Readonly<{
+  sharedDocument: Y.Doc;
+  /** "blankDeck": default theme, layouts and one title slide, with this deck id. "none": a joining replica. */
+  seed: Readonly<{ kind: "blankDeck"; deckId: string }> | Readonly<{ kind: "none" }>;
+  /** Clock for `updatedAt` stamps and the typing merge window; injected for determinism. */
+  now: () => number;
+  /** For the random suffix of new order keys only (yjs-schema.ts). */
+  random: RandomSource;
+  /** Where repairs are scheduled, after the transaction that revealed them. */
+  scheduler: SchedulerLike;
+  repairPolicy: RepairPolicy;
+  /** Typing in the same body within this window is one undo step (500 in the editor). */
+  typingMergeWindowMilliseconds: number;
+}>): DocumentStore => {
   const { sharedDocument, now, random, scheduler } = options;
   const roots = documentRoots(sharedDocument);
   // Created before the store's own handler so its stacks are current when a change is reported.

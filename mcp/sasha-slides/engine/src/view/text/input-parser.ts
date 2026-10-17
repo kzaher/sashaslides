@@ -237,8 +237,11 @@ function pastedText(options: Readonly<{ event: BeforeInputLike; context: BeforeI
   return { kind: "plain", text: plain.replace(/\r\n?/g, "\n") };
 }
 
-/** "rgb(r, g, b)" or "#rrggbb", as browsers report a chosen colour; null for anything else. */
-function colourFromBrowser(data: string | null): Colour | null {
+/**
+ * "rgb(r, g, b)", "rgba(r, g, b, a)" or "#rrggbb", as browsers report a chosen colour or an inline
+ * style's (a pasted element's, browser-services.ts); null for anything else.
+ */
+export function colourFromBrowser(data: string | null): Colour | null {
   if (data === null) return null;
   const hexadecimal = /^#([0-9a-f]{6})$/i.exec(data.trim());
   if (hexadecimal !== null) return literalColour({ hexadecimal: `#${(hexadecimal[1] ?? "000000").toLowerCase()}`, alpha: 1 });

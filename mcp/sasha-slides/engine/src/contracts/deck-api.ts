@@ -266,19 +266,12 @@ export type GoogleSlidesExportBody =
 // --- the add-on (server to server from Code.gs, and the editor frame inside its dialog) -----------
 
 /**
- * POST /deck-api/addon/handoff from Code.gs (UrlFetchApp). `identityToken` is
- * `ScriptApp.getIdentityToken()`; `bindingSecret` is the presentation's 32 random bytes from
- * `PropertiesService.getDocumentProperties()` (base64url), which only editors of that
- * presentation can read. SPEC.md "Milestone 2", "Add-on embedding".
+ * The answer to POST /deck-api/addon/handoff from Code.gs (UrlFetchApp), which sends
+ * `identityToken` (`ScriptApp.getIdentityToken()`), `presentationId`, `bindingSecret` (the
+ * presentation's 32 random bytes from `PropertiesService.getDocumentProperties()`, base64url, which
+ * only editors of that presentation can read) and the presentation's current `revisionId`.
+ * SPEC.md "Milestone 2", "Add-on embedding".
  */
-export type AddonHandoffRequest = Readonly<{
-  identityToken: string;
-  presentationId: string;
-  bindingSecret: string;
-  /** The presentation's current `revisionId`, to tell whether it changed since the last import. */
-  revisionId: string;
-}>;
-
 export type AddonHandoffBody =
   /** A deck is bound and current: open it. */
   | Readonly<{ kind: "open"; deckId: DeckId; ticket: string }>
@@ -287,13 +280,11 @@ export type AddonHandoffBody =
   /** No deck yet: Code.gs reads the presentation and posts it to `addonImport` with this token. */
   | Readonly<{ kind: "needsImport"; importToken: string }>;
 
-/** POST /deck-api/addon/import. `presentation` is the Slides API `Presentation` JSON, parsed by the server. */
-export type AddonImportRequest = Readonly<{
-  importToken: string;
-  presentation: unknown;
-  /** Replace this bound deck's slides (after `changedSinceImport`), or null to create the bound deck. */
-  replaceDeckId: DeckId | null;
-}>;
+/**
+ * The answer to POST /deck-api/addon/import, which sends the `importToken`, the Slides API
+ * `Presentation` JSON (parsed by the server) and the bound deck whose slides it replaces after
+ * `changedSinceImport`, if any.
+ */
 export type AddonImportBody = Readonly<{ deckId: DeckId; ticket: string; report: GoogleSlidesImportReport }>;
 
 /** GET /deck-api/addon/export/<exportId> from Code.gs, with the same identity token and binding secret as headers. */
@@ -301,11 +292,6 @@ export type AddonExportPlanBody = Readonly<{
   presentationId: string;
   /** Slides API batchUpdate requests, in order; Code.gs sends them in chunks of at most 500. */
   requests: readonly unknown[];
-}>;
-
-/** POST /deck-api/addon/export/<exportId>/result from Code.gs. */
-export type AddonExportResultRequest = Readonly<{
-  outcome: Readonly<{ kind: "applied" }> | Readonly<{ kind: "failed"; message: string }>;
 }>;
 
 /** POST /deck-api/embed/session: the ticket from the frame's `#ticket=` fragment, single use. */

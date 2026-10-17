@@ -4,7 +4,7 @@
 // the clock for the event log and the error reporter all arrive as arguments, so a test builds the
 // same system from fakes.
 
-import { LOCAL_COLLABORATION_STATUS, type CreateEditorSystem, type EditorEvent, type EditorState } from "../contracts/index.ts";
+import { LOCAL_COLLABORATION_STATUS, type EditorDependencies, type EditorEvent, type EditorState, type RunningSystem } from "../contracts/index.ts";
 import { initialEditorState } from "./editor/initial-editor-state.ts";
 import { reduceEditor } from "./editor/reduce-editor.ts";
 import { collaborationFeedback } from "./feedbacks/collaboration-feedbacks.ts";
@@ -16,7 +16,7 @@ import { createSystem } from "./rxfeedback/create-system.ts";
 /** Enough recent events to reconstruct a bug report's last few seconds of typing and dragging. */
 export const EDITOR_EVENT_LOG_CAPACITY = 500;
 
-export const createEditorSystem: CreateEditorSystem = (dependencies) =>
+export const createEditorSystem = (dependencies: EditorDependencies): RunningSystem<EditorState, EditorEvent> =>
   createSystem<EditorState, EditorEvent>({
     initial: initialEditorState({
       me: dependencies.me,

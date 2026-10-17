@@ -22,7 +22,7 @@
 //    edits per message reads the same value on every replica and after a restart replays the log.
 
 import { Subject } from "rxjs";
-import type { CommentMessage, CommentThread, CreateMemoryDiscussionStore, DiscussionCommand, DiscussionLogEntry, DiscussionOutcome, DiscussionRejectionReason, DiscussionRequest, DiscussionSnapshot, DiscussionStore, Person, ReduceDiscussionLog } from "../contracts/discussion.ts";
+import type { CommentMessage, CommentThread, DiscussionCommand, DiscussionLogEntry, DiscussionOutcome, DiscussionRejectionReason, DiscussionRequest, DiscussionSnapshot, DiscussionStore, Person, ReduceDiscussionLog } from "../contracts/discussion.ts";
 import { assertNever } from "../contracts/assert-never.ts";
 import { EMPTY_DISCUSSION } from "../contracts/discussion.ts";
 
@@ -31,7 +31,12 @@ export const reduceDiscussionLog: ReduceDiscussionLog = (snapshot, entry) => {
   return { sequence: entry.sequence, threads: threads ?? snapshot.threads };
 };
 
-export const createMemoryDiscussionStore: CreateMemoryDiscussionStore = (options) => {
+export const createMemoryDiscussionStore = (options: Readonly<{
+  /** Who every request is from (the authority's view of the session). */
+  actor: Person;
+  now: () => number;
+  initialLog: readonly DiscussionLogEntry[];
+}>): DiscussionStore => {
   const log: DiscussionLogEntry[] = [];
   let snapshot: DiscussionSnapshot = EMPTY_DISCUSSION;
   for (const entry of options.initialLog) {

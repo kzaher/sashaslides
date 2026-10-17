@@ -6,13 +6,12 @@
 // document, the chrome harness renders it for screenshots, and the tests read single slides from it,
 // so what the screenshots show is what the tests pin.
 
-import type { DocumentSnapshot, SlideSnapshot } from "../../contracts/document.ts";
+import type { SlideSnapshot } from "../../contracts/document.ts";
 import type { AssetId, DeckId } from "../../contracts/ids.ts";
 import { literalColour, themeColour, type Stroke } from "../../contracts/style.ts";
 import {
   IdMinter,
   animationStep,
-  documentSnapshot,
   groupElement,
   imageElement,
   lineElement,
@@ -33,10 +32,6 @@ export type SampleDeckOptions = Readonly<{
   /** Plain slides appended after the showcase, for the filmstrip (virtualised past 40). */
   extraSlideCount: number;
 }>;
-
-export function sampleDeck(options: SampleDeckOptions): DocumentSnapshot {
-  return documentSnapshot({ deckId: options.deckId, title: "Tidepool tour", slides: sampleSlides(options) });
-}
 
 /** The showcase slides, then `extraSlideCount` numbered ones. */
 export function sampleSlides(options: SampleDeckOptions): readonly SlideSnapshot[] {

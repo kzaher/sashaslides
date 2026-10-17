@@ -74,8 +74,7 @@ export type TransitionScriptBundle = Readonly<{
   markup: string;
 }>;
 
-/** Sent with `window.postMessage` (the only two messages that are). */
-export type RunnerAnnouncement = Readonly<{ protocol: typeof TRANSITION_PROTOCOL; kind: "runnerReady" }>;
+/** Sent with `window.postMessage`, as is the runner's `{ protocol, kind: "runnerReady" }` (the only two messages that are). */
 export type HostConnect = Readonly<{ protocol: typeof TRANSITION_PROTOCOL; kind: "connect" }>;
 
 /** Host to runner, on the port. */

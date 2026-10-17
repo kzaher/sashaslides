@@ -66,7 +66,7 @@ export type StaticSlideProperties = Readonly<{
   assetAddress: AssetAddressResolver;
 }>;
 
-/** The view module exports `StaticSlide` of this type from src/view/index.ts. */
+/** The view module's `StaticSlide` (view/render/static-slide.tsx) is of this type. */
 export type StaticSlideComponent = ComponentType<StaticSlideProperties>;
 
 /** A slide as a self-contained markup string, for the transition sandbox. */
@@ -95,7 +95,7 @@ export type StageElementRecord = Readonly<{
   groupPath: readonly ElementId[];
 }>;
 
-/** The view module exports `renderSlideMarkup` of this type from src/view/index.ts. */
+/** The view module's `renderSlideMarkup` (view/render/slide-markup.tsx) is of this type. */
 export type RenderSlideMarkup = (input: Readonly<{
   slide: SlideSnapshot;
   document: DocumentSnapshot;

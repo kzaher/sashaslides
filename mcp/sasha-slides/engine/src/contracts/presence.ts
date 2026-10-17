@@ -50,8 +50,3 @@ export interface PresenceChannel {
   publish(presence: LocalPresence): void;
   subscribe(listener: (peers: readonly PeerPresence[]) => void): Disposable;
 }
-
-/** The in-memory hub: every channel it creates sees every other channel's presence. */
-export type CreateMemoryPresenceHub = (options: Readonly<{ now: () => number }>) => Readonly<{
-  channelFor: (clientId: number) => PresenceChannel;
-}>;

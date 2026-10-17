@@ -154,7 +154,7 @@ describe("arrow keys in pill groups (acceptance 6)", () => {
       const target = { closest: (selector: string) => (row.insidePills && selector.includes("tablist") ? {} : null) };
       // handleShellKey only calls `closest` on its target (editor-shell.tsx `closestMatches`); the stand-in has exactly that.
       const event: ShellKeyEvent = { key: row.key, code: row.key, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, target: target as unknown as EventTarget, defaultPrevented: false, preventDefault: () => undefined };
-      handleShellKey({ event, gesture: { system, browser: recordingCapabilities([]), clipboardContentFor: () => null, presentationHost: () => null, speakerWindow: { current: null } }, primaryModifier: "control" });
+      handleShellKey({ event, gesture: { system, browser: recordingCapabilities([]), clipboardContentFor: () => null, presentationHost: () => null, speakerWindow: { current: null }, assetAddress: () => null }, primaryModifier: "control" });
       assert.equal(system.dispatched.some((dispatched: EditorEvent) => dispatched.kind === "keyPressed"), row.dispatched);
     });
   }
@@ -186,6 +186,6 @@ describe("a disabled control gives the reducer's own reason", () => {
 function withServices(state: EditorState, child: ReactElement): string {
   const system = createRecordingSystem({ initial: state });
   const services = fixtureServices({ system });
-  const gesture = { system, browser: recordingCapabilities([]), clipboardContentFor: services.clipboardContentFor, presentationHost: () => null, speakerWindow: { current: null } };
+  const gesture = { system, browser: recordingCapabilities([]), clipboardContentFor: services.clipboardContentFor, presentationHost: () => null, speakerWindow: { current: null }, assetAddress: services.assetAddress };
   return renderToStaticMarkup(createElement(EditorServicesContext.Provider, { value: services }, createElement(EditorGestureContext.Provider, { value: gesture }, child)));
 }

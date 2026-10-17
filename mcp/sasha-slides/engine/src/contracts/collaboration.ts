@@ -16,7 +16,8 @@
 //    THAN REJECTS. A Yjs update cannot be partially accepted, and refusing one leaves the sender's
 //    replica permanently ahead of everyone else's (every later update depends on it). So the server
 //    applies an editor's update in its own transaction, inspects what the transaction changed in
-//    the protected fields (`PROTECTED_DOCUMENT_FIELDS`), and when a rule is broken writes the
+//    the protected fields (`meta/deckId`, `meta/schemaVersion`, `meta/createdAt`, and each transition
+//    script's `approval` and `author`), and when a rule is broken writes the
 //    correction in a follow-up transaction and broadcasts the update MERGED with its correction
 //    (`Y.mergeUpdates`), so no other replica ever holds the forbidden state, and the offender is
 //    told why (`correction`). The rules:
@@ -48,7 +49,6 @@ import type { Observable } from "rxjs";
 import type { DeckMember, DeckRole } from "./deck-access.ts";
 import type { DiscussionLogEntry, DiscussionOutcome, DiscussionRequest, Person } from "./discussion.ts";
 import type { DeckId, TransitionScriptId } from "./ids.ts";
-import type { LocalPresence } from "./presence.ts";
 
 /** Bumped when a message changes incompatibly; the server refuses other versions with 4010. */
 export const COLLABORATION_PROTOCOL_VERSION = 1;
@@ -71,9 +71,6 @@ export const BINARY_MESSAGE_TYPE = { sync: 0, awareness: 1 } as const;
 
 /** The field of a Yjs awareness state that holds this protocol's presence. */
 export const AWARENESS_PRESENCE_FIELD = "presence";
-
-/** What a client puts in its awareness state; `person` is overwritten by the server. */
-export type AwarenessPresenceState = Readonly<{ presence: LocalPresence }>;
 
 // --- text frames ------------------------------------------------------------------------------
 
@@ -138,15 +135,6 @@ export type ApprovalRevocationReason =
 
 export type ProtectedMetaKey = "deckId" | "schemaVersion" | "createdAt";
 
-/** The document paths the server guards, for SPEC.md and the server's tests. */
-export const PROTECTED_DOCUMENT_FIELDS: readonly string[] = [
-  "meta/deckId",
-  "meta/schemaVersion",
-  "meta/createdAt",
-  "transitionScripts/<id>/approval",
-  "transitionScripts/<id>/author",
-];
-
 // --- closing ------------------------------------------------------------------------------------
 
 /** Why the server closed a connection; each has its own close code (`CLOSE_CODE_BY_REASON`). */
@@ -183,20 +171,6 @@ export const CLOSE_CODE_BY_REASON: Readonly<Record<CloseReason, number>> = {
   tooManyConnections: 4012,
   serverShuttingDown: 4013,
   deckUnreadable: 4014,
-};
-
-/** What the client does after each close reason. Total, so a new reason must decide. */
-export const RECONNECT_AFTER_CLOSE: Readonly<Record<CloseReason, "refreshSessionThenReconnect" | "reconnectWithBackoff" | "stop">> = {
-  unauthenticated: "refreshSessionThenReconnect",
-  accessRevoked: "stop",
-  deckNotFound: "stop",
-  deckDeleted: "stop",
-  rateLimited: "reconnectWithBackoff",
-  protocolVersionUnsupported: "stop",
-  documentSchemaTooNew: "stop",
-  tooManyConnections: "reconnectWithBackoff",
-  serverShuttingDown: "reconnectWithBackoff",
-  deckUnreadable: "stop",
 };
 
 // --- timing and limits --------------------------------------------------------------------------

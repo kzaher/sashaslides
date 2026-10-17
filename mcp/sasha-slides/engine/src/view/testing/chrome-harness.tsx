@@ -18,6 +18,7 @@ import type { ArrangedThread } from "../../contracts/editor-system.ts";
 import { parsePersonId, type AssetId } from "../../contracts/ids.ts";
 import type { PeerPresence } from "../../contracts/presence.ts";
 import { literalColour, themeColour } from "../../contracts/style.ts";
+import { INK_WIPE_EXAMPLE_SCRIPT } from "../../presenter/testing/ink-wipe.ts";
 import { EditorShell } from "../application/editor-shell.tsx";
 import { pageBrowserCapabilities, primaryModifierOf, readImageFile, richTextFromMarkup } from "../application/browser-services.ts";
 import { sampleSlides } from "../sample/sample-deck.ts";
@@ -157,7 +158,7 @@ function sampleScript(): TransitionScriptRecord {
     description: "Reveals the next slide behind a moving clip, with its elements rising in.",
     purpose: "transition",
     author: { kind: "agent", name: "Claude", agentSessionId: "session_sample" },
-    script: INK_WIPE,
+    script: INK_WIPE_EXAMPLE_SCRIPT,
     stylesheet: "",
     markup: "",
     defaultParameters: {},
@@ -257,19 +258,3 @@ function noticeId(): EditorState["notices"][number]["id"] {
 const SAMPLE_PHOTO = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="440" height="360" viewBox="0 0 440 360"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7dd3fc"/><stop offset="1" stop-color="#fde68a"/></linearGradient></defs><rect width="440" height="360" fill="url(#sky)"/><circle cx="330" cy="110" r="46" fill="#fb923c"/><path d="M0 260 L120 150 L230 250 L320 180 L440 270 L440 360 L0 360 Z" fill="#0e7490"/><path d="M0 300 L160 230 L300 300 L440 250 L440 360 L0 360 Z" fill="#047857"/></svg>`,
 )}`;
-
-const INK_WIPE = `sashaTransition.define({
-  name: "Ink wipe",
-  async run(context) {
-    const { outgoing, incoming, overlay, durationMilliseconds, direction } = context;
-    if (outgoing === null || context.reducedMotion) {
-      await context.animate(incoming, [{ opacity: 0 }, { opacity: 1 }], { duration: 150 }).finished;
-      return;
-    }
-    const sweep = direction === "forward" ? ["inset(0 0 0 100%)", "inset(0 0 0 0)"] : ["inset(0 100% 0 0)", "inset(0 0 0 0)"];
-    incoming.style.zIndex = "2";
-    const reveal = context.animate(incoming, [{ clipPath: sweep[0] }, { clipPath: sweep[1] }],
-      { duration: durationMilliseconds, easing: "cubic-bezier(.6,0,.2,1)" });
-    await reveal.finished;
-  },
-});`;

@@ -21,9 +21,6 @@ export function SashaLogo(): ReactElement {
   return <span className={WEB_CLASS.logo} aria-hidden="true" dangerouslySetInnerHTML={{ __html: sashaIcon.SASHA_ICON_SVG }} />;
 }
 
-/** The logo's markup, for tests that check the page carries the real one. */
-export const SASHA_LOGO_MARKUP: string = sashaIcon.SASHA_ICON_SVG;
-
 export function DialogFrame(properties: Readonly<{ title: string; onClose: () => void; children: ReactNode }>): ReactElement {
   const { onClose } = properties;
   useEffect(() => {

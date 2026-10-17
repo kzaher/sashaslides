@@ -23,7 +23,7 @@ import { newSessionPrefix, type SlideId } from "../../contracts/ids.ts";
 import type { PresenterDependencies } from "../../contracts/presenter.ts";
 import { tidepoolStylesheet } from "../../theme/tidepool-stylesheet.ts";
 import { TIDEPOOL_TOKENS } from "../../theme/tidepool-theme.ts";
-import { INK_WIPE_EXAMPLE_SCRIPT } from "../examples/ink-wipe.ts";
+import { INK_WIPE_EXAMPLE_SCRIPT } from "./ink-wipe.ts";
 import { Presentation, TransitionPreview } from "../index.ts";
 import { demoRenderSlideMarkup, DemoStaticSlide } from "./demo-renderer.tsx";
 import { builtinTransition, fixtureDocument, scriptedTransition, slideIdOf, type FixtureElement } from "./document-fixture.ts";

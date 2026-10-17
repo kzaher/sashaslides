@@ -14,7 +14,7 @@ import { DEFAULT_PARAGRAPH_STYLE, type RunStyle } from "../../contracts/style.ts
 import { sampleTheme } from "../sample/snapshot-builders.ts";
 import { paragraphDeclarations, paragraphRunsDeclarations, runDeclarations, runFitsParagraphSpan } from "./inline-styles.ts";
 import { resolveRunStyle } from "./text-layout.ts";
-import { FONT_VERTICAL_METRICS, runDropEm, SLIDES_BASELINE_PER_FONT_SIZE, strutLineHeight, stylesheetBaselineInLineBox } from "./text-vertical-metrics.ts";
+import { FONT_VERTICAL_METRICS, paragraphLineDropEm, SLIDES_BASELINE_PER_FONT_SIZE, strutLineHeight, stylesheetBaselineInLineBox } from "./text-vertical-metrics.ts";
 
 const theme = sampleTheme();
 const SPACINGS = [0.5, 0.7, 0.8333, 1, 1.15, 1.2, 1.7333, 2, 3] as const;
@@ -122,6 +122,15 @@ describe("the declarations carry it", () => {
 });
 
 type LineRun = Readonly<{ size: number; family: string }>;
+
+/**
+ * How far a stylesheet's centred line box must move DOWN, in em of the run's own size, for its top
+ * to sit Google's baseline offset above the baseline: the stylesheet's own offset at this spacing
+ * (its half-leading plus the font's) minus Google's. The oracle the renderer's written drops match.
+ */
+function runDropEm(options: Readonly<{ lineSpacing: number; family: string }>): number {
+  return stylesheetBaselineInLineBox(options.family) + paragraphLineDropEm(options.lineSpacing);
+}
 
 /**
  * One line laid out by the stylesheet's rule from the values the renderer writes: the strut (the

@@ -8,12 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Awareness } from "y-protocols/awareness";
 import { Doc } from "yjs";
-import {
-  CLOSE_CODE_BY_REASON,
-  CONNECTION_DEAD_AFTER_MILLISECONDS,
-  RECONNECT_AFTER_CLOSE,
-  type CloseReason,
-} from "../../contracts/collaboration.ts";
+import { CLOSE_CODE_BY_REASON, CONNECTION_DEAD_AFTER_MILLISECONDS, type CloseReason } from "../../contracts/collaboration.ts";
 import { EMPTY_DISCUSSION, type DiscussionLogEntry, type DiscussionRequest } from "../../contracts/discussion.ts";
 import { mintId, type ThreadId } from "../../contracts/ids.ts";
 import type { LocalPresence } from "../../contracts/presence.ts";
@@ -129,12 +124,13 @@ describe("2. reconnecting", () => {
 });
 
 describe("3. every close reason", () => {
-  it("the wording table agrees with the contract's RECONNECT_AFTER_CLOSE", () => {
-    for (const reason of Object.keys(CLOSE_CODE_BY_REASON) as CloseReason[]) assert.equal(CLOSE_HANDLING[reason].kind, RECONNECT_AFTER_CLOSE[reason], reason);
+  it("the client stops for good only where retrying cannot help", () => {
+    const stops = (Object.keys(CLOSE_HANDLING) as readonly CloseReason[]).filter((reason) => CLOSE_HANDLING[reason].kind === "stop").sort();
+    assert.deepEqual(stops, ["accessRevoked", "deckDeleted", "deckNotFound", "deckUnreadable", "documentSchemaTooNew", "protocolVersionUnsupported"]);
   });
 
   for (const reason of Object.keys(CLOSE_CODE_BY_REASON) as CloseReason[]) {
-    it(`${reason} (${CLOSE_CODE_BY_REASON[reason]}) -> ${RECONNECT_AFTER_CLOSE[reason]}`, async () => {
+    it(`${reason} (${CLOSE_CODE_BY_REASON[reason]}) -> ${CLOSE_HANDLING[reason].kind}`, async () => {
       const requests: string[] = [];
       const api = createDeckApiClient({
         origin: "https://sashaslides.test",
@@ -154,7 +150,7 @@ describe("3. every close reason", () => {
       harness.server.latest().handshake();
       harness.server.latest().close(CLOSE_CODE_BY_REASON[reason]);
       await settle();
-      const action = RECONNECT_AFTER_CLOSE[reason];
+      const action = CLOSE_HANDLING[reason].kind;
       switch (action) {
         case "refreshSessionThenReconnect":
           assert.deepEqual(requests, ["GET /deck-api/session"]);

@@ -27,7 +27,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildPresenterAssets } from "./build-presenter.ts";
+import { buildPresenterAssets, type RunnerBuild } from "./build-presenter.ts";
 import { editorPageMarkup, editorStylesheet } from "./src/view/application/editor-page.ts";
 
 export const EDITOR_SITE = { host: "127.0.0.1", port: 8790 } as const;
@@ -38,9 +38,6 @@ const DIST = join(ENGINE_DIRECTORY, "dist");
 const DEMO_DIRECTORY = join(DIST, "demo");
 const RUNNER_DIRECTORY = join(DIST, "runner");
 const RUNNER_POLICY_FILE = join(RUNNER_DIRECTORY, "policy.json");
-
-/** What the runner build produced, as the server needs it. */
-export type RunnerBuild = Readonly<{ runnerPagePath: string; runnerContentSecurityPolicy: string }>;
 
 /** Builds dist/demo and dist/runner; returns the runner build, or null when the presenter refused. */
 export async function buildDemo(options: Readonly<{ minify: boolean; requireRunner: boolean }>): Promise<RunnerBuild | null> {

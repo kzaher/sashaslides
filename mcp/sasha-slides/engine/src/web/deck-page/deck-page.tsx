@@ -9,7 +9,7 @@ import type { ClosedReason } from "../../contracts/collaboration.ts";
 import type { DeckRole } from "../../contracts/deck-access.ts";
 import type { EditorHost } from "../../contracts/editor-system.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
-import { EditorApplication } from "../../view/index.ts";
+import { EditorApplication } from "../../view/application/editor-application.tsx";
 import { SashaLogo } from "../shared/web-chrome.tsx";
 import { WEB_CLASS } from "../web-stylesheet.ts";
 import type { PageNotice } from "./deck-exports.ts";

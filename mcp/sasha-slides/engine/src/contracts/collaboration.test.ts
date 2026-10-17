@@ -11,10 +11,8 @@ import {
   DECK_SYNC_PATH_PREFIX,
   DECK_SYNC_SUBPROTOCOL,
   LOCAL_COLLABORATION_STATUS,
-  RECONNECT_AFTER_CLOSE,
-  type CloseReason,
 } from "./collaboration.ts";
-import { DECK_PERMISSIONS_BY_ROLE, DECK_ROLES, roleAllows, roleRank, type DeckPermission } from "./deck-access.ts";
+import { DECK_PERMISSIONS_BY_ROLE, DECK_ROLES, roleAllows, type DeckPermission } from "./deck-access.ts";
 import { DECK_API_PATHS, DECK_API_PREFIX, DECK_SESSION_COOKIE_PATH } from "./deck-api.ts";
 import type { DeckId } from "./ids.ts";
 
@@ -26,9 +24,9 @@ describe("deck access", () => {
   });
 
   it("a higher role allows everything a lower role allows (the table is monotonic)", () => {
-    for (const higher of DECK_ROLES) {
-      for (const lower of DECK_ROLES) {
-        if (roleRank(higher) <= roleRank(lower)) continue;
+    // DECK_ROLES lists the roles highest first.
+    for (const [rank, higher] of DECK_ROLES.entries()) {
+      for (const lower of DECK_ROLES.slice(rank + 1)) {
         for (const permission of PERMISSIONS) {
           if (!roleAllows({ role: lower, permission })) continue;
           assert.equal(roleAllows({ role: higher, permission }), true, `${higher} lacks ${permission} that ${lower} has`);
@@ -59,11 +57,6 @@ describe("the WebSocket protocol", () => {
     const codes = Object.values(CLOSE_CODE_BY_REASON);
     assert.equal(new Set(codes).size, codes.length);
     for (const code of codes) assert.ok(code >= 4000 && code <= 4999, String(code));
-  });
-
-  it("the client stops for good only where retrying cannot help", () => {
-    const stops = (Object.keys(RECONNECT_AFTER_CLOSE) as readonly CloseReason[]).filter((reason) => RECONNECT_AFTER_CLOSE[reason] === "stop").sort();
-    assert.deepEqual(stops, ["accessRevoked", "deckDeleted", "deckNotFound", "deckUnreadable", "documentSchemaTooNew", "protocolVersionUnsupported"]);
   });
 
   it("the sync endpoint lives under the session cookie's path, so the upgrade carries the cookie", () => {

@@ -339,7 +339,7 @@ describe("presence (acceptance 14)", () => {
 function render(options: Readonly<{ state: EditorState; child: ReactElement; host?: EditorHost }>): string {
   const system = createRecordingSystem({ initial: options.state });
   const services = fixtureServices({ system, ...(options.host === undefined ? {} : { host: options.host }) });
-  const gesture = { system, browser: recordingCapabilities([]), clipboardContentFor: services.clipboardContentFor, presentationHost: () => null, speakerWindow: { current: null } };
+  const gesture = { system, browser: recordingCapabilities([]), clipboardContentFor: services.clipboardContentFor, presentationHost: () => null, speakerWindow: { current: null }, assetAddress: services.assetAddress };
   return renderToStaticMarkup(
     createElement(
       EditorServicesContext.Provider,

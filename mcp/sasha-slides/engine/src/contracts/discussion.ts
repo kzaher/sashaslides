@@ -182,13 +182,6 @@ export interface DiscussionStore extends Disposable {
   submit(request: DiscussionRequest): Promise<DiscussionOutcome>;
 }
 
-export type CreateMemoryDiscussionStore = (options: Readonly<{
-  /** Who every request is from (the authority's view of the session). */
-  actor: Person;
-  now: () => number;
-  initialLog: readonly DiscussionLogEntry[];
-}>) => DiscussionStore;
-
 /** The pure fold every replica runs; the model module implements it. Unknown references skip the entry. */
 export type ReduceDiscussionLog = (snapshot: DiscussionSnapshot, entry: DiscussionLogEntry) => DiscussionSnapshot;
 

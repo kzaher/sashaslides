@@ -23,7 +23,8 @@ import type { RunningSystem } from "../../contracts/rxfeedback.ts";
 import { arrangeThreads, clipboardContentFor, createEditorSystem, createSystem, react, reactSet } from "../../state/index.ts";
 import { pageBrowserCapabilities } from "../../view/application/browser-services.ts";
 import { googleFontFiles, pageVisibility } from "../../view/application/compose-editor.ts";
-import { renderSlideMarkup, StaticSlide } from "../../view/index.ts";
+import { renderSlideMarkup } from "../../view/render/slide-markup.tsx";
+import { StaticSlide } from "../../view/render/static-slide.tsx";
 import type { DeckReplica } from "./deck-workspace.ts";
 import { readRecentColours, writeRecentColours, type ColourStorage } from "./recent-colours.ts";
 

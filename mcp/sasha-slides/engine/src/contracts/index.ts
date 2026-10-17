@@ -25,7 +25,6 @@ export * from "./editor-system.ts";
 export * from "./render.ts";
 export * from "./transition-protocol.ts";
 export * from "./presenter.ts";
-export * from "./module-surfaces.ts";
 // milestone 2
 export * from "./deck-access.ts";
 export * from "./collaboration.ts";

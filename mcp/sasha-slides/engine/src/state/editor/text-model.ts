@@ -17,7 +17,6 @@ import {
   type RunAttributeName,
   type RunStylePatch,
   type TextBody,
-  type TextDelta,
   type TextOperation,
   type TextRun,
 } from "../../contracts/index.ts";
@@ -220,30 +219,6 @@ export function plainTextOfFlat(items: FlatText, start: number, end: number): st
     }
   }
   return text;
-}
-
-/**
- * The delta that turns `before` into `after`, as one retain, delete, insert around the common
- * prefix and suffix. Enough for a single edit; used by the test stores to report `textChanges`.
- */
-export function deltaBetween(before: string, after: string): TextDelta {
-  let prefix = 0;
-  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1;
-  let suffix = 0;
-  while (
-    suffix < before.length - prefix &&
-    suffix < after.length - prefix &&
-    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
-  ) {
-    suffix += 1;
-  }
-  const deleted = before.length - prefix - suffix;
-  const inserted = after.length - prefix - suffix;
-  const delta: TextDelta[number][] = [];
-  if (prefix > 0) delta.push({ kind: "retain", length: prefix });
-  if (deleted > 0) delta.push({ kind: "delete", length: deleted });
-  if (inserted > 0) delta.push({ kind: "insert", length: inserted });
-  return delta;
 }
 
 export function patchRunStyle(style: RunStylePatch, patch: RunStylePatch, clear: readonly RunAttributeName[]): RunStylePatch {

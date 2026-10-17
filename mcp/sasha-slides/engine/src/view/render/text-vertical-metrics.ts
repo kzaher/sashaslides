@@ -24,7 +24,8 @@
 //    bottom-aligned box centres the full `lineSpacing` x 1.2 lines, trailing spacing included.
 //
 // How the stylesheet gets there (inline-styles.ts): a line box is `lineSpacing` x 1.2 of its own
-// size tall, LOWERED by `runDropEm` (vertical-align) so its top is the baseline's distance above
+// size tall, LOWERED by its drop (vertical-align: the family's `stylesheetBaselineInLineBox` plus the
+// spacing's `paragraphLineDropEm`) so its top is the baseline's distance above
 // it, and its glyphs RAISED back by the same amount (relative `top`), so all text keeps one
 // baseline. A paragraph's runs share one such box (the one span they sit in); a run larger than
 // the base moves its own box by the difference of the two drops. A line box is the union of these boxes, which is
@@ -119,15 +120,6 @@ export function slidesBaselineInLine(lineSpacing: number): number {
  */
 export function paragraphLineDropEm(lineSpacing: number): number {
   return ((lineSpacing - 1) * LINE_BOX_PER_LINE_SPACING) / 2 - slidesBaselineInLine(lineSpacing);
-}
-
-/**
- * How far a stylesheet's centred line box must move DOWN, in em of the run's own size, for its top
- * to sit Google's baseline offset above the baseline: the stylesheet's own offset at this spacing
- * (its half-leading plus the font's) minus Google's.
- */
-export function runDropEm(options: Readonly<{ lineSpacing: number; family: string }>): number {
-  return stylesheetBaselineInLineBox(options.family) + paragraphLineDropEm(options.lineSpacing);
 }
 
 /**

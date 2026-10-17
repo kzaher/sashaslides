@@ -14,13 +14,13 @@
 
 import type { ReactNode } from "react";
 import type { SchedulerLike } from "rxjs";
-import type { CollaborationSession, CollaborationStatus } from "./collaboration.ts";
+import type { CollaborationSession } from "./collaboration.ts";
 import type { CommentThread, DiscussionSnapshot, DiscussionStore, Person } from "./discussion.ts";
 import type { AssetStore, DocumentStore, TextRange } from "./document-store.ts";
 import type { DocumentSnapshot } from "./document.ts";
 import type { EditorEvent } from "./editor-events.ts";
 import type { ClipboardContent, ClipboardPayload, EditorEmbedding, EditorState } from "./editor-state.ts";
-import type { Box, Size } from "./geometry.ts";
+import type { Box } from "./geometry.ts";
 import type { ElementId, SlideId, ThreadId } from "./ids.ts";
 import type { PresenceChannel } from "./presence.ts";
 import type { PresenterDependencies } from "./presenter.ts";
@@ -52,22 +52,6 @@ export type EditorDependencies = Readonly<{
   reportError: (error: unknown, context: string) => void;
 }>;
 
-/** src/state/index.ts exports `createEditorSystem` of this type. */
-export type CreateEditorSystem = (dependencies: EditorDependencies) => RunningSystem<EditorState, EditorEvent>;
-
-/** src/state/index.ts exports `initialEditorState` of this type (pure; the tests' starting point). */
-export type InitialEditorState = (options: Readonly<{
-  me: Person;
-  sessionPrefix: string;
-  embedding: EditorEmbedding;
-  document: DocumentSnapshot;
-  discussion: DiscussionSnapshot;
-  containerSize: Size;
-  /** `collaboration.status()` when connected; `LOCAL_COLLABORATION_STATUS` otherwise. */
-  collaboration: CollaborationStatus;
-  /** The viewer's remembered recent colours (local storage in the web module), most recent first. */
-  recentColours: readonly Colour[];
-}>) => EditorState;
 
 /**
  * src/state/index.ts exports `clipboardContentFor` of this type: what a copy or cut of the current
@@ -115,7 +99,7 @@ export type BrowserCapabilities = Readonly<{
   openTab: (address: string) => void;
 }>;
 
-/** src/view/index.ts exports `EditorApplication`, a React component with these properties. */
+/** The view module's `EditorApplication` (view/application/editor-application.tsx), a React component with these properties. */
 export type EditorApplicationProperties = Readonly<{
   system: RunningSystem<EditorState, EditorEvent>;
   assetStore: AssetStore;

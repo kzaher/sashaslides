@@ -332,7 +332,7 @@ function renderTab(state: EditorState): string {
 function withServices(state: EditorState, child: ReactElement): string {
   const system = createRecordingSystem({ initial: state });
   const services = fixtureServices({ system });
-  const gesture = { system, browser: recordingCapabilities([]), clipboardContentFor: services.clipboardContentFor, presentationHost: () => null, speakerWindow: { current: null } };
+  const gesture = { system, browser: recordingCapabilities([]), clipboardContentFor: services.clipboardContentFor, presentationHost: () => null, speakerWindow: { current: null }, assetAddress: services.assetAddress };
   return renderToStaticMarkup(createElement(EditorServicesContext.Provider, { value: services }, createElement(EditorGestureContext.Provider, { value: gesture }, child)));
 }
 

@@ -424,7 +424,7 @@ function retryRequestOf(state: DeckConnectionState): Readonly<{ generation: numb
   }
 }
 
-/** After a 4001: ask for a fresh session, then reconnect (collaboration.ts `RECONNECT_AFTER_CLOSE`). */
+/** After a 4001: ask for a fresh session, then reconnect (reconnect-policy.ts `CLOSE_HANDLING`). */
 function sessionRefreshFeedback(dependencies: DeckCollaborationDependencies): Feedback<DeckConnectionState, DeckConnectionEvent> {
   return react<DeckConnectionState, number, DeckConnectionEvent>({
     query: (state) => refreshGenerationOf(state),

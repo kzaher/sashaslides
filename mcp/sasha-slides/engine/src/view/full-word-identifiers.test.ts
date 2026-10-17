@@ -27,10 +27,10 @@ const DICTATED_NAMES: ReadonlySet<string> = new Set(["__html"]);
 
 /**
  * Names one file must declare because its outside callers dictate them: the slide page export's
- * interface, which the reverse importer's pipeline and rating tools were written against.
+ * entry point, which the reverse importer's pipeline (renderer/html2slides/reverse) calls by name.
  */
 const DICTATED_IN_FILE: Readonly<Record<string, readonly string[]>> = {
-  "export/slide-html.ts": ["renderSlideHtml", "renderDeckHtml", "html"],
+  "export/slide-html.ts": ["renderSlideHtml"],
 };
 
 /**

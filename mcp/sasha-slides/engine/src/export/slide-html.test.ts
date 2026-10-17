@@ -10,25 +10,25 @@ import { assertNever } from "../contracts/assert-never.ts";
 import type { DocumentSnapshot, ElementSnapshot } from "../contracts/document.ts";
 import type { AssetId } from "../contracts/ids.ts";
 import { literalColour } from "../contracts/style.ts";
-import { sampleDeck } from "../view/sample/sample-deck.ts";
+import { sampleSlides } from "../view/sample/sample-deck.ts";
 import { IdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, groupElement, plainBody, shapeElement, slideSnapshot } from "../view/sample/snapshot-builders.ts";
-import { EXPORT_PAGE_SIZE, EXPORT_READY_ATTRIBUTE, fontStylesheetAddresses, pagePlacement, renderDeckHtml, renderSlideHtml, shrinkTargetsOf, unsubsetCharacters } from "./slide-html.ts";
+import { EXPORT_PAGE_SIZE, EXPORT_READY_ATTRIBUTE, fontStylesheetAddresses, pagePlacement, renderSlideHtml, shrinkTargetsOf, unsubsetCharacters } from "./slide-html.ts";
 
 const PHOTO = fixtureAssetId("export-photo");
 const PHOTO_ADDRESS = "data:image/png;base64,iVBORw0KGgo=";
 const assetAddress = (assetId: AssetId): string => (assetId === PHOTO ? PHOTO_ADDRESS : `data:image/png;base64,missing-${assetId}`);
-const deck = sampleDeck({ deckId: fixtureDeckId("export"), imageAssetId: PHOTO, extraSlideCount: 2 });
+const deck = documentSnapshot({ deckId: fixtureDeckId("export"), title: "Tidepool tour", slides: sampleSlides({ deckId: fixtureDeckId("export"), imageAssetId: PHOTO, extraSlideCount: 2 }) });
+/** The first slide's page, which several controls read. */
+const firstPage = (): string => {
+  const slide = deck.slides[0];
+  assert.ok(slide !== undefined);
+  return renderSlideHtml({ snapshot: deck, slideId: slide.id, assetAddress });
+};
 
 describe("every slide of the sample deck as a page", () => {
-  const pages = renderDeckHtml({ snapshot: deck, assetAddress });
-
-  it("one page per slide, in presentation order", () => {
-    assert.deepEqual(pages.map((page) => page.slideId), deck.slides.map((slide) => slide.id));
-  });
-
   deck.slides.forEach((slide, index) => {
     it(`slide ${index + 1} is a complete 1280 x 720 page holding every element it has`, () => {
-      const page = pages[index]?.html ?? "";
+      const page = renderSlideHtml({ snapshot: deck, slideId: slide.id, assetAddress });
       assert.match(page, /^<!doctype html>\n<html lang="en">/);
       assert.match(page, /<meta charset="utf-8">/);
       assert.match(page, /html,body\{margin:0;padding:0;width:1280px;height:720px;overflow:hidden/);
@@ -37,12 +37,6 @@ describe("every slide of the sample deck as a page", () => {
       for (const elementId of elementIdsOf(slide.elements)) assert.ok(page.includes(`data-sasha-element-id="${elementId}"`), `element ${elementId} is drawn`);
       assert.match(page, /<\/body>\n<\/html>\n$/);
     });
-  });
-
-  it("renderSlideHtml draws the same page renderDeckHtml does for that slide", () => {
-    const slide = deck.slides[2];
-    assert.ok(slide !== undefined);
-    assert.equal(renderSlideHtml({ snapshot: deck, slideId: slide.id, assetAddress }), pages[2]?.html);
   });
 
   it("a slide the deck does not have is an error, not an empty page", () => {
@@ -118,7 +112,7 @@ describe("page size", () => {
   });
 
   it("control: a 16:9 deck has no wrapper", () => {
-    assert.doesNotMatch(renderDeckHtml({ snapshot: deck, assetAddress })[0]?.html ?? "", /transform:scale\(/);
+    assert.doesNotMatch(firstPage(), /transform:scale\(/);
   });
 });
 
@@ -157,7 +151,7 @@ describe("fonts", () => {
   });
 
   it("control: a slide without such symbols requests no text= stylesheet", () => {
-    assert.doesNotMatch(renderDeckHtml({ snapshot: deck, assetAddress })[0]?.html ?? "", /&amp;text=/);
+    assert.doesNotMatch(firstPage(), /&amp;text=/);
   });
 
   it("control: a system family is never requested", () => {
@@ -165,7 +159,7 @@ describe("fonts", () => {
   });
 
   it("the sample deck's Manrope reaches the page as escaped links", () => {
-    assert.match(renderDeckHtml({ snapshot: deck, assetAddress })[0]?.html ?? "", /<link rel="stylesheet" href="https:\/\/fonts.googleapis.com\/css2\?family=Manrope:ital,wght@0,700&amp;display=block">/);
+    assert.match(firstPage(), /<link rel="stylesheet" href="https:\/\/fonts.googleapis.com\/css2\?family=Manrope:ital,wght@0,700&amp;display=block">/);
   });
 
   it("a Georgia title draws Georgia, then Gelasio, then serif, and the page loads and waits for Gelasio", () => {

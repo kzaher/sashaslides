@@ -7,12 +7,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import * as sashaIcon from "../../../../http/sasha-icon.generated.ts";
 import { DECK_ROLES, type DeckRole } from "../../contracts/deck-access.ts";
 import type { DeckSummary } from "../../contracts/deck-api.ts";
 import { parseDeckId } from "../../contracts/ids.ts";
 import { tidepoolCustomProperties, TIDEPOOL_TOKENS } from "../../theme/tidepool-theme.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
-import { SASHA_LOGO_MARKUP, editedAgo } from "../shared/web-chrome.tsx";
+import { editedAgo } from "../shared/web-chrome.tsx";
 import { PEER_PERSON, TEST_PERSON } from "../testing/collaboration-harness.ts";
 import { webStylesheet } from "../web-stylesheet.ts";
 import { DeckListPage, type DeckListActions } from "./deck-list-page.tsx";
@@ -65,8 +66,9 @@ describe("9. the deck list", () => {
 
   it("carries the real Sasha Slides logo, the lively shapes, and the account", () => {
     const markup = render(loaded(decks));
-    assert.ok(SASHA_LOGO_MARKUP.startsWith("<svg") && SASHA_LOGO_MARKUP.length > 1000, "the generated logo, not a placeholder");
-    assert.ok(markup.includes(SASHA_LOGO_MARKUP), "the logo markup is on the page");
+    const logo = sashaIcon.SASHA_ICON_SVG;
+    assert.ok(logo.startsWith("<svg") && logo.length > 1000, "the generated logo, not a placeholder");
+    assert.ok(markup.includes(logo), "the logo markup is on the page");
     assert.ok(markup.includes(`class="${TIDEPOOL_CLASS.livelyGround}"`), "LivelyShapes");
     assert.ok(markup.includes("ada@example.com"));
     assert.ok(markup.includes('href="/account"'));

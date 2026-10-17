@@ -75,8 +75,6 @@ export type FractionalRegion = Readonly<{ x: number; y: number; width: number; h
 /** A point as fractions (0..1) of the same reference box as a `FractionalRegion`. */
 export type FractionalPoint = Readonly<{ x: number; y: number }>;
 
-export const WHOLE_REGION: FractionalRegion = { x: 0, y: 0, width: 1, height: 1 };
-
 /** The eight resize handles, as hit-testing reports them (the rotation handle is its own target). */
 export type ResizeHandle =
   | "topLeft"

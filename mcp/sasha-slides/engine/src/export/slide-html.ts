@@ -54,28 +54,12 @@ export type SlideExportOptions = Readonly<{
   assetAddress: (assetId: AssetId) => string;
 }>;
 
-export type DeckExportOptions = Readonly<{
-  snapshot: DocumentSnapshot;
-  assetAddress: (assetId: AssetId) => string;
-}>;
-
-export type ExportedSlide = Readonly<{ slideId: SlideId; html: string }>;
-
 /** One slide as a self-contained 1280 x 720 page (see the header). */
 export function renderSlideHtml(options: SlideExportOptions): string {
   const slideIndex = options.snapshot.slides.findIndex((slide) => slide.id === options.slideId);
   const slide = options.snapshot.slides[slideIndex];
   if (slide === undefined) throw new Error(`The deck has no slide ${options.slideId}.`);
   return slidePage({ snapshot: options.snapshot, slide, slideNumber: slideIndex + 1, assetAddress: options.assetAddress, slideNumberOf: slideNumberLookup(options.snapshot) });
-}
-
-/** Every slide of the deck, skipped ones included, in presentation order. */
-export function renderDeckHtml(options: DeckExportOptions): readonly ExportedSlide[] {
-  const slideNumberOf = slideNumberLookup(options.snapshot);
-  return options.snapshot.slides.map((slide, index) => ({
-    slideId: slide.id,
-    html: slidePage({ snapshot: options.snapshot, slide, slideNumber: index + 1, assetAddress: options.assetAddress, slideNumberOf }),
-  }));
 }
 
 /** The scale and offset that fit a 1280-wide page of `pageHeight` into the exported page. */

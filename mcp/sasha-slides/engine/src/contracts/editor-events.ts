@@ -183,8 +183,6 @@ export type EditorEvent =
   /** The colour picker applied a colour; it moves to the front of `chrome.recentColours`. */
   | Readonly<{ kind: "recentColourUsed"; colour: Colour }>;
 
-export type EditorEventKind = EditorEvent["kind"];
-
 /** A key with normalised modifiers; `key` is KeyboardEvent.key, `code` is KeyboardEvent.code. */
 export type KeyChord = Readonly<{ key: string; code: string; modifiers: Modifiers }>;
 

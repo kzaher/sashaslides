@@ -42,7 +42,7 @@ import {
   type TextTargetKey,
 } from "../../contracts/index.ts";
 import { textBodyOf } from "../editor/document-lookup.ts";
-import { applyTextOperations, bodyFromFlat, deltaBetween, flattenBody, type FlatText } from "../editor/text-model.ts";
+import { applyTextOperations, bodyFromFlat, flattenBody, type FlatText } from "../editor/text-model.ts";
 import type { VirtualScheduler } from "./virtual-scheduler.ts";
 
 export type Settlement = Readonly<{ kind: "synchronously" }> | Readonly<{ kind: "onScheduler"; scheduler: VirtualScheduler; delayMilliseconds: number }>;
@@ -50,8 +50,6 @@ export type Settlement = Readonly<{ kind: "synchronously" }> | Readonly<{ kind: 
 export type FakeDocumentStore = DocumentStore &
   Readonly<{
     appliedEnvelopes: () => readonly CommandEnvelope[];
-    /** A collaborator types `text` at `index`: applied and emitted as a remote change. */
-    remoteInsert: (options: Readonly<{ target: TextTarget; index: number; text: string }>) => void;
     /** The outcome the next undo or redo returns (otherwise "nothing to do"). */
     queueHistoryOutcome: (outcome: HistoryOutcome) => void;
     plainTextOf: (target: TextTarget) => string;
@@ -114,18 +112,6 @@ export function createFakeDocumentStore(options: Readonly<{ initial: DocumentSna
     resolveTextAnchors: (anchors) =>
       anchors.map((anchor) => (textBodyOf(snapshot, anchor.target) === null ? null : { target: anchor.target, start: Number(anchor.start), end: Number(anchor.end) })),
     appliedEnvelopes: () => applied.slice(),
-    remoteInsert: (insert) => {
-      const result = applyCommands(snapshot, [{ kind: "editText", target: insert.target, basedOnRevision: snapshot.revision, operations: [{ kind: "insert", index: insert.index, text: insert.text, style: {} }] }]);
-      switch (result.kind) {
-        case "rejected":
-          throw new Error("remote insert rejected");
-        case "applied":
-          commit(result.snapshot, { kind: "remote" }, result.textChanges, result.changedSlideIds);
-          return;
-        default:
-          assertNever(result);
-      }
-    },
     queueHistoryOutcome: (outcome) => {
       historyOutcomes.push(outcome);
     },
@@ -347,6 +333,30 @@ function idsInTrees(elements: readonly ElementSnapshot[]): readonly string[] {
         return assertNever(element);
     }
   });
+}
+
+/**
+ * The delta that turns `before` into `after`, as one retain, delete, insert around the common
+ * prefix and suffix. Enough for a single edit; how these stores report `textChanges`.
+ */
+function deltaBetween(before: string, after: string): TextDelta {
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < before.length - prefix &&
+    suffix < after.length - prefix &&
+    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  const deleted = before.length - prefix - suffix;
+  const inserted = after.length - prefix - suffix;
+  const delta: TextDelta[number][] = [];
+  if (prefix > 0) delta.push({ kind: "retain", length: prefix });
+  if (deleted > 0) delta.push({ kind: "delete", length: deleted });
+  if (inserted > 0) delta.push({ kind: "insert", length: inserted });
+  return delta;
 }
 
 /** One character per index: what `deltaBetween` diffs. */

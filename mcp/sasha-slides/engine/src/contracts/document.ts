@@ -204,9 +204,6 @@ export type ShapePreset =
   | "upArrow"
   | "downArrow";
 
-/** The presets drawn as a box (per-side borders, per-corner radii); the rest are vector paths. */
-export const RECTANGLE_FAMILY_PRESETS: readonly ShapePreset[] = ["textBox", "rectangle", "roundedRectangle"];
-
 export type ShapeElement = ElementCommon &
   Readonly<{
     kind: "shape";

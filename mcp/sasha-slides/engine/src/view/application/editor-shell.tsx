@@ -47,7 +47,7 @@ export function EditorShell(properties: Readonly<{ services: EditorServices }>):
   const presentationHost = useRef<HTMLDivElement>(null);
   const speakerWindow = useRef<Window | null>(null);
   const gesture = useMemo<GestureContext>(
-    () => ({ system: services.system, browser: services.browser, clipboardContentFor: services.clipboardContentFor, presentationHost: () => presentationHost.current, speakerWindow }),
+    () => ({ system: services.system, browser: services.browser, clipboardContentFor: services.clipboardContentFor, presentationHost: () => presentationHost.current, speakerWindow, assetAddress: services.assetAddress }),
     [services],
   );
   const [showAnnotations, setShowAnnotations] = useState(true);

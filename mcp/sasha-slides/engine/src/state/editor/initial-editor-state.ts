@@ -3,9 +3,14 @@
 
 import {
   DOCUMENT_SCHEMA_VERSION,
+  type CollaborationStatus,
+  type Colour,
+  type DiscussionSnapshot,
+  type DocumentSnapshot,
+  type EditorEmbedding,
   type EditorState,
-  type InitialEditorState,
   type PageSize,
+  type Person,
   type Size,
   type ZoomSetting,
 } from "../../contracts/index.ts";
@@ -17,7 +22,18 @@ export const FIT_MARGIN_CLIENT_PIXELS = 40;
 /** The smallest client-pixels-per-unit the canvas uses, so a collapsed container never divides by zero. */
 export const MINIMUM_SCALE = 0.05;
 
-export const initialEditorState: InitialEditorState = (options) => {
+export const initialEditorState = (options: Readonly<{
+  me: Person;
+  sessionPrefix: string;
+  embedding: EditorEmbedding;
+  document: DocumentSnapshot;
+  discussion: DiscussionSnapshot;
+  containerSize: Size;
+  /** `collaboration.status()` when connected; `LOCAL_COLLABORATION_STATUS` otherwise. */
+  collaboration: CollaborationStatus;
+  /** The viewer's remembered recent colours (local storage in the web module), most recent first. */
+  recentColours: readonly Colour[];
+}>): EditorState => {
   const state: EditorState = {
     me: options.me,
     idSeed: { sessionPrefix: options.sessionPrefix, counter: 0 },

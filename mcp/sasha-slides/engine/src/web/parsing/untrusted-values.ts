@@ -46,10 +46,6 @@ export function recordOf(value: unknown, what: string): UntrustedRecord {
   return value as UntrustedRecord;
 }
 
-export function recordAt(record: UntrustedRecord, key: string): UntrustedRecord {
-  return recordOf(record[key], key);
-}
-
 export function stringOf(value: unknown, what: string): string {
   if (typeof value !== "string") throw new MalformedValue(`${what} is not text`);
   return value;
@@ -81,12 +77,6 @@ export function numberOrNullAt(record: UntrustedRecord, key: string): number | n
 export function nonNegativeIntegerAt(record: UntrustedRecord, key: string): number {
   const value = numberAt(record, key);
   if (!Number.isInteger(value) || value < 0) throw new MalformedValue(`${key} is not a whole number`);
-  return value;
-}
-
-export function booleanAt(record: UntrustedRecord, key: string): boolean {
-  const value = record[key];
-  if (typeof value !== "boolean") throw new MalformedValue(`${key} is not true or false`);
   return value;
 }
 

@@ -10,7 +10,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { compositeOver, contrastRatio, opaque, parseColour, washFilter, type OpaqueColour } from "./colour-contrast.ts";
+import { compositeOver, contrastRatio, opaque, parseColour, washFilter, type OpaqueColour } from "./testing/colour-contrast.ts";
 import { TIDEPOOL_TOKENS, tidepoolCustomProperties, type SchemeName, type TidepoolScheme } from "./tidepool-theme.ts";
 import { TIDEPOOL_CLASS, tidepoolRules, tidepoolStylesheet } from "./tidepool-stylesheet.ts";
 

@@ -4,10 +4,5 @@
 // and the tests run it under fake connections. Like the model, every import names a DOM-free
 // contract file, never contracts/index.ts.
 
-export { createDeckRoom, STORAGE_ORIGIN, type CreateDeckRoomOptions, type DeckRoom, type RoomApplyOutcome, type RoomConnection, type RoomConnectionPort, type RoomFrame } from "./deck-room.ts";
-export { createAwarenessRelay, decodeAwarenessUpdate, encodeAwarenessUpdate, type AwarenessEntry, type AwarenessRelay } from "./awareness-relay.ts";
-export { parseClientMessage, parseDiscussionRequest, type ParsedClientMessage } from "./client-messages.ts";
-export { decideDiscussionRequest, discussionAuthorityFromLog, type DiscussionAuthorityState, type DiscussionDecision } from "./discussion-authority.ts";
-export { correctionsFor, type GuardDecision, type GuardSender } from "./protected-field-guard.ts";
-export { DEFAULT_RATE_LIMIT_POLICY, initialRateLimitState, takeToken, type RateLimitPolicy, type RateLimitState, type RateLimitVerdict } from "./rate-limit.ts";
+export { createDeckRoom, type DeckRoom, type RoomConnection, type RoomConnectionPort, type RoomFrame } from "./deck-room.ts";
 export { isDocumentUpdate, mergeDocumentUpdates } from "./document-updates.ts";

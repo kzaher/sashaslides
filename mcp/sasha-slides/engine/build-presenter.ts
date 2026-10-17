@@ -1,4 +1,4 @@
-// THE PRESENTER'S BUILD STEP (contracts/module-surfaces.ts `BuildPresenterAssets`): bundles the
+// THE PRESENTER'S BUILD STEP: bundles the
 // runner bootstrap (src/presenter/runner/bootstrap.ts) with esbuild into `runner-bootstrap.js` and
 // writes the runner page `index.html` next to it in `outputDirectory`, then returns the page's path
 // relative to that directory and the content security policy its server must send with it. The
@@ -13,10 +13,22 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import type { BuildPresenterAssets } from "./src/contracts/index.ts";
 import { RUNNER_BOOTSTRAP_FILE, RUNNER_CONTENT_SECURITY_POLICY, runnerPageMarkup } from "./src/presenter/runner/runner-page.ts";
 
-export const buildPresenterAssets: BuildPresenterAssets = async (options) => {
+/** What the runner build produced, as the server needs it. */
+export type RunnerBuild = Readonly<{
+  /** The runner page's path relative to `outputDirectory`. */
+  runnerPagePath: string;
+  /** The header the server must send with the runner page (transition-protocol.ts header). */
+  runnerContentSecurityPolicy: string;
+}>;
+
+/**
+ * Writes the runner page and its bootstrap DIRECTLY into `outputDirectory` (no subdirectory), so the
+ * caller passes the directory it serves on the runner's site (dist/runner) and addresses the page by
+ * the returned `runnerPagePath`, never by a guessed file name.
+ */
+export const buildPresenterAssets = async (options: Readonly<{ outputDirectory: string; minify: boolean }>): Promise<RunnerBuild> => {
   await mkdir(options.outputDirectory, { recursive: true });
   await build({
     entryPoints: [fileURLToPath(new URL("./src/presenter/runner/bootstrap.ts", import.meta.url))],
