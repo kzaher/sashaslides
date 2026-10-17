@@ -24,9 +24,10 @@ import type {
   InterchangeLoss,
   InviteBody,
 } from "../../contracts/deck-api.ts";
-import type { AssetMediaType } from "../../contracts/document.ts";
 import { parseAssetId, parseDeckId, parseElementId, parseSlideId } from "../../contracts/ids.ts";
-import { readDeckMember, readDeckRole, readPerson } from "./collaboration-values.ts";
+import { ASSET_MEDIA_TYPES } from "../../shared/media-types.ts";
+import { readPerson } from "../../shared/discussion-wire-values.ts";
+import { readDeckMember, readDeckRole } from "./collaboration-values.ts";
 import {
   identifierAt,
   keysOf,
@@ -38,7 +39,7 @@ import {
   recordOf,
   stringAt,
   stringOrNullAt,
-} from "./untrusted-values.ts";
+} from "../../shared/untrusted-values.ts";
 
 export function readDeckApiError(value: unknown): DeckApiErrorBody {
   const record = recordOf(value, "error body");
@@ -161,7 +162,6 @@ const DECK_API_ERROR_CODES = keysOf<DeckApiErrorCode>({
 });
 const AUTHENTICATION_KINDS = keysOf<DeckSessionBody["authentication"]>({ cookie: true, bearer: true });
 const INVITE_OUTCOMES = keysOf<InviteBody["outcome"]>({ added: true, invited: true, alreadyMember: true });
-const ASSET_MEDIA_TYPES = keysOf<AssetMediaType>({ "image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true, "image/svg+xml": true });
 const REVERT_KINDS = keysOf<AgentRevertOutcome["kind"]>({ reverted: true, nothingToRevert: true, notPermitted: true, failed: true });
 const EXPORT_KINDS = keysOf<GoogleSlidesExportBody["kind"]>({ exported: true, runInAddon: true });
 const LINK_SHARING_KINDS = keysOf<LinkSharing["kind"]>({ off: true, anyoneSignedIn: true });

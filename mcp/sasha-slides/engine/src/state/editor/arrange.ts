@@ -19,12 +19,12 @@ import {
   type Box,
   type DocumentCommand,
   type EditorState,
-  type ElementSnapshot,
   type FrameUpdate,
   type SlideId,
 } from "../../contracts/index.ts";
+import { elementOfKind } from "../../shared/element-tree.ts";
 import { elementBounds, slideBox } from "./document-lookup.ts";
-import { queueEnvelope } from "./editor-queue.ts";
+import { queueCommands, queueEnvelope } from "./editor-queue.ts";
 import { selectedElements, type SelectedElements } from "./editor-selection.ts";
 import { createIdMinter } from "./id-minter.ts";
 import { boundsOfUpdates, flipUpdates, groupRotationUpdates, leafUpdates, rotateUpdates, scaleUpdates, selectionFrame, translateUpdates } from "./frame-updates.ts";
@@ -37,11 +37,7 @@ export function reduceArrange(state: EditorState, action: ArrangeAction): Editor
   const slideId = selected.slide.id;
   switch (action.kind) {
     case "reorder":
-      return queueEnvelope(state, {
-        commands: [{ kind: "reorderElements", slideId, elementIds: selected.elements.map((element) => element.id), placement: action.placement }],
-        selectionAfter: state.selection,
-        mergeWithPrevious: false,
-      });
+      return queueCommands(state, [{ kind: "reorderElements", slideId, elementIds: selected.elements.map((element) => element.id), placement: action.placement }]);
     case "align":
       return queueFrames(state, slideId, alignUpdates({ state, selected, edge: action.edge }));
     case "distribute":
@@ -164,7 +160,7 @@ export function editFrameField(state: EditorState, field: "x" | "y" | "width" | 
 function queueFrames(state: EditorState, slideId: SlideId, frames: readonly FrameUpdate[]): EditorState {
   if (frames.length === 0) return state;
   const commands: readonly DocumentCommand[] = [{ kind: "setFrames", slideId, frames }];
-  return queueEnvelope(state, { commands, selectionAfter: state.selection, mergeWithPrevious: false });
+  return queueCommands(state, commands);
 }
 
 function groupSelection(state: EditorState, selected: SelectedElements): EditorState {
@@ -182,29 +178,14 @@ function groupSelection(state: EditorState, selected: SelectedElements): EditorS
 }
 
 function ungroupSelection(state: EditorState, selected: SelectedElements): EditorState {
-  const groups = selected.elements.filter((element) => childrenIfGroup(element) !== null);
+  const groups = selected.elements.filter((element) => elementOfKind(element, "group") !== null);
   if (groups.length === 0) return state;
-  const childIds = selected.elements.flatMap((element) => (childrenIfGroup(element) ?? [element]).map((child) => child.id));
+  const childIds = selected.elements.flatMap((element) => (elementOfKind(element, "group")?.children ?? [element]).map((child) => child.id));
   return queueEnvelope(state, {
     commands: [{ kind: "ungroupElements", slideId: selected.slide.id, groupIds: groups.map((group) => group.id) }],
     selectionAfter: { kind: "elements", slideId: selected.slide.id, elementIds: childIds },
     mergeWithPrevious: false,
   });
-}
-
-function childrenIfGroup(element: ElementSnapshot): readonly ElementSnapshot[] | null {
-  switch (element.kind) {
-    case "group":
-      return element.children;
-    case "shape":
-    case "image":
-    case "line":
-    case "table":
-    case "unsupported":
-      return null;
-    default:
-      return assertNever(element);
-  }
 }
 
 function alignOffset(edge: AlignEdge, bounds: Box, reference: Box): Readonly<{ x: number; y: number }> {

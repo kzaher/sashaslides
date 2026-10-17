@@ -20,7 +20,6 @@ import type {
   ElementId,
   Frame,
   GroupElement,
-  IdSeed,
   ImageElement,
   LineElement,
   MintedIdByKind,
@@ -33,8 +32,10 @@ import type {
   TableElement,
   TextBody,
 } from "../../contracts/index.ts";
-import { DEFAULT_TEXT_BOX_STYLE, identityFrame, lineFrame, mintId, parseAssetId, parseElementId, parsePersonId, PLAIN_BOX_STYLE, themeColour } from "../../contracts/index.ts";
+import { DEFAULT_TEXT_BOX_STYLE, identityFrame, parseAssetId, parseElementId, parsePersonId, themeColour } from "../../contracts/index.ts";
 import { createDocumentStore } from "../document-store.ts";
+import { imageElement, lineElement, shapeElement } from "../../contracts/testing/snapshot-builders.ts";
+import { createPrefixedIdMinter } from "../../shared/id-minter.ts";
 
 /** Mulberry32: a small, well-mixed 32-bit generator; the same seed always gives the same sequence. */
 export function seededRandom(seed: number): RandomSource {
@@ -87,12 +88,7 @@ export function createTestStore(
 
 /** Mints branded ids from a fixed session prefix, the way the editor does (ids.ts). */
 export function idMinter(sessionPrefix: string): <TKind extends ObjectIdKind>(kind: TKind) => MintedIdByKind[TKind] {
-  let seed: IdSeed = { sessionPrefix, counter: 0 };
-  return (kind) => {
-    const minted = mintId({ seed, kind });
-    seed = minted.seed;
-    return minted.id;
-  };
+  return createPrefixedIdMinter(sessionPrefix).next;
 }
 
 export function personId(text: string): PersonId {
@@ -164,62 +160,25 @@ export function box(options: Readonly<{ x: number; y: number; width: number; hei
 }
 
 export function shape(options: Readonly<{ id: ElementId; frame?: Frame; text?: TextBody; customOutline?: CustomOutline }>): ShapeElement {
-  return {
+  return shapeElement({
     id: options.id,
-    kind: "shape",
-    name: "",
-    description: "",
     frame: options.frame ?? box({ x: 100, y: 100, width: 200, height: 100 }),
-    groupId: null,
-    morphKey: options.id,
-    placeholder: null,
-    unsupportedKeys: [],
-    preset: "rectangle",
-    customOutline: options.customOutline ?? null,
-    box: PLAIN_BOX_STYLE,
-    textBox: DEFAULT_TEXT_BOX_STYLE,
+    ...(options.customOutline === undefined ? {} : { customOutline: options.customOutline }),
     text: options.text ?? textBody(""),
-  };
+  });
 }
 
 export function line(options: Readonly<{ id: ElementId }>): LineElement {
-  const start = { x: 10, y: 10 };
-  const end = { x: 210, y: 60 };
-  return {
+  return lineElement({
     id: options.id,
-    kind: "line",
-    name: "",
-    description: "",
-    frame: lineFrame({ start, end }),
-    groupId: null,
-    morphKey: options.id,
-    placeholder: null,
-    unsupportedKeys: [],
-    start,
-    end,
-    routing: "straight",
+    start: { x: 10, y: 10 },
+    end: { x: 210, y: 60 },
     stroke: { width: 3, colour: themeColour({ slot: "accent1", alpha: 1 }), dash: "solid" },
-    startArrow: "none",
-    endArrow: "triangle",
-    opacity: 1,
-  };
+  });
 }
 
 export function image(options: Readonly<{ id: ElementId; assetId: AssetId }>): ImageElement {
-  return {
-    id: options.id,
-    kind: "image",
-    name: "",
-    description: "a photo",
-    frame: box({ x: 400, y: 100, width: 320, height: 200 }),
-    groupId: null,
-    morphKey: options.id,
-    placeholder: null,
-    unsupportedKeys: [],
-    assetId: options.assetId,
-    crop: { left: 0, top: 0, right: 0, bottom: 0 },
-    box: PLAIN_BOX_STYLE,
-  };
+  return imageElement({ id: options.id, assetId: options.assetId, box: { x: 400, y: 100, width: 320, height: 200 }, description: "a photo" });
 }
 
 export function group(options: Readonly<{ id: ElementId; children: GroupElement["children"]; rotation?: number }>): GroupElement {

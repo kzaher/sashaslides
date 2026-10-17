@@ -28,7 +28,7 @@ import { buildSegmentTimeline } from "../builds/build-states.ts";
 import { slideOnSide } from "../builds/run-slides.ts";
 import { hostRunnerId } from "../presenter-queries.ts";
 import { slideById, type PresenterSystemState } from "../presenter-state.ts";
-import { stageElementRecordsOf } from "../stage-elements.ts";
+import { stageElementRecordsOf } from "../../shared/stage-elements.ts";
 import { buildTransitionContext, type AnimateNode, type StartTimer, type TransitionStage } from "../transition-context.ts";
 
 /** Where React registers the stage of the live in-page run. */

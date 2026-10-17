@@ -25,6 +25,7 @@
 
 import type { Frame } from "../../contracts/geometry.ts";
 import type { TransitionDefinition } from "../../contracts/transition-protocol.ts";
+import { roundTo } from "../../shared/numbers.ts";
 import { allFinished, builtinTiming } from "./builtin-parameters.ts";
 
 export const MORPH_TRANSITION: TransitionDefinition = {
@@ -119,5 +120,5 @@ function flipSign(flipped: boolean): number {
 }
 
 function round(value: number): number {
-  return Math.round(value * 10_000) / 10_000;
+  return roundTo(value, 4);
 }

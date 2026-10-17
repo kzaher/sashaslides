@@ -20,6 +20,7 @@ import {
   type ServerMessage,
 } from "../../contracts/collaboration.ts";
 import { assertNever } from "../../contracts/assert-never.ts";
+import { syncStepOneFrame, syncUpdateFrame } from "../../shared/sync-frames.ts";
 import type { DeckMember, DeckRole } from "../../contracts/deck-access.ts";
 import type { DiscussionRequest, Person } from "../../contracts/discussion.ts";
 import type { DeckId } from "../../contracts/ids.ts";
@@ -72,10 +73,7 @@ export function createFakeDeckServer(options: Readonly<{ deckId: DeckId; me: Per
   document.on("update", (update: Uint8Array, origin: unknown) => {
     for (const connection of welcomed) {
       if (connection === origin) continue;
-      const encoder = encoding.createEncoder();
-      encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.sync);
-      syncProtocol.writeUpdate(encoder, update);
-      connection.sendBinary(encoding.toUint8Array(encoder));
+      connection.sendBinary(syncUpdateFrame(update));
     }
   });
 
@@ -135,10 +133,7 @@ export function createFakeDeckServer(options: Readonly<{ deckId: DeckId; me: Per
           discussionSequence: welcomeOptions?.discussionSequence ?? 0,
         };
         queue(JSON.stringify(message));
-        const encoder = encoding.createEncoder();
-        encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.sync);
-        syncProtocol.writeSyncStep1(encoder, document);
-        queue(encoding.toUint8Array(encoder));
+        queue(syncStepOneFrame(document));
         welcomed.add(connection);
       },
       handshake: (handshakeOptions) => {

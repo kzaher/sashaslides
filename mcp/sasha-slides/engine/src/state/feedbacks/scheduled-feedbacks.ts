@@ -31,9 +31,7 @@ import { assertNever } from "../../contracts/index.ts";
 import { sameValue } from "../editor/text-model.ts";
 import { UPLOAD_ATTEMPT_TIMEOUT_MILLISECONDS, UPLOAD_ATTEMPTS, UPLOAD_FIRST_BACKOFF_MILLISECONDS } from "../editor/uploads.ts";
 import { reactSet } from "../rxfeedback/react-feedbacks.ts";
-import { messageOf } from "./document-feedbacks.ts";
-
-type ReportError = (error: unknown, context: string) => void;
+import { messageOf, type ReportError } from "./document-feedbacks.ts";
 
 export function uploadsFeedback(dependencies: Readonly<{ assetStore: AssetStore; scheduler: SchedulerLike; reportError: ReportError }>): Feedback<EditorState, EditorEvent> {
   return reactSet<EditorState, PendingUpload, EditorEvent>({

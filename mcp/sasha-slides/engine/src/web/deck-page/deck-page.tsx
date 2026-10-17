@@ -13,14 +13,14 @@ import { EditorApplication } from "../../view/application/editor-application.tsx
 import { SashaLogo } from "../shared/web-chrome.tsx";
 import { WEB_CLASS } from "../web-stylesheet.ts";
 import type { PageNotice } from "./deck-exports.ts";
-import type { DeckEditor } from "./deck-editor.ts";
+import type { ComposedEditor } from "../../view/application/compose-editor.ts";
 import { PageNotices } from "./deck-host.tsx";
 import type { DeckWorkspace, WorkspaceView } from "./deck-workspace.ts";
 
 export type NumberedNotice = PageNotice & Readonly<{ id: number }>;
 
 export function DeckPage(properties: Readonly<{
-  workspace: DeckWorkspace<DeckEditor>;
+  workspace: DeckWorkspace<ComposedEditor>;
   /** The host for the current role (the role decides which File items are enabled). */
   hostFor: (role: DeckRole) => EditorHost;
   notices: readonly NumberedNotice[];
@@ -35,7 +35,7 @@ export function DeckPage(properties: Readonly<{
   );
 }
 
-function WorkspaceContent(properties: Readonly<{ view: WorkspaceView<DeckEditor>; hostFor: (role: DeckRole) => EditorHost }>): ReactElement {
+function WorkspaceContent(properties: Readonly<{ view: WorkspaceView<ComposedEditor>; hostFor: (role: DeckRole) => EditorHost }>): ReactElement {
   const view = properties.view;
   switch (view.kind) {
     case "opening":
@@ -49,7 +49,7 @@ function WorkspaceContent(properties: Readonly<{ view: WorkspaceView<DeckEditor>
   }
 }
 
-function ReadyEditor(properties: Readonly<{ editor: DeckEditor; session: DeckEditorSession; hostFor: (role: DeckRole) => EditorHost }>): ReactElement {
+function ReadyEditor(properties: Readonly<{ editor: ComposedEditor; session: DeckEditorSession; hostFor: (role: DeckRole) => EditorHost }>): ReactElement {
   const session = properties.session;
   const [status, setStatus] = useState(() => session.status());
   useEffect(() => {
@@ -77,7 +77,7 @@ function ReadyEditor(properties: Readonly<{ editor: DeckEditor; session: DeckEdi
   );
 }
 
-type DeckEditorSession = Extract<WorkspaceView<DeckEditor>, { kind: "ready" }>["replica"]["collaboration"]["session"];
+type DeckEditorSession = Extract<WorkspaceView<ComposedEditor>, { kind: "ready" }>["replica"]["collaboration"]["session"];
 
 /** The calm wash with one card, until the first sync. */
 export function OpeningDeck(): ReactElement {
@@ -136,7 +136,7 @@ function unavailableSentence(reason: ClosedReason): string {
   }
 }
 
-function useObservedView(workspace: DeckWorkspace<DeckEditor>): WorkspaceView<DeckEditor> {
+function useObservedView(workspace: DeckWorkspace<ComposedEditor>): WorkspaceView<ComposedEditor> {
   const [view, setView] = useState(() => workspace.current());
   useEffect(() => {
     const subscription = workspace.view$.subscribe(setView);

@@ -20,7 +20,7 @@ import type { AutomaticTextField, Paragraph, TextBody, TextRun } from "../contra
 import type { ParagraphStylePatch, RunStylePatch } from "../contracts/style.ts";
 import { assertNever } from "../contracts/assert-never.ts";
 import { AUTOMATIC_TEXT_EMBED_KEY, PARAGRAPH_ATTRIBUTE_NAMES, RUN_ATTRIBUTE_NAMES } from "../contracts/yjs-schema.ts";
-import { isRecord, PARAGRAPH_ATTRIBUTE_CHECKS, RUN_ATTRIBUTE_CHECKS } from "./stored-values.ts";
+import { isRecord, PARAGRAPH_ATTRIBUTE_CHECKS, RUN_ATTRIBUTE_CHECKS, type Verdict } from "./stored-values.ts";
 
 /** Attribute values as Yjs stores them; `null` removes an attribute (yjs-schema.ts). */
 export type TextAttributes = Readonly<Record<string, unknown>>;
@@ -91,10 +91,10 @@ export function applyTextOperations(text: Y.Text, operations: readonly TextOpera
         if (operation.length > 0) text.delete(operation.index, operation.length);
         break;
       case "formatRuns":
-        formatRuns({ text, index: operation.index, length: operation.length, attributes: runFormatAttributes(operation.patch, operation.clear) });
+        formatRuns({ text, index: operation.index, length: operation.length, attributes: formatAttributes({ patch: operation.patch, names: RUN_ATTRIBUTE_NAMES, clear: operation.clear }) });
         break;
       case "formatParagraphs":
-        formatParagraphs({ text, index: operation.index, length: operation.length, attributes: paragraphFormatAttributes(operation.patch, operation.clear) });
+        formatParagraphs({ text, index: operation.index, length: operation.length, attributes: formatAttributes({ patch: operation.patch, names: PARAGRAPH_ATTRIBUTE_NAMES, clear: operation.clear }) });
         break;
       default:
         assertNever(operation);
@@ -104,18 +104,12 @@ export function applyTextOperations(text: Y.Text, operations: readonly TextOpera
 
 /** Rule 1: the run's own values, and null for every other run key and every paragraph key. */
 export function runInsertAttributes(style: RunStylePatch): TextAttributes {
-  const attributes: Record<string, unknown> = {};
-  for (const name of RUN_ATTRIBUTE_NAMES) attributes[name] = style[name] ?? null;
-  for (const name of PARAGRAPH_ATTRIBUTE_NAMES) attributes[name] = null;
-  return attributes;
+  return completeAttributes({ style, names: RUN_ATTRIBUTE_NAMES, nulled: PARAGRAPH_ATTRIBUTE_NAMES });
 }
 
 /** Rule 2: the paragraph's values, and null for every other paragraph key and every run key. */
 export function paragraphMarkAttributes(style: ParagraphStylePatch): TextAttributes {
-  const attributes: Record<string, unknown> = {};
-  for (const name of PARAGRAPH_ATTRIBUTE_NAMES) attributes[name] = style[name] ?? null;
-  for (const name of RUN_ATTRIBUTE_NAMES) attributes[name] = null;
-  return attributes;
+  return completeAttributes({ style, names: PARAGRAPH_ATTRIBUTE_NAMES, nulled: RUN_ATTRIBUTE_NAMES });
 }
 
 /** Where every paragraph mark sits, with the paragraph style it carries. */
@@ -145,28 +139,34 @@ export function endsWithParagraphMark(text: Y.Text): boolean {
 
 /** Keep only run keys whose values pass their checks (rule 3). */
 export function runStyleOf(attributes: TextAttributes | undefined): RunStylePatch {
-  const style: Record<string, unknown> = {};
-  if (attributes === undefined) return style;
-  for (const name of RUN_ATTRIBUTE_NAMES) {
-    const value = attributes[name];
-    if (value === undefined || value === null) continue;
-    if (RUN_ATTRIBUTE_CHECKS[name](value) === "valid") style[name] = value;
-  }
-  // Every key copied above is a RunAttributeName whose value passed that attribute's check.
-  return style as RunStylePatch;
+  // Every key checkedAttributes copies is a RunAttributeName whose value passed that attribute's check.
+  return checkedAttributes(attributes, RUN_ATTRIBUTE_CHECKS) as RunStylePatch;
 }
 
 /** Keep only paragraph keys whose values pass their checks (rule 3). */
 export function paragraphStyleOf(attributes: TextAttributes | undefined): ParagraphStylePatch {
+  // Every key checkedAttributes copies is a ParagraphAttributeName whose value passed that attribute's check.
+  return checkedAttributes(attributes, PARAGRAPH_ATTRIBUTE_CHECKS) as ParagraphStylePatch;
+}
+
+/** The attributes named in `checks` that are set and pass their check. */
+function checkedAttributes(attributes: TextAttributes | undefined, checks: Readonly<Record<string, (candidate: unknown) => Verdict>>): Record<string, unknown> {
   const style: Record<string, unknown> = {};
   if (attributes === undefined) return style;
-  for (const name of PARAGRAPH_ATTRIBUTE_NAMES) {
+  for (const [name, check] of Object.entries(checks)) {
     const value = attributes[name];
     if (value === undefined || value === null) continue;
-    if (PARAGRAPH_ATTRIBUTE_CHECKS[name](value) === "valid") style[name] = value;
+    if (check(value) === "valid") style[name] = value;
   }
-  // Every key copied above is a ParagraphAttributeName whose value passed that attribute's check.
-  return style as ParagraphStylePatch;
+  return style;
+}
+
+/** Rules 1 and 2: `style`'s value (or null) for each of `names`, and null for each of `nulled`. */
+function completeAttributes(options: Readonly<{ style: Readonly<Record<string, unknown>>; names: readonly string[]; nulled: readonly string[] }>): TextAttributes {
+  const attributes: Record<string, unknown> = {};
+  for (const name of options.names) attributes[name] = options.style[name] ?? null;
+  for (const name of options.nulled) attributes[name] = null;
+  return attributes;
 }
 
 /** One delta operation as `Y.Text.toDelta` returns it. */
@@ -223,23 +223,14 @@ function insertText(options: Readonly<{ text: Y.Text; index: number; inserted: s
   });
 }
 
-function runFormatAttributes(patch: RunStylePatch, clear: readonly string[]): TextAttributes {
+/** A format's attributes: the patch's set values among `names`, and null for every cleared one. */
+function formatAttributes(options: Readonly<{ patch: Readonly<Record<string, unknown>>; names: readonly string[]; clear: readonly string[] }>): TextAttributes {
   const attributes: Record<string, unknown> = {};
-  for (const name of RUN_ATTRIBUTE_NAMES) {
-    const value = patch[name];
+  for (const name of options.names) {
+    const value = options.patch[name];
     if (value !== undefined) attributes[name] = value;
   }
-  for (const name of clear) attributes[name] = null;
-  return attributes;
-}
-
-function paragraphFormatAttributes(patch: ParagraphStylePatch, clear: readonly string[]): TextAttributes {
-  const attributes: Record<string, unknown> = {};
-  for (const name of PARAGRAPH_ATTRIBUTE_NAMES) {
-    const value = patch[name];
-    if (value !== undefined) attributes[name] = value;
-  }
-  for (const name of clear) attributes[name] = null;
+  for (const name of options.clear) attributes[name] = null;
   return attributes;
 }
 

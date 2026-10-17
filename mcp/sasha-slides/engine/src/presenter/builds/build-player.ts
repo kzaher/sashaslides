@@ -39,7 +39,9 @@ import { boundsOfBoxes, frameCentre, rotatePoint, rotatedBounds, type Box, type 
 import { SLIDE_ROOT_CLASS } from "../../contracts/render.ts";
 import type { StageElementHandle, TransitionContext, TransitionDefinition } from "../../contracts/transition-protocol.ts";
 import { EASING_FUNCTIONS, allFinished } from "../builtin/builtin-parameters.ts";
-import { findElement, leavesOf, type BuildSegmentTimeline } from "./build-states.ts";
+import { findInTree, leavesOf } from "../../shared/element-tree.ts";
+import { roundTo } from "../../shared/numbers.ts";
+import type { BuildSegmentTimeline } from "./build-states.ts";
 
 export function createBuildPlayer(options: Readonly<{ timeline: BuildSegmentTimeline; pageSize: PageSize }>): TransitionDefinition {
   return {
@@ -135,7 +137,7 @@ class SegmentPlayback {
 
   private playStep(options: Readonly<{ timed: TimedAnimationStep; index: number }>): void {
     const step = options.timed.step;
-    const target = findElement({ elements: this.tree(options.index), elementId: step.elementId });
+    const target = findInTree(this.tree(options.index), step.elementId);
     if (target === null) return;
     const leaves = leavesOf(target);
     const timing: KeyframeAnimationOptions = {
@@ -249,13 +251,13 @@ class SegmentPlayback {
 
   /** Where the leaf is when step `index` starts, relative to its node. */
   private placement(options: Readonly<{ side: Side; leaf: ElementSnapshot; index: number }>): RelativePlacement {
-    const current = findElement({ elements: this.tree(options.index), elementId: options.leaf.id }) ?? options.leaf;
+    const current = findInTree(this.tree(options.index), options.leaf.id) ?? options.leaf;
     return this.relative({ side: options.side, leafId: options.leaf.id, centre: frameCentre(current.frame), size: sizeOf(current), turned: this.turnedAt({ index: options.index, leafId: options.leaf.id }) });
   }
 
   private relative(options: Readonly<{ side: Side; leafId: string; centre: Point; size: number; turned: number }>): RelativePlacement {
     const referenceIndex = this.referenceIndex(options.side);
-    const reference = findElement({ elements: this.tree(referenceIndex), elementId: options.leafId });
+    const reference = findInTree(this.tree(referenceIndex), options.leafId);
     if (reference === null) return { translateX: 0, translateY: 0, rotate: 0, scale: 1 };
     const referenceCentre = frameCentre(reference.frame);
     const referenceSize = sizeOf(reference);
@@ -274,7 +276,7 @@ class SegmentPlayback {
   /** The leaf's placement scaled by `factor` about the target's centre (a group's leaves move apart or together). */
   private zoomed(options: Readonly<{ side: Side; leaf: ElementSnapshot; index: number; target: ElementSnapshot; factor: number }>): RelativePlacement {
     const placement = this.placement(options);
-    const leafNow = findElement({ elements: this.tree(options.index), elementId: options.leaf.id }) ?? options.leaf;
+    const leafNow = findInTree(this.tree(options.index), options.leaf.id) ?? options.leaf;
     const leafCentre = frameCentre(leafNow.frame);
     const targetCentre = frameCentre(options.target.frame);
     return {
@@ -288,7 +290,7 @@ class SegmentPlayback {
   /** The leaf's placement moved so the whole TARGET is just beyond `edge` (a group flies as one). */
   private offEdge(options: Readonly<{ side: Side; leaf: ElementSnapshot; index: number; leaves: readonly ElementSnapshot[]; edge: AnimationEdge }>): RelativePlacement {
     const placement = this.placement(options);
-    const current = options.leaves.map((leaf) => findElement({ elements: this.tree(options.index), elementId: leaf.id }) ?? leaf);
+    const current = options.leaves.map((leaf) => findInTree(this.tree(options.index), leaf.id) ?? leaf);
     const bounds = boundsOfBoxes(current.map((leaf) => rotatedBounds(leaf.frame))) ?? { x: 0, y: 0, width: 0, height: 0 };
     const offset = offEdgeOffset({ bounds, edge: options.edge, pageSize: this.pageSize });
     return shifted({ placement, x: offset.x, y: offset.y });
@@ -298,8 +300,8 @@ class SegmentPlayback {
   private geometryKeyframes(
     options: Readonly<{ side: Side; leaf: ElementSnapshot; index: number; target: ElementSnapshot; spinDegrees: number }>,
   ): readonly RelativePlacement[] {
-    const start = findElement({ elements: this.tree(options.index), elementId: options.leaf.id }) ?? options.leaf;
-    const end = findElement({ elements: this.tree(options.index + 1), elementId: options.leaf.id }) ?? start;
+    const start = findInTree(this.tree(options.index), options.leaf.id) ?? options.leaf;
+    const end = findInTree(this.tree(options.index + 1), options.leaf.id) ?? start;
     const turnedAtStart = this.turnedAt({ index: options.index, leafId: options.leaf.id });
     const pivot = frameCentre(options.target.frame);
     const samples = options.spinDegrees === 0 ? 1 : Math.max(1, Math.ceil(Math.abs(options.spinDegrees) / ARC_SAMPLE_DEGREES));
@@ -346,7 +348,7 @@ class SegmentPlayback {
   }
 
   private ownOpacity(options: Readonly<{ side: Side; leaf: ElementSnapshot }>): number {
-    const reference = findElement({ elements: this.tree(this.referenceIndex(options.side)), elementId: options.leaf.id }) ?? options.leaf;
+    const reference = findInTree(this.tree(this.referenceIndex(options.side)), options.leaf.id) ?? options.leaf;
     return leafOpacity(reference);
   }
 }
@@ -400,7 +402,7 @@ function turnedDegrees(timeline: BuildSegmentTimeline): readonly ReadonlyMap<str
   timeline.segment.steps.forEach((timed, index) => {
     const next = new Map(turned[index]);
     const degrees = spinDegreesOf(timed.step.effect);
-    const target = degrees === 0 ? null : findElement({ elements: timeline.trees[index] ?? [], elementId: timed.step.elementId });
+    const target = degrees === 0 ? null : findInTree(timeline.trees[index] ?? [], timed.step.elementId);
     for (const leaf of target === null ? [] : leavesOf(target)) next.set(leaf.id, (next.get(leaf.id) ?? 0) + degrees);
     turned.push(next);
   });
@@ -495,5 +497,5 @@ function mirroredEdge(options: Readonly<{ edge: AnimationEdge; flipHorizontal: b
 }
 
 function round(value: number): number {
-  return Math.round(value * 10_000) / 10_000 + 0;
+  return roundTo(value, 4);
 }

@@ -34,6 +34,7 @@ import { pageBrowserCapabilities } from "./browser-services.ts";
 export type ComposedEditor = Disposable &
   Readonly<{
     system: RunningSystem<EditorState, EditorEvent>;
+    assetStore: AssetStore;
     browser: BrowserCapabilities;
     presenterDependencies: PresenterDependencies;
     clipboardContentFor: ClipboardContentFor;
@@ -53,10 +54,12 @@ export function composeEditor(options: Readonly<{
   me: Person;
   embedding: EditorEmbedding;
   runnerAddress: string;
+  /** Where the editor and the presenter report failures; the console when omitted (the demo). */
+  reportError?: (error: unknown, context: string) => void;
 }>): ComposedEditor {
   const page = options.page;
   const now = (): number => Date.now();
-  const reportError = (error: unknown, context: string): void => console.error(`[sasha engine] ${context}`, error);
+  const reportError = options.reportError ?? ((error: unknown, context: string): void => console.error(`[sasha engine] ${context}`, error));
   const sessionPrefix = newSessionPrefix(Math.random);
   const system = createEditorSystem({
     documentStore: options.documentStore,
@@ -88,6 +91,7 @@ export function composeEditor(options: Readonly<{
   };
   return {
     system,
+    assetStore: options.assetStore,
     browser: pageBrowserCapabilities(page),
     presenterDependencies,
     clipboardContentFor,

@@ -34,12 +34,13 @@ import {
   type SlideId,
   type SlideSnapshot,
 } from "../../contracts/index.ts";
-import { editingRefusal } from "./access.ts";
+import { editingRefusal } from "../../shared/access-refusals.ts";
 import { commandOfKind } from "./command-kinds.ts";
 import { findSlide } from "./document-lookup.ts";
-import { queueEnvelope, refuse } from "./editor-queue.ts";
+import { queueCommands, refuse } from "./editor-queue.ts";
 import { selectedElements } from "./editor-selection.ts";
 import { createIdMinter } from "./id-minter.ts";
+import { orderUnchanged } from "./slides.ts";
 
 export const NOTHING_TO_ANIMATE_MESSAGE = "Select something on the slide first, then add an animation.";
 export const NEWER_VERSION_STEP_MESSAGE = "This animation was made with a newer version of Sasha Slides, so it cannot be changed here.";
@@ -67,10 +68,7 @@ export function addAnimation(state: EditorState, effect: AnimationEffect): Edito
   }));
   const chosen = state.chrome.selectedAnimationStepId;
   const after = chosen !== null && sequence.some((step) => step.id === chosen) ? chosen : (sequence.at(-1)?.id ?? null);
-  const queued = queueEnvelope(
-    { ...state, idSeed: minter.seed() },
-    { commands: [{ kind: "insertAnimationSteps", slideId: selected.slide.id, steps, after }], selectionAfter: state.selection, mergeWithPrevious: false },
-  );
+  const queued = queueCommands({ ...state, idSeed: minter.seed() }, [{ kind: "insertAnimationSteps", slideId: selected.slide.id, steps, after }]);
   return { ...queued, chrome: { ...queued.chrome, selectedAnimationStepId: steps[0]?.id ?? chosen } };
 }
 
@@ -84,11 +82,7 @@ export function patchAnimationStep(state: EditorState, options: Readonly<{ stepI
   const located = locateStep(state, options.stepId);
   if (located === null) return refuse(state, STEP_MISSING_MESSAGE);
   if (located.step.unsupportedKeys.length > 0) return refuse(state, NEWER_VERSION_STEP_MESSAGE);
-  return queueEnvelope(state, {
-    commands: [{ kind: "updateAnimationSteps", slideId: located.slide.id, stepIds: [options.stepId], patch: options.patch }],
-    selectionAfter: state.selection,
-    mergeWithPrevious: false,
-  });
+  return queueCommands(state, [{ kind: "updateAnimationSteps", slideId: located.slide.id, stepIds: [options.stepId], patch: options.patch }]);
 }
 
 /** Drag or keyboard reorder; nothing is queued when the order would not change. */
@@ -100,14 +94,14 @@ export function moveAnimationSteps(state: EditorState, options: Readonly<{ stepI
   if (moving.length === 0) return refuse(state, STEP_MISSING_MESSAGE);
   if (options.after !== null && (moving.includes(options.after) || !order.includes(options.after))) return state;
   if (orderUnchanged({ order, moving, after: options.after })) return state;
-  return queueEnvelope(state, { commands: [{ kind: "moveAnimationSteps", slideId: slide.id, stepIds: moving, after: options.after }], selectionAfter: state.selection, mergeWithPrevious: false });
+  return queueCommands(state, [{ kind: "moveAnimationSteps", slideId: slide.id, stepIds: moving, after: options.after }]);
 }
 
 /** Remove one step; when it was the chosen one, the next step (or else the one before) is chosen. */
 export function removeAnimationStep(state: EditorState, stepId: AnimationStepId): EditorState {
   const located = locateStep(state, stepId);
   if (located === null) return refuse(state, STEP_MISSING_MESSAGE);
-  const queued = queueEnvelope(state, { commands: [{ kind: "deleteAnimationSteps", slideId: located.slide.id, stepIds: [stepId] }], selectionAfter: state.selection, mergeWithPrevious: false });
+  const queued = queueCommands(state, [{ kind: "deleteAnimationSteps", slideId: located.slide.id, stepIds: [stepId] }]);
   if (queued.pendingEdits.length === state.pendingEdits.length || state.chrome.selectedAnimationStepId !== stepId) return queued;
   const sequence = located.slide.animations;
   const neighbour = sequence[located.index + 1] ?? sequence[located.index - 1] ?? null;
@@ -156,14 +150,6 @@ function locateStep(state: EditorState, stepId: AnimationStepId): LocatedStep | 
 
 function currentSlide(state: EditorState): SlideSnapshot | null {
   return state.currentSlideId === null ? null : findSlide(state.document, state.currentSlideId);
-}
-
-function orderUnchanged(options: Readonly<{ order: readonly AnimationStepId[]; moving: readonly AnimationStepId[]; after: AnimationStepId | null }>): boolean {
-  const remaining = options.order.filter((stepId) => !options.moving.includes(stepId));
-  const insertAt = options.after === null ? 0 : remaining.indexOf(options.after) + 1;
-  const movedInOrder = options.order.filter((stepId) => options.moving.includes(stepId));
-  const result = [...remaining.slice(0, insertAt), ...movedInOrder, ...remaining.slice(insertAt)];
-  return result.every((stepId, index) => options.order[index] === stepId);
 }
 
 function queuedForInsert(pendingEdits: readonly QueuedEdit[], stepId: AnimationStepId): boolean {

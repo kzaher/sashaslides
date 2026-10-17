@@ -15,14 +15,14 @@ import type { TransferredFont } from "../../contracts/transition-protocol.ts";
 import { createInPageStageRegistry } from "../in-page/in-page-run-feedback.ts";
 import { initialShowState, type PresenterSystemState } from "../presenter-state.ts";
 import { createPresenterSystem } from "../presenter-system.ts";
-import { stageElementRecordsOf } from "../stage-elements.ts";
+import { stageElementRecordsOf } from "../../shared/stage-elements.ts";
 import { fixtureDocument, slideIdOf, type FixtureScript, type FixtureSlide } from "./document-fixture.ts";
 import { COOPERATIVE_RUNNER, FakeRunnerSite, type FakeRunnerBehaviour } from "./fake-runner-site.ts";
 import { testRxFeedbackToolkit } from "./rxfeedback-toolkit.ts";
-import { VirtualTimeScheduler } from "./virtual-time-scheduler.ts";
+import { createVirtualScheduler, type VirtualScheduler } from "../../state/testing/virtual-scheduler.ts";
 
 export type PresenterHarness = Readonly<{
-  scheduler: VirtualTimeScheduler;
+  scheduler: VirtualScheduler;
   system: RunningSystem<PresenterSystemState, PresenterEvent>;
   site: FakeRunnerSite;
   visibility: BehaviorSubject<boolean>;
@@ -47,7 +47,7 @@ export function presenterHarness(
     reducedMotion?: boolean;
   }>,
 ): PresenterHarness {
-  const scheduler = new VirtualTimeScheduler(0);
+  const scheduler = createVirtualScheduler({ startAt: 0 });
   const visibility = new BehaviorSubject(true);
   const site = new FakeRunnerSite({ scheduler, behaviour: { ...COOPERATIVE_RUNNER, ...options.runner } });
   const exits: (SlideId | null)[] = [];
@@ -103,7 +103,7 @@ export function presenterHarness(
     errors,
     state: () => system.currentState(),
     press: (key) => system.dispatch({ kind: "keyPressed", chord: chordOf(key) }),
-    advanceBy: (milliseconds) => scheduler.advanceBy(milliseconds),
+    advanceBy: (milliseconds) => scheduler.advanceBySettling(milliseconds),
   };
 }
 

@@ -22,7 +22,7 @@ import {
   type StaticSlideComponent,
 } from "../../contracts/render.ts";
 import type { Colour, CornerRadius, Fill } from "../../contracts/style.ts";
-import { stageElementRecordsOf } from "../stage-elements.ts";
+import { stageElementRecordsOf } from "../../shared/stage-elements.ts";
 
 export const DemoStaticSlide: StaticSlideComponent = (properties) => (
   <div style={{ width: properties.document.pageSize.width * properties.scale, height: properties.document.pageSize.height * properties.scale, overflow: "hidden", position: "relative" }}>

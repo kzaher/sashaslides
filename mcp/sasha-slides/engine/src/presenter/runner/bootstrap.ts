@@ -23,16 +23,15 @@ import {
   TRANSITION_LIMITS,
   TRANSITION_PROTOCOL,
   hasTransitionProtocol,
-  type HostToRunnerMessage,
   type RunnerToHostMessage,
   type TransitionAuthoringGlobal,
   type TransitionDefinition,
 } from "../../contracts/transition-protocol.ts";
 import { assertNever } from "../../contracts/assert-never.ts";
+import { fitBox } from "../../shared/fit-box.ts";
+import type { PrepareMessage } from "../sandbox/prepare-message.ts";
 import { parseHostToRunnerMessage } from "../sandbox/protocol-parsing.ts";
 import { buildTransitionContext, type TransitionStage } from "../transition-context.ts";
-
-type PrepareMessage = Extract<HostToRunnerMessage, Readonly<{ kind: "prepare" }>>;
 
 /** Distributes `Omit` over a union, so each message kind keeps its own fields. */
 type WithoutEnvelope<TMessage> = TMessage extends unknown ? Omit<TMessage, "protocol" | "runId"> : never;
@@ -171,9 +170,10 @@ function buildStage(
   const pageWidth = 1280;
   const stage = document.createElement("div");
   stage.id = "sasha-stage";
-  const scale = Math.min(options.runnerWindow.innerWidth / pageWidth, options.runnerWindow.innerHeight / message.pageHeight);
-  const left = (options.runnerWindow.innerWidth - pageWidth * scale) / 2;
-  const top = (options.runnerWindow.innerHeight - message.pageHeight * scale) / 2;
+  const { scale, left, top } = fitBox({
+    container: { width: options.runnerWindow.innerWidth, height: options.runnerWindow.innerHeight },
+    content: { width: pageWidth, height: message.pageHeight },
+  });
   Object.assign(stage.style, {
     position: "absolute",
     left: "0px",

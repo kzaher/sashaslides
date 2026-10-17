@@ -8,7 +8,7 @@ import { assertNever } from "../../contracts/assert-never.ts";
 import type { RunnerId } from "../../contracts/ids.ts";
 import { TRANSITION_PROTOCOL, type HostToRunnerMessage } from "../../contracts/transition-protocol.ts";
 import type { HostPort, RunnerFrame, SandboxEnvironment, WindowMessage } from "../sandbox/sandbox-environment.ts";
-import type { VirtualTimeScheduler } from "./virtual-time-scheduler.ts";
+import type { VirtualScheduler } from "../../state/testing/virtual-scheduler.ts";
 
 export type FakeRunnerBehaviour = Readonly<{
   /** "never": the frame loads but its bootstrap never posts `runnerReady`. */
@@ -47,7 +47,7 @@ export class FakeRunnerSite {
   readonly windowMessages = new Subject<WindowMessage>();
   readonly environment: SandboxEnvironment;
 
-  constructor(private readonly options: Readonly<{ scheduler: VirtualTimeScheduler; behaviour: FakeRunnerBehaviour }>) {
+  constructor(private readonly options: Readonly<{ scheduler: VirtualScheduler; behaviour: FakeRunnerBehaviour }>) {
     this.environment = {
       createRunnerFrame: (request) => this.createFrame(request.runnerId),
       windowMessages: this.windowMessages.asObservable(),

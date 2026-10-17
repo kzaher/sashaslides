@@ -15,10 +15,10 @@ import {
   type EditorState,
   type TransitionScriptRecord,
 } from "../../contracts/index.ts";
+import { CLOSED_MESSAGE } from "../../shared/access-refusals.ts";
 import { editorStateFor, personId, shape, slide, slideId, testDocument } from "../testing/document-fixtures.ts";
 import { flushPromises, createEditorHarness } from "../testing/editor-harness.ts";
 import { createFakeCollaborationSession } from "../testing/fake-collaboration.ts";
-import { CLOSED_MESSAGE } from "./access.ts";
 import { reduceEditor } from "./reduce-editor.ts";
 
 const box = shape({ id: "shape_box", x: 100, y: 100, width: 200, height: 100 });

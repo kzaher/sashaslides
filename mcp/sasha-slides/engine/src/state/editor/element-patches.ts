@@ -31,6 +31,7 @@ import {
   type Stroke,
   type TextBoxStyle,
 } from "../../contracts/index.ts";
+import { firstDrawnStroke } from "../../shared/element-tree.ts";
 import { sameValue } from "./text-model.ts";
 
 /** One `updateElements` worth: these elements receive this patch. */
@@ -118,8 +119,8 @@ function mergeCornerRadius(options: Readonly<{ own: CornerRadius; base: CornerRa
 /** A changed stroke field reaches every drawn side of the element's own border (see the header). */
 function mergeBorder(options: Readonly<{ own: Border; base: Border; next: Border }>): Border {
   const next = options.next;
-  const baseStroke = representativeStroke(options.base);
-  const nextStroke = representativeStroke(next);
+  const baseStroke = firstDrawnStroke(options.base);
+  const nextStroke = firstDrawnStroke(next);
   if (next.kind !== options.base.kind || baseStroke === null || nextStroke === null || !sameSidePattern(options.base, next)) return next;
   const restroke = (stroke: Stroke): Stroke => mergeChangedFields({ own: stroke, base: baseStroke, next: nextStroke });
   const own = options.own;
@@ -140,19 +141,6 @@ function mergeBorder(options: Readonly<{ own: Border; base: Border; next: Border
         : next;
     default:
       return assertNever(own);
-  }
-}
-
-function representativeStroke(border: Border): Stroke | null {
-  switch (border.kind) {
-    case "none":
-      return null;
-    case "uniform":
-      return border.stroke;
-    case "perSide":
-      return border.top ?? border.right ?? border.bottom ?? border.left;
-    default:
-      return assertNever(border);
   }
 }
 

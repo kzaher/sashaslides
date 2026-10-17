@@ -11,6 +11,7 @@ import * as Y from "yjs";
 import { BINARY_MESSAGE_TYPE, type CloseReason, type ServerMessage } from "../../contracts/collaboration.ts";
 import type { DeckRole } from "../../contracts/deck-access.ts";
 import type { Person } from "../../contracts/discussion.ts";
+import { awarenessFrame, syncStepOneFrame, syncUpdateFrame } from "../../shared/sync-frames.ts";
 import type { DeckRoom, RoomConnection, RoomFrame } from "../deck-room.ts";
 
 export type FakeClient = Disposable &
@@ -91,10 +92,7 @@ export function connectFakeClient(
 
   const sendLocalUpdate = (update: Uint8Array, origin: unknown): void => {
     if (origin === FROM_SERVER) return;
-    const encoder = encoding.createEncoder();
-    encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.sync);
-    syncProtocol.writeUpdate(encoder, update);
-    send({ kind: "binary", bytes: encoding.toUint8Array(encoder) });
+    send({ kind: "binary", bytes: syncUpdateFrame(update) });
   };
   if (options.sendLocalUpdates !== false) sharedDocument.on("update", sendLocalUpdate);
 
@@ -110,18 +108,12 @@ export function connectFakeClient(
     },
   });
   // The client's own sync step 1, after the server's (y-websocket sends it on open).
-  const encoder = encoding.createEncoder();
-  encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.sync);
-  syncProtocol.writeSyncStep1(encoder, sharedDocument);
-  send({ kind: "binary", bytes: encoding.toUint8Array(encoder) });
+  send({ kind: "binary", bytes: syncStepOneFrame(sharedDocument) });
   for (const frame of pendingBeforeConnected.splice(0)) send(frame);
   const connected = connection;
 
   const sendAwarenessUpdate = (update: Uint8Array): void => {
-    const frame = encoding.createEncoder();
-    encoding.writeVarUint(frame, BINARY_MESSAGE_TYPE.awareness);
-    encoding.writeVarUint8Array(frame, update);
-    send({ kind: "binary", bytes: encoding.toUint8Array(frame) });
+    send({ kind: "binary", bytes: awarenessFrame(update) });
   };
 
   return {

@@ -17,7 +17,7 @@
 
 import { filter, firstValueFrom, Subject, timeout, type Observable, type SchedulerLike } from "rxjs";
 import { ADDON_FRAME_ANCESTORS, type AddonShellMessage } from "../../contracts/deck-api.ts";
-import { keysOf, memberAt, parseOrNull, recordOf, stringAt } from "../parsing/untrusted-values.ts";
+import { keysOf, memberAt, parseOrNull, recordOf, stringAt } from "../../shared/untrusted-values.ts";
 
 export type EditorToShellMessage = Extract<AddonShellMessage, { source: "sasha-editor" }>;
 export type ShellToEditorMessage = Extract<AddonShellMessage, { source: "sasha-addon-shell" }>;

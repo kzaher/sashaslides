@@ -60,21 +60,12 @@ export function readProtectedFields(sharedDocument: Y.Doc): ProtectedFields {
   const scripts = new Map<TransitionScriptId, ProtectedScriptFields>();
   roots.transitionScripts.forEach((value, key) => {
     if (!(value instanceof Y.Map)) return;
-    const text = (name: string): string => {
-      const stored: unknown = value.get(name);
-      return typeof stored === "string" ? stored : "";
-    };
     // Keys of the transitionScripts root are script ids by construction (command-application.ts);
     // the brand records that, and the guard only ever writes back to the same key.
     scripts.set(key as TransitionScriptId, {
       author: value.get(TRANSITION_SCRIPT_KEY.author),
       approval: value.get(TRANSITION_SCRIPT_KEY.approval),
-      fingerprint: scriptFingerprint({
-        script: text(TRANSITION_SCRIPT_KEY.script),
-        stylesheet: text(TRANSITION_SCRIPT_KEY.stylesheet),
-        markup: text(TRANSITION_SCRIPT_KEY.markup),
-        purpose: purposeOf(value.get(TRANSITION_SCRIPT_KEY.purpose)),
-      }),
+      fingerprint: storedScriptFingerprint(value),
     });
   });
   return { meta, scripts };
@@ -106,6 +97,24 @@ export function writeProtectedFields(options: Readonly<{ sharedDocument: Y.Doc; 
       }
     }
   }, options.origin);
+}
+
+/**
+ * `scriptFingerprint` of a stored script record, read the way `ProtectedScriptFields.fingerprint`
+ * describes. Command validation compares an approval's fingerprint against the same reading, so the
+ * guard and a command never disagree about what text an approval covers.
+ */
+export function storedScriptFingerprint(script: Y.Map<unknown>): string {
+  const text = (name: string): string => {
+    const stored: unknown = script.get(name);
+    return typeof stored === "string" ? stored : "";
+  };
+  return scriptFingerprint({
+    script: text(TRANSITION_SCRIPT_KEY.script),
+    stylesheet: text(TRANSITION_SCRIPT_KEY.stylesheet),
+    markup: text(TRANSITION_SCRIPT_KEY.markup),
+    purpose: purposeOf(script.get(TRANSITION_SCRIPT_KEY.purpose)),
+  });
 }
 
 /** The stored purpose; anything but "animation" reads as "transition" (an unknown value can never claim a build step's approval). */

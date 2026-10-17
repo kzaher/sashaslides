@@ -34,6 +34,8 @@
 
 import type { FontFaceRequest } from "../../contracts/render.ts";
 
+const SYSTEM_FAMILIES: ReadonlySet<string> = new Set(["arial", "helvetica", "times new roman", "georgia", "courier new", "verdana", "sans-serif", "serif", "monospace", "system-ui"]);
+
 /** The kind of face a generic family names, the last entry of every family list. */
 export type GenericFontFamily = "serif" | "sans-serif" | "monospace";
 
@@ -45,6 +47,11 @@ export function fontFamilyValue(family: string): string {
   const standIn = fontStandInOf(family);
   const quoted = [family, ...(standIn === null ? [] : [standIn])].map((name) => `"${name.replace(/["\\]/g, "")}"`);
   return [...quoted, genericFontFamilyOf(family)].join(", ");
+}
+
+/** Whether a family is a system or generic one, which is never requested from Google Fonts. */
+export function isSystemFontFamily(family: string): boolean {
+  return SYSTEM_FAMILIES.has(family.toLowerCase());
 }
 
 /**

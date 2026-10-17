@@ -13,7 +13,7 @@
 //    the changed field into every selected element's own group (state element-patches.ts), so the
 //    fields SHOW the shared value ("mixed" when the selection differs) but EDIT from that base.
 //  * A ROLE THAT CANNOT EDIT SEES THE PANEL READ-ONLY: the tab body sits in a disabled fieldset with
-//    the reason above it (access.ts), so every control is disabled at once and says why.
+//    the reason above it (shared/access-refusals.ts), so every control is disabled at once and says why.
 //  * THE TABS ARE A TABLIST with a roving tab index; the arrow keys switch tabs and never nudge the
 //    selected element (pill-group.ts).
 
@@ -24,14 +24,17 @@ import { mintId } from "../../contracts/ids.ts";
 import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { EditorState, PropertiesTab } from "../../contracts/editor-state.ts";
 import type { Border, Colour, CornerRadius, DashStyle, Fill, ImageFit, ListGlyph, NoColour, Shadow, Stroke, TextBoxStyle } from "../../contracts/style.ts";
-import { literalColour, themeColour } from "../../contracts/style.ts";
+import { themeColour } from "../../contracts/style.ts";
+import { editingRefusal } from "../../shared/access-refusals.ts";
+import { DEFAULT_SHADOW, DEFAULT_STROKE } from "../../shared/element-defaults.ts";
+import { elementOfKind, firstDrawnStroke, leavesOf } from "../../shared/element-tree.ts";
+import { roundTo } from "../../shared/numbers.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { shallowEqual, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
 import { isDrawnAsBox } from "../render/shape-geometry.ts";
 import { linearGradientValue, radialGradientValue } from "../render/inline-styles.ts";
 import { slideBackground } from "../render/static-slide.tsx";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
-import { editingDisabledReason } from "./access.ts";
 import { AnimateTab } from "./animate-tab.tsx";
 import { ChoiceField, ColourField, NumberField, PillChoice, Section, ToggleButton } from "./fields.tsx";
 import { MAXIMUM_GRADIENT_STOPS, MINIMUM_GRADIENT_STOPS, withAddedStop, withLinearAngle, withRadialCentre, withStopColour, withStopOffset, withoutStop, type GradientFill } from "./gradient-stops.ts";
@@ -39,7 +42,7 @@ import { Icon } from "./icons.tsx";
 import { LIST_GLYPH_PRESETS } from "./list-glyphs.ts";
 import { UNGROUP_HINT, selectionHoldsGroup } from "./menu-model.ts";
 import { handlePillGroupKey, rovingTabIndex } from "./pill-group.ts";
-import { fontSizeEvent, frameValues, leafElements, lockedExplanation, panelSubject, roundTo, sharedValue, subjectElements, textValues, type PanelSubject, type SharedValue } from "./properties-values.ts";
+import { fontSizeEvent, frameValues, lockedExplanation, panelSubject, sharedValue, subjectElements, textValues, type PanelSubject, type SharedValue } from "./properties-values.ts";
 
 export const PROPERTIES_TABS: readonly Readonly<{ tab: PropertiesTab; label: string }>[] = [
   { tab: "arrange", label: "Arrange" },
@@ -72,7 +75,7 @@ export const PropertiesPanel = memo(function PropertiesPanel(): ReactElement {
   );
   const state = services.system.currentState();
   const dispatch = services.system.dispatch;
-  const refusal = editingDisabledReason(state);
+  const refusal = editingRefusal(state);
   const chosenIndex = PROPERTIES_TABS.findIndex((entry) => entry.tab === tab);
   return (
     <aside className={`${TIDEPOOL_CLASS.panel} ${VIEW_CLASS.sidePanel}`} aria-label="Properties">
@@ -117,7 +120,7 @@ export const PropertiesPanel = memo(function PropertiesPanel(): ReactElement {
 function TabBody(properties: Readonly<{ tab: PropertiesTab; state: EditorState; dispatch: (event: EditorEvent) => void }>): ReactElement {
   const subject = panelSubject(properties.state);
   const elements = subjectElements(subject);
-  const leaves = elements.flatMap(leafElements);
+  const leaves = elements.flatMap(leavesOf);
   const nothing = <p className={TIDEPOOL_CLASS.muted}>Select something on the slide to change it here.</p>;
   switch (properties.tab) {
     case "arrange":
@@ -201,7 +204,7 @@ function ArrangeTab(properties: Readonly<{ state: EditorState; elements: readonl
 
 function FillTab(properties: Readonly<{ theme: ThemeSnapshot; elements: readonly ElementSnapshot[]; dispatch: (event: EditorEvent) => void }>): ReactElement {
   const boxes = properties.elements.flatMap(boxStyleOf);
-  const tables = properties.elements.flatMap(tablesOf);
+  const tables = properties.elements.flatMap((element) => elementOfKind(element, "table") ?? []);
   if (boxes.length === 0 && tables.length > 0) {
     const cellFill = sharedValue(tables.flatMap((table) => table.cells.map((cell) => cell.fill)), sameStructure);
     const setCellFill = (next: Fill): void => properties.dispatch({ kind: "tableCellPatchRequested", patch: { fill: next } });
@@ -382,10 +385,10 @@ function gradientPreviewValue(fill: GradientFill, theme: ThemeSnapshot): string 
 }
 
 function BorderTab(properties: Readonly<{ theme: ThemeSnapshot; elements: readonly ElementSnapshot[]; dispatch: (event: EditorEvent) => void }>): ReactElement {
-  const lines = properties.elements.flatMap(lineOf);
+  const lines = properties.elements.flatMap((element) => elementOfKind(element, "line") ?? []);
   if (lines.length > 0) return <LineStrokeEditor theme={properties.theme} elements={properties.elements} lines={lines} dispatch={properties.dispatch} />;
   const boxes = properties.elements.flatMap(boxStyleOf);
-  const tables = properties.elements.flatMap(tablesOf);
+  const tables = properties.elements.flatMap((element) => elementOfKind(element, "table") ?? []);
   if (boxes.length === 0 && tables.length > 0) return <CellBordersEditor theme={properties.theme} tables={tables} dispatch={properties.dispatch} />;
   if (boxes.length === 0) return <p className={TIDEPOOL_CLASS.muted}>Select a shape, an image, a line or a table.</p>;
   const locked = lockedExplanation({ elements: properties.elements, control: "border" });
@@ -396,7 +399,7 @@ function BorderTab(properties: Readonly<{ theme: ThemeSnapshot; elements: readon
   const current = first?.border ?? null;
   const kind = sharedValue(boxes.map((box) => box.border.kind));
   const strokes = boxes.flatMap((box) => drawnStrokes(box.border));
-  const stroke = current === null ? DEFAULT_STROKE : borderStroke(current);
+  const stroke = (current === null ? null : firstDrawnStroke(current)) ?? DEFAULT_STROKE;
   const setBorder = (next: Border): void => properties.dispatch({ kind: "elementPatchRequested", patch: { border: next } });
   const setRadius = (next: CornerRadius): void => properties.dispatch({ kind: "elementPatchRequested", patch: { cornerRadius: next } });
   return (
@@ -585,7 +588,7 @@ function TextTab(properties: Readonly<{ state: EditorState; subject: PanelSubjec
   const runStyle = (patch: Extract<EditorEvent, { kind: "runStyleRequested" }>["patch"]): void => dispatch({ kind: "runStyleRequested", patch, clear: [] });
   const paragraphStyle = (patch: Extract<EditorEvent, { kind: "paragraphStyleRequested" }>["patch"]): void => dispatch({ kind: "paragraphStyleRequested", patch, clear: [] });
   const families = [...new Set([theme.headingFontFamily, theme.bodyFontFamily, ...CURATED_FONT_FAMILIES])];
-  const shapes = properties.elements.flatMap(shapeOf);
+  const shapes = properties.elements.flatMap((element) => elementOfKind(element, "shape") ?? []);
   const firstShape = shapes[0];
   const setTextBox = (patch: Partial<TextBoxStyle>): void => {
     if (firstShape !== undefined) dispatch({ kind: "elementPatchRequested", patch: { textBox: { ...firstShape.textBox, ...patch } } });
@@ -923,9 +926,6 @@ function transitionFor(options: Readonly<{ choice: TransitionChoice; previous: S
   }
 }
 
-const DEFAULT_STROKE: Stroke = { width: 2, colour: themeColour({ slot: "dark1", alpha: 1 }), dash: "solid" };
-const DEFAULT_SHADOW: Shadow = { offsetX: 0, offsetY: 8, blur: 16, spread: 0, colour: literalColour({ hexadecimal: "#1c2333", alpha: 0.25 }) };
-
 const DASH_OPTIONS: readonly Readonly<{ value: DashStyle; label: string }>[] = [
   { value: "solid", label: "Solid" },
   { value: "dot", label: "Dotted" },
@@ -988,56 +988,11 @@ function CellBordersEditor(properties: Readonly<{ theme: ThemeSnapshot; tables: 
   );
 }
 
-function tablesOf(element: ElementSnapshot): readonly TableElement[] {
-  switch (element.kind) {
-    case "table":
-      return [element];
-    case "shape":
-    case "image":
-    case "line":
-    case "group":
-    case "unsupported":
-      return [];
-    default:
-      return assertNever(element);
-  }
-}
-
 function boxStyleOf(element: ElementSnapshot): readonly ShapeElement["box"][] {
   switch (element.kind) {
     case "shape":
     case "image":
       return [element.box];
-    case "line":
-    case "table":
-    case "group":
-    case "unsupported":
-      return [];
-    default:
-      return assertNever(element);
-  }
-}
-
-function lineOf(element: ElementSnapshot): readonly Extract<ElementSnapshot, { kind: "line" }>[] {
-  switch (element.kind) {
-    case "line":
-      return [element];
-    case "shape":
-    case "image":
-    case "table":
-    case "group":
-    case "unsupported":
-      return [];
-    default:
-      return assertNever(element);
-  }
-}
-
-function shapeOf(element: ElementSnapshot): readonly ShapeElement[] {
-  switch (element.kind) {
-    case "shape":
-      return [element];
-    case "image":
     case "line":
     case "table":
     case "group":
@@ -1107,19 +1062,6 @@ function drawnStrokes(border: Border): readonly Stroke[] {
       return [border.stroke];
     case "perSide":
       return [border.top, border.right, border.bottom, border.left].filter((side): side is Stroke => side !== null);
-    default:
-      return assertNever(border);
-  }
-}
-
-function borderStroke(border: Border): Stroke {
-  switch (border.kind) {
-    case "none":
-      return DEFAULT_STROKE;
-    case "uniform":
-      return border.stroke;
-    case "perSide":
-      return border.top ?? border.right ?? border.bottom ?? border.left ?? DEFAULT_STROKE;
     default:
       return assertNever(border);
   }

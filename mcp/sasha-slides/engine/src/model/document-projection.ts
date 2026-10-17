@@ -16,6 +16,7 @@ import { EMPTY_TEXT_BODY, PLACEHOLDER_ROLES } from "../contracts/document.ts";
 import { SLIDE_WIDTH_UNITS } from "../contracts/geometry.ts";
 import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
 import { ANIMATION_STEP_KEY, LAYOUT_KEY, META_KEY, SLIDE_KEY, THEME_KEY, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
+import { isHexadecimalColour } from "../shared/colour-values.ts";
 import { DEFAULT_PLACEHOLDER_STYLES, DEFAULT_RUN_STYLE, DEFAULT_THEME } from "./blank-deck.ts";
 import { childMap, childText, type DocumentRoots } from "./document-paths.ts";
 import { flattenElements, projectElementTree, readSlideStructure } from "./element-tree.ts";
@@ -241,7 +242,7 @@ function projectColours(candidate: unknown): Readonly<Record<ThemeColourSlot, st
   const colours: Record<string, string> = {};
   for (const slot of THEME_COLOUR_SLOTS) {
     const value = candidate[slot];
-    colours[slot] = typeof value === "string" && HEXADECIMAL_PATTERN.test(value) ? value.toLowerCase() : DEFAULT_THEME.colours[slot];
+    colours[slot] = isHexadecimalColour(value) ? value.toLowerCase() : DEFAULT_THEME.colours[slot];
   }
   // The loop above assigned every ThemeColourSlot.
   return colours as Readonly<Record<ThemeColourSlot, string>>;
@@ -284,5 +285,3 @@ function projectDefaultRunStyle(candidate: unknown): RunStyle {
 function sameItems<TItem>(first: readonly TItem[], second: readonly TItem[]): boolean {
   return first.length === second.length && first.every((item, index) => item === second[index]);
 }
-
-const HEXADECIMAL_PATTERN = /^#[0-9a-fA-F]{6}$/;

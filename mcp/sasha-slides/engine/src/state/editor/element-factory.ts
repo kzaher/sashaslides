@@ -35,18 +35,12 @@ import {
   type TableElement,
   type TextBody,
 } from "../../contracts/index.ts";
+import { DEFAULT_STROKE, isTextBoxPreset } from "../../shared/element-defaults.ts";
 import { childrenOf } from "./document-lookup.ts";
 import type { IdMinter } from "./id-minter.ts";
 
-/** What a click (no drag) with an insert tool creates, in slide units (SPEC.md section 7, "create"). */
-export const DEFAULT_TEXT_BOX_SIZE = { width: 400, height: 80 } as const;
-export const DEFAULT_SHAPE_SIZE = { width: 240, height: 240 } as const;
-export const DEFAULT_LINE_LENGTH = 240;
-export const DEFAULT_TABLE_COLUMN_WIDTH = 160;
-export const DEFAULT_TABLE_ROW_HEIGHT = 48;
-
 export function createShape(options: Readonly<{ id: ElementId; preset: ShapePreset; box: Box; text: TextBody }>): ShapeElement {
-  const isTextBox = TEXT_BOX_PRESET[options.preset];
+  const isTextBox = isTextBoxPreset(options.preset);
   return {
     kind: "shape",
     id: options.id,
@@ -79,7 +73,7 @@ export function createLine(options: Readonly<{ id: ElementId; tool: Extract<Inse
     start: options.start,
     end: options.end,
     routing: options.tool.routing,
-    stroke: { width: 2, colour: themeColour({ slot: "dark1", alpha: 1 }), dash: "solid" },
+    stroke: DEFAULT_STROKE,
     startArrow: options.tool.startArrow,
     endArrow: options.tool.endArrow,
     opacity: 1,
@@ -224,36 +218,6 @@ export function elementIdsOf(elements: readonly ElementSnapshot[]): readonly Ele
         return assertNever(element);
     }
   });
-}
-
-/** Total over ShapePreset: which presets start as a growing, unfilled text box. */
-const TEXT_BOX_PRESET: Readonly<Record<ShapePreset, boolean>> = {
-  textBox: true,
-  rectangle: false,
-  roundedRectangle: false,
-  ellipse: false,
-  triangle: false,
-  rightTriangle: false,
-  diamond: false,
-  parallelogram: false,
-  trapezoid: false,
-  pentagon: false,
-  hexagon: false,
-  octagon: false,
-  fivePointStar: false,
-  plus: false,
-  heart: false,
-  cloud: false,
-  speechBubble: false,
-  chevron: false,
-  rightArrow: false,
-  leftArrow: false,
-  upArrow: false,
-  downArrow: false,
-};
-
-export function isTextBoxPreset(preset: ShapePreset): boolean {
-  return TEXT_BOX_PRESET[preset];
 }
 
 /** Original element id to its copy's, by walking the two trees side by side (reidentifyElement keeps the shape). */

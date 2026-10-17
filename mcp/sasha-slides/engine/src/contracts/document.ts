@@ -469,6 +469,18 @@ export function plainText(options: Readonly<{ body: TextBody; slideNumber: numbe
     .join("\n");
 }
 
+/** The text a run shows: its characters, or the slide number ("#" when the caller does not know it). */
+export function plainRunText(options: Readonly<{ run: TextRun; slideNumber: number | null }>): string {
+  switch (options.run.kind) {
+    case "text":
+      return options.run.text;
+    case "automaticText":
+      return options.slideNumber === null ? "#" : String(options.slideNumber);
+    default:
+      return assertNever(options.run);
+  }
+}
+
 /**
  * A short, synchronous fingerprint of a script's three sources and its purpose (two 32-bit
  * Fowler-Noll-Vo hashes with different offsets, 16 hexadecimal digits). Not a security hash: it only
@@ -490,17 +502,6 @@ function purposeSuffix(purpose: ScriptPurpose): string {
       return "\u0000animation";
     default:
       return assertNever(purpose);
-  }
-}
-
-function plainRunText(options: Readonly<{ run: TextRun; slideNumber: number | null }>): string {
-  switch (options.run.kind) {
-    case "text":
-      return options.run.text;
-    case "automaticText":
-      return options.slideNumber === null ? "#" : String(options.slideNumber);
-    default:
-      return assertNever(options.run);
   }
 }
 

@@ -17,7 +17,7 @@ import { STANDALONE_EDITOR_HOST, type ArrangedThread, type EditorHost } from "..
 import { EditorGestureContext, EditorServicesContext, ViewPreferencesContext } from "../application/editor-services.tsx";
 import { EditorShell } from "../application/editor-shell.tsx";
 import { CanvasOverlay } from "../canvas/canvas-overlay.tsx";
-import { documentSnapshot, fixtureDeckId, IdMinter, plainBody, shapeElement, slideSnapshot } from "../sample/snapshot-builders.ts";
+import { documentSnapshot, fixtureDeckId, createPrefixedIdMinter, plainBody, shapeElement, slideSnapshot } from "../../contracts/testing/snapshot-builders.ts";
 import { createRecordingSystem, fixtureEditorState, fixtureServices, recordingCapabilities } from "../testing/editor-fixtures.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { MessageBody, railSections, threadPassesFilter } from "./comment-rail.tsx";
@@ -27,7 +27,7 @@ import { menuEntries } from "./menu-model.ts";
 import { peerLocations } from "./presence.ts";
 import { ConnectionIndicator, PeerList, TopBar, connectionNote } from "./top-bar.tsx";
 
-const ids = new IdMinter("Collab01");
+const ids = createPrefixedIdMinter("Collab01");
 const box = shapeElement({ id: ids.next("element"), box: { x: 200, y: 100, width: 400, height: 200 }, text: plainBody("Quarterly numbers") });
 const slides = [0, 1, 2].map((index) => slideSnapshot({ ids, elements: index === 2 ? [box] : [shapeElement({ id: ids.next("element"), text: plainBody(`Slide ${index + 1}`) })] }));
 const document = documentSnapshot({ deckId: fixtureDeckId("deck_collaboration"), title: "Shared deck", slides });

@@ -16,7 +16,7 @@ import { reduceEditor } from "../../state/editor/reduce-editor.ts";
 import { editorStateFor, group, shape, slide, slideId, testDocument } from "../../state/testing/document-fixtures.ts";
 import { EditorGestureContext, EditorServicesContext, ViewPreferencesContext } from "../application/editor-services.tsx";
 import { sampleSlides } from "../sample/sample-deck.ts";
-import { fixtureAssetId, fixtureDeckId, IdMinter } from "../sample/snapshot-builders.ts";
+import { fixtureAssetId, fixtureDeckId, createPrefixedIdMinter } from "../../contracts/testing/snapshot-builders.ts";
 import { scenarioState } from "../testing/chrome-harness.tsx";
 import { createRecordingSystem, fixtureServices, recordingCapabilities } from "../testing/editor-fixtures.ts";
 import { VIEW_CLASS, viewStylesheet } from "../view-stylesheet.ts";
@@ -45,7 +45,7 @@ describe("notices stack in a corner column beside the slide", () => {
   });
 
   it("the newest notice is nearest the corner: newest first in the markup, laid out from the bottom up", () => {
-    const ids = new IdMinter("Notices3");
+    const ids = createPrefixedIdMinter("Notices3");
     const notices: readonly Notice[] = ["oldest", "middle", "newest"].map((message) => ({ id: ids.next("notice"), tone: "information", message, action: null, expiresAfterMilliseconds: null }));
     const state = { ...editorStateFor(testDocument({ slides: [slide({ id: "slide_one", elements: [] })] })), notices };
     const markup = render({ state, child: createElement(Notices) });

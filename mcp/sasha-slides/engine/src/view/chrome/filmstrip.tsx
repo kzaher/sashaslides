@@ -20,10 +20,10 @@ import type { Gesture } from "../../contracts/editor-state.ts";
 import type { SlideId } from "../../contracts/ids.ts";
 import type { PeerPresence } from "../../contracts/presence.ts";
 import type { Selection } from "../../contracts/selection.ts";
+import { editingRefusal } from "../../shared/access-refusals.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { shallowEqual, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
 import { peerColour } from "../canvas/canvas-overlay.tsx";
-import { editingDisabledReason } from "./access.ts";
 import { shownPeers, usePresenceNow } from "./presence.ts";
 import { StaticSlide } from "../render/static-slide.tsx";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
@@ -65,7 +65,7 @@ export const Filmstrip = memo(function Filmstrip(): ReactElement {
       dragging: draggingSlides(state.gesture),
       peers: state.peers,
       discussion: state.discussion,
-      editing: editingDisabledReason(state),
+      editing: editingRefusal(state),
     }),
     shallowEqual,
   );

@@ -34,8 +34,9 @@ import { browserDeckSocket } from "../collaboration/deck-socket.ts";
 import { createHttpAssetStore } from "../collaboration/http-asset-store.ts";
 import { scheduleBearerRenewal, startEmbeddedSession } from "../embedded/embedded-session.ts";
 import { createShellRelay, shellOriginOf, type InboundMessage, type ShellRelay } from "../embedded/shell-relay.ts";
-import { parseWebPageConfiguration, WEB_CONFIGURATION_ID, WEB_ROOT_ID } from "../web-page.ts";
-import { composeDeckEditor, type DeckEditor } from "./deck-editor.ts";
+import { PAGE_CONFIGURATION_ID, PAGE_ROOT_ID, parsePageConfiguration } from "../../view/application/editor-page.ts";
+import type { ComposedEditor } from "../../view/application/compose-editor.ts";
+import { composeDeckEditor } from "./deck-editor.ts";
 import { reviewRequestOf } from "./review-address.ts";
 import { createExportRunner, type PageNotice } from "./deck-exports.ts";
 import { deckEditorHost, TopBarAccessory } from "./deck-host.tsx";
@@ -62,7 +63,7 @@ type StartOutcome =
 const reportError = (error: unknown, context: string): void => console.error(`[sasha deck] ${context}`, error);
 
 async function start(): Promise<StartOutcome> {
-  const configuration = parseWebPageConfiguration(document.getElementById(WEB_CONFIGURATION_ID)?.textContent ?? null);
+  const configuration = parsePageConfiguration(document.getElementById(PAGE_CONFIGURATION_ID)?.textContent ?? null);
   const deckId = parseDeckId(decodeURIComponent(window.location.pathname.slice(DECK_PAGE_PATH_PREFIX.length)));
   if (deckId === null) return { kind: "notFound" };
   // A query value is untrusted text, not a closed union: only the exact "addon" embeds.
@@ -252,7 +253,7 @@ function DeckApplication(properties: Readonly<{ deck: StartedDeck }>): ReactElem
   const { deck } = properties;
   const [notices, setNotices] = useState<readonly NumberedNotice[]>([]);
   const notify = useCallback((notice: PageNotice) => setNotices((current) => [...current.slice(-2), { ...notice, id: Date.now() + Math.random() }]), []);
-  const [workspace] = useState<DeckWorkspace<DeckEditor>>(() => composeWorkspace(deck));
+  const [workspace] = useState<DeckWorkspace<ComposedEditor>>(() => composeWorkspace(deck));
   const [exports] = useState(() => createExportRunner({ deck: deck.api.deck(deck.deckId), shell: deck.shell, notify }));
   const hostFor = useCallback(
     (role: DeckRole): EditorHost =>
@@ -272,7 +273,7 @@ function DeckApplication(properties: Readonly<{ deck: StartedDeck }>): ReactElem
   return <DeckPage workspace={workspace} hostFor={hostFor} notices={notices} onDismissNotice={(id) => setNotices((current) => current.filter((notice) => notice.id !== id))} />;
 }
 
-function composeWorkspace(deck: StartedDeck): DeckWorkspace<DeckEditor> {
+function composeWorkspace(deck: StartedDeck): DeckWorkspace<ComposedEditor> {
   const assetStore = createHttpAssetStore({
     deck: deck.api.deck(deck.deckId),
     createAddress: (bytes, mediaType) => URL.createObjectURL(new Blob([bytes], { type: mediaType })),
@@ -280,7 +281,7 @@ function composeWorkspace(deck: StartedDeck): DeckWorkspace<DeckEditor> {
     scheduler: asyncScheduler,
     reportError,
   });
-  const workspace = createDeckWorkspace<DeckEditor>({
+  const workspace = createDeckWorkspace<ComposedEditor>({
     openReplica: (options) => openReplica(deck, options.initialNotices),
     composeEditor: (replica) =>
       composeDeckEditor({ page: window, replica, assetStore, me: deck.session.me, embedding: deck.embedding, runnerAddress: deck.runnerAddress, storage: () => window.localStorage, reportError }),
@@ -315,7 +316,7 @@ function composeWorkspace(deck: StartedDeck): DeckWorkspace<DeckEditor> {
   return workspace;
 }
 
-function hasUnsentChanges(view: WorkspaceView<DeckEditor>): boolean {
+function hasUnsentChanges(view: WorkspaceView<ComposedEditor>): boolean {
   switch (view.kind) {
     case "opening":
     case "ready":
@@ -327,7 +328,7 @@ function hasUnsentChanges(view: WorkspaceView<DeckEditor>): boolean {
   }
 }
 
-const container = document.getElementById(WEB_ROOT_ID);
+const container = document.getElementById(PAGE_ROOT_ID);
 if (container !== null) {
   const root = createRoot(container);
   start()

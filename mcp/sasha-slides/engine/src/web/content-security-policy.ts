@@ -22,16 +22,14 @@
 //    the slides in a fallback font.
 
 import { ADDON_FRAME_ANCESTORS } from "../contracts/deck-api.ts";
-import { PRESENTER_RULES } from "../presenter/view/presenter-stylesheet.ts";
-import { tidepoolStylesheet } from "../theme/tidepool-stylesheet.ts";
-import { TIDEPOOL_TOKENS } from "../theme/tidepool-theme.ts";
+import { PRESENTER_RULES, SPEAKER_VIEW_STYLE_TEXT } from "../presenter/view/presenter-stylesheet.ts";
 
 /**
  * The exact text of every `<style>` element the presenter inserts: presentation.tsx and
- * transition-preview.tsx render PRESENTER_RULES; speaker-view.tsx joins the Tidepool sheet and
- * PRESENTER_RULES with a newline (build-web.test.ts checks that source still does).
+ * transition-preview.tsx and build-preview.tsx render PRESENTER_RULES; speaker-view.tsx inserts
+ * SPEAKER_VIEW_STYLE_TEXT (both exported by presenter-stylesheet.ts, so this is the same value).
  */
-export const PRESENTER_INLINE_STYLE_TEXTS: readonly string[] = [PRESENTER_RULES, `${tidepoolStylesheet(TIDEPOOL_TOKENS)}\n${PRESENTER_RULES}`];
+export const PRESENTER_INLINE_STYLE_TEXTS: readonly string[] = [PRESENTER_RULES, SPEAKER_VIEW_STYLE_TEXT];
 
 /** Both pages' policies, given the base64 SHA-256 of each text in PRESENTER_INLINE_STYLE_TEXTS. */
 export function deckPagesContentSecurityPolicies(options: Readonly<{ inlineStyleHashes: readonly string[] }>): Readonly<{ standalone: string; embedded: string }> {

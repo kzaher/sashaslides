@@ -9,10 +9,11 @@
 // run finishes, falls back, or there was nothing to play.
 
 import { useMemo, useRef, useState, type ReactElement } from "react";
-import type { TransitionPreviewProperties } from "../../contracts/presenter.ts";
+import type { PreviewProperties, TransitionPreviewProperties } from "../../contracts/presenter.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { createInPageStageRegistry } from "../in-page/in-page-run-feedback.ts";
 import { initialPreviewState } from "../presenter-reducer.ts";
+import type { PresenterSystemState } from "../presenter-state.ts";
 import { createPresenterSystem } from "../presenter-system.ts";
 import { createBrowserPresenterEnvironment, windowOf } from "./browser-environment.ts";
 import { PRESENTATION_SURFACE, PRESENTER_CLASS, PRESENTER_RULES } from "./presenter-stylesheet.ts";
@@ -20,17 +21,28 @@ import { ScreenContent } from "./slide-surfaces.tsx";
 import { useLatest, usePresenterSystem } from "./use-presenter-system.ts";
 
 export function TransitionPreview(properties: TransitionPreviewProperties): ReactElement {
-  return <PreviewRun key={properties.generation} {...properties} />;
+  return <PreviewRun key={properties.generation} properties={properties} initialState={initialPreviewState} label="Transition preview" />;
 }
 
-function PreviewRun(properties: TransitionPreviewProperties): ReactElement {
+/**
+ * The box both previews share (`BuildPreview` wraps it with its own start state, label and build
+ * attribute): `initialState` is the reducer's start for the preview mode, and `buildOf`, when given,
+ * is published as `data-build`.
+ */
+export function PreviewRun(options: Readonly<{
+  properties: PreviewProperties;
+  initialState: (start: Parameters<typeof initialPreviewState>[0]) => PresenterSystemState;
+  label: string;
+  buildOf?: (state: PresenterSystemState) => number;
+}>): ReactElement {
+  const { properties, label, buildOf } = options;
   const dependencies = properties.dependencies;
   const box = useRef<HTMLDivElement>(null);
   const runnerLayer = useRef<HTMLDivElement>(null);
   const stages = useMemo(createInPageStageRegistry, []);
   const onEnded = useLatest(properties.onEnded);
   const [initial] = useState(() =>
-    initialPreviewState({
+    options.initialState({
       document: properties.document,
       slideId: properties.slideId,
       idSeed: { sessionPrefix: dependencies.sessionPrefix, counter: 0 },
@@ -63,7 +75,8 @@ function PreviewRun(properties: TransitionPreviewProperties): ReactElement {
       style={{ width: viewport.width, height: viewport.height, background: PRESENTATION_SURFACE.letterbox }}
       data-preview-ended={state.previewEnded ? "true" : "false"}
       data-run-phase={state.run?.phase ?? "none"}
-      aria-label="Transition preview"
+      data-build={buildOf?.(state)}
+      aria-label={label}
     >
       <style>{PRESENTER_RULES}</style>
       <ScreenContent state={state} dependencies={dependencies} stages={stages} box={viewport} />

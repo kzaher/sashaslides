@@ -39,6 +39,23 @@ import { assertNever } from "../contracts/assert-never.ts";
 import { ANIMATION_EDGES, ANIMATION_TRIGGERS } from "../contracts/animations.ts";
 import { PLACEHOLDER_ROLES } from "../contracts/document.ts";
 import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
+import {
+  ARROW_HEADS,
+  DASH_STYLES,
+  IMAGE_FITS,
+  LINE_ROUTINGS,
+  LIST_GLYPHS,
+  SHAPE_PRESETS,
+  SLIDE_DIRECTIONS,
+  TEXT_AUTOFITS,
+  TRANSITION_EASINGS,
+  VERTICAL_ALIGNMENTS,
+} from "../shared/closed-sets.ts";
+import { isHexadecimalColour } from "../shared/colour-values.ts";
+import { ASSET_MEDIA_TYPES } from "../shared/media-types.ts";
+
+// deck-tools/tool-input-schemas.ts reads the shape presets from here.
+export { SHAPE_PRESETS } from "../shared/closed-sets.ts";
 
 export type Verdict = "valid" | "unsupported" | "wrongType";
 
@@ -127,7 +144,6 @@ export function checkEnumeration(candidate: unknown, values: readonly string[]):
 
 export function checkColour(candidate: unknown): Verdict {
   return checkKind(candidate, {
-    // Text first: `String()` of a list or an object would pass the pattern and reach the renderer.
     literal: (record) => combine([checkHexadecimal(record["hexadecimal"]), checkUnit(record["alpha"])]),
     theme: (record) => combine([checkEnumeration(record["slot"], THEME_COLOUR_SLOTS), checkUnit(record["alpha"])]),
   });
@@ -139,9 +155,9 @@ export function checkListMarkerColour(candidate: unknown): Verdict {
   return candidate.startsWith("#") ? checkHexadecimal(candidate) : checkEnumeration(candidate, THEME_COLOUR_SLOTS);
 }
 
-/** "#rrggbb" as text. */
+/** "#rrggbb" as text (colour-values.ts). */
 function checkHexadecimal(candidate: unknown): Verdict {
-  return typeof candidate === "string" && HEXADECIMAL_PATTERN.test(candidate) ? "valid" : "wrongType";
+  return isHexadecimalColour(candidate) ? "valid" : "wrongType";
 }
 
 export function checkColourOrNone(candidate: unknown): Verdict {
@@ -194,36 +210,25 @@ export function checkFrame(candidate: unknown): Verdict {
   ]);
 }
 
+/** Text box field checks, total over `TextBoxStyle`: whole styles, partial ones and single fields all read through it. */
+export const TEXT_BOX_FIELD_CHECKS: Readonly<Record<keyof TextBoxStyle, (candidate: unknown) => Verdict>> = {
+  verticalAlignment: (candidate) => checkEnumeration(candidate, VERTICAL_ALIGNMENTS),
+  paddingTop: checkNonNegative,
+  paddingRight: checkNonNegative,
+  paddingBottom: checkNonNegative,
+  paddingLeft: checkNonNegative,
+  autofit: (candidate) => checkEnumeration(candidate, TEXT_AUTOFITS),
+  wrap: checkBoolean,
+};
+
 export function checkTextBoxStyle(candidate: unknown): Verdict {
   if (!isRecord(candidate)) return "wrongType";
-  return combine([
-    checkEnumeration(candidate["verticalAlignment"], VERTICAL_ALIGNMENTS),
-    checkNonNegative(candidate["paddingTop"]),
-    checkNonNegative(candidate["paddingRight"]),
-    checkNonNegative(candidate["paddingBottom"]),
-    checkNonNegative(candidate["paddingLeft"]),
-    checkEnumeration(candidate["autofit"], TEXT_AUTOFITS),
-    checkBoolean(candidate["wrap"]),
-  ]);
+  return combine(Object.entries(TEXT_BOX_FIELD_CHECKS).map(([key, check]) => check(candidate[key])));
 }
 
-/** One `TextBoxStyle` field, for partial text box styles (placeholder styles, cell patches). */
+/** One `TextBoxStyle` field, for partial text box styles (placeholder styles); an unknown key is a newer client's. */
 export function checkTextBoxField(key: string, candidate: unknown): Verdict {
-  switch (key) {
-    case "verticalAlignment":
-      return checkEnumeration(candidate, VERTICAL_ALIGNMENTS);
-    case "autofit":
-      return checkEnumeration(candidate, TEXT_AUTOFITS);
-    case "wrap":
-      return checkBoolean(candidate);
-    case "paddingTop":
-    case "paddingRight":
-    case "paddingBottom":
-    case "paddingLeft":
-      return checkNonNegative(candidate);
-    default:
-      return "unsupported";
-  }
+  return ownCheck(TEXT_BOX_FIELD_CHECKS, key)?.(candidate) ?? "unsupported";
 }
 
 /** Run attribute checks, total over `RunAttributeName`. */
@@ -274,7 +279,7 @@ export const PARAGRAPH_ATTRIBUTE_CHECKS: Readonly<Record<ParagraphAttributeName,
 export function checkStylePatch(candidate: unknown, checks: Readonly<Record<string, (value: unknown) => Verdict>>): Verdict {
   if (!isRecord(candidate)) return "wrongType";
   return combine(Object.entries(candidate).map(([key, value]) => {
-    const check = checks[key];
+    const check = ownCheck(checks, key);
     return check === undefined ? "unsupported" : check(value);
   }));
 }
@@ -354,7 +359,7 @@ export const ARROW_HEAD: StoredValueCheck<ArrowHead> = {
   describe: "an arrow head",
 };
 export const LINE_ROUTING: StoredValueCheck<LineRouting> = {
-  check: (candidate) => checkEnumeration(candidate, ["straight", "elbow", "curved"]),
+  check: (candidate) => checkEnumeration(candidate, LINE_ROUTINGS),
   describe: "a line routing",
 };
 export const PLACEHOLDER: StoredValueCheck<PlaceholderReference | null> = {
@@ -393,7 +398,7 @@ export const SLIDE_TRANSITION: StoredValueCheck<SlideTransition | null> = {
         combine([
           checkBuiltinEffect(record["effect"]),
           checkNonNegative(record["durationMilliseconds"]),
-          checkEnumeration(record["easing"], EASINGS),
+          checkEnumeration(record["easing"], TRANSITION_EASINGS),
         ]),
       scripted: (record) =>
         combine([checkString(record["scriptId"]), checkNonNegative(record["durationMilliseconds"]), isRecord(record["parameters"]) ? checkSerialisable(record["parameters"]) : "wrongType"]),
@@ -402,7 +407,7 @@ export const SLIDE_TRANSITION: StoredValueCheck<SlideTransition | null> = {
   describe: "a slide transition or null",
 };
 export const TRANSITION_EASING: StoredValueCheck<TransitionEasing> = {
-  check: (candidate) => checkEnumeration(candidate, EASINGS),
+  check: (candidate) => checkEnumeration(candidate, TRANSITION_EASINGS),
   describe: "an easing",
 };
 export const SCRIPT_PURPOSE: StoredValueCheck<ScriptPurpose> = {
@@ -479,67 +484,25 @@ export const ASSET_RECORD: StoredValueCheck<AssetRecord> = {
   describe: "an asset record",
 };
 
-export const ASSET_MEDIA_TYPES: readonly string[] = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
-
-/** The presets this client draws (document.ts `ShapePreset`); total, so a new preset is a compile error. */
-// `Object.keys` widens to string[]; the `satisfies` record below has exactly the ShapePreset keys.
-export const SHAPE_PRESETS: readonly ShapePreset[] = Object.keys({
-  textBox: true,
-  rectangle: true,
-  roundedRectangle: true,
-  ellipse: true,
-  triangle: true,
-  rightTriangle: true,
-  diamond: true,
-  parallelogram: true,
-  trapezoid: true,
-  pentagon: true,
-  hexagon: true,
-  octagon: true,
-  fivePointStar: true,
-  plus: true,
-  heart: true,
-  cloud: true,
-  speechBubble: true,
-  chevron: true,
-  rightArrow: true,
-  leftArrow: true,
-  upArrow: true,
-  downArrow: true,
-} satisfies Readonly<Record<ShapePreset, true>>) as readonly ShapePreset[];
-
-const HEXADECIMAL_PATTERN = /^#[0-9a-fA-F]{6}$/;
-const IMAGE_FITS: readonly string[] = ["cover", "contain", "stretch", "tile"];
-const DASH_STYLES: readonly string[] = ["solid", "dot", "dash", "dashDot", "longDash", "longDashDot"];
-const VERTICAL_ALIGNMENTS: readonly string[] = ["top", "middle", "bottom"];
-const TEXT_AUTOFITS: readonly string[] = ["none", "shrinkText", "resizeShape"];
-const ARROW_HEADS: readonly string[] = ["none", "triangle", "openArrow", "stealth", "diamond", "oval", "bar"];
-const LIST_GLYPHS: readonly string[] = [
-  "disc",
-  "circle",
-  "square",
-  "arrow",
-  "star",
-  "checkbox",
-  "decimal",
-  "decimalZeroPadded",
-  "upperAlphabetic",
-  "lowerAlphabetic",
-  "upperRoman",
-  "lowerRoman",
-];
 const SIDES = ["top", "right", "bottom", "left"] as const;
 const CORNERS = ["topLeft", "topRight", "bottomRight", "bottomLeft"] as const;
-const EASINGS: readonly string[] = ["linear", "easeIn", "easeOut", "easeInOut"];
-const SLIDE_DIRECTIONS: readonly string[] = ["fromLeft", "fromRight", "fromTop", "fromBottom"];
 
 /** A discriminated object: an unknown `kind` string is a newer client's (see the header). */
 function checkKind(candidate: unknown, cases: Readonly<Record<string, (record: Readonly<Record<string, unknown>>) => Verdict>>): Verdict {
   if (!isRecord(candidate)) return "wrongType";
   const kind = candidate["kind"];
   if (typeof kind !== "string") return "wrongType";
-  const check = cases[kind];
+  const check = ownCheck(cases, kind);
   return check === undefined ? "unsupported" : check(candidate);
+}
+
+/**
+ * `checks[key]` when the table has `key` as its own property. A stored name such as "constructor"
+ * or "toString" must read as a newer client's, not call the inherited Object method and hand its
+ * result on as a verdict.
+ */
+function ownCheck<TCheck>(checks: Readonly<Record<string, TCheck>>, key: string): TCheck | undefined {
+  return Object.hasOwn(checks, key) ? checks[key] : undefined;
 }
 
 function checkStops(candidate: unknown): Verdict {

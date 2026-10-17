@@ -1,7 +1,8 @@
 // READING VALUES THAT CROSSED A TRUST BOUNDARY: a server frame, an HTTP answer, an awareness state
-// a peer wrote, a `postMessage` from another origin, a value from local storage. Each boundary
-// parser in the web module is written with these readers and returns a typed value or null; nothing
-// past the boundary re-checks a shape.
+// a peer wrote, a `postMessage` from another origin, a value from local storage, a client's
+// discussion request at the deck server. DOM-free and Node-free, so the web module, the server and
+// the connector's `decks/` build their boundary parsers from the same readers; each parser returns
+// a typed value or null, and nothing past the boundary re-checks a shape.
 //
 // Key decisions:
 //
@@ -76,7 +77,7 @@ export function numberOrNullAt(record: UntrustedRecord, key: string): number | n
 
 export function nonNegativeIntegerAt(record: UntrustedRecord, key: string): number {
   const value = numberAt(record, key);
-  if (!Number.isInteger(value) || value < 0) throw new MalformedValue(`${key} is not a whole number`);
+  if (!Number.isSafeInteger(value) || value < 0) throw new MalformedValue(`${key} is not a whole number`);
   return value;
 }
 

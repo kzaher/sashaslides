@@ -18,7 +18,8 @@
 //    reduced motion the controls appear and disappear at once.
 
 import { SLIDE_ROOT_CLASS } from "../../contracts/render.ts";
-import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
+import { TIDEPOOL_CLASS, tidepoolStylesheet } from "../../theme/tidepool-stylesheet.ts";
+import { TIDEPOOL_TOKENS } from "../../theme/tidepool-theme.ts";
 import { RUNNER_FRAME_CLASS, RUNNER_SHOWN_ATTRIBUTE } from "../sandbox/sandbox-environment.ts";
 
 export const PRESENTER_CLASS = {
@@ -56,6 +57,12 @@ export const PRESENTATION_SURFACE = {
 
 /** The rules, built once (they depend on nothing but class names). */
 export const PRESENTER_RULES: string = presenterRules();
+
+/**
+ * The text of the speaker window's one `<style>` element (speaker-view.tsx): the shared Tidepool sheet,
+ * which that empty window lacks, then the presenter's rules. web/content-security-policy.ts hashes it.
+ */
+export const SPEAKER_VIEW_STYLE_TEXT: string = `${tidepoolStylesheet(TIDEPOOL_TOKENS)}\n${PRESENTER_RULES}`;
 
 export function presenterRules(): string {
   const classes = PRESENTER_CLASS;

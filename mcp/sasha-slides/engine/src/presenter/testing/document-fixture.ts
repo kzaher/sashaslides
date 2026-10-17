@@ -13,7 +13,6 @@ import {
   type GroupElement,
   type LineElement,
   type ScriptPurpose,
-  type ShapeElement,
   type SlideSnapshot,
   type SlideTransition,
   type TextBody,
@@ -23,7 +22,8 @@ import {
 import type { Frame } from "../../contracts/geometry.ts";
 import { isObjectId, parseAnimationStepId, parseElementId, parsePersonId, parseSlideId, type AnimationStepId, type DeckId, type ElementId, type SlideId, type TransitionScriptId } from "../../contracts/ids.ts";
 import type { SerialisableObject } from "../../contracts/serialisable.ts";
-import { DEFAULT_TEXT_BOX_STYLE, PLAIN_BOX_STYLE, literalColour, type HexadecimalColour, type ThemeColourSlot } from "../../contracts/style.ts";
+import { literalColour, type HexadecimalColour, type ThemeColourSlot } from "../../contracts/style.ts";
+import { lineElement, shapeElement } from "../../contracts/testing/snapshot-builders.ts";
 
 export type FixtureElement = Readonly<{
   id: string;
@@ -86,23 +86,13 @@ export function fixtureSlide(slide: FixtureSlide): SlideSnapshot {
 }
 
 export function fixtureShape(element: FixtureElement): ElementSnapshot {
-  const shape: ShapeElement = {
-    kind: "shape",
+  return shapeElement({
     id: elementIdOf(element.id),
-    name: "",
-    description: "",
     frame: { rotation: 0, flipHorizontal: false, flipVertical: false, ...element.frame },
-    groupId: null,
     morphKey: element.morphKey ?? element.id,
-    placeholder: null,
-    unsupportedKeys: [],
-    preset: "rectangle",
-    customOutline: null,
-    box: { ...PLAIN_BOX_STYLE, fill: element.fill === undefined ? { kind: "none" } : { kind: "solid", colour: literalColour({ hexadecimal: element.fill, alpha: 1 }) } },
-    textBox: DEFAULT_TEXT_BOX_STYLE,
+    style: { fill: element.fill === undefined ? { kind: "none" } : { kind: "solid", colour: literalColour({ hexadecimal: element.fill, alpha: 1 }) } },
     text: textBodyOf(element.text ?? ""),
-  };
-  return shape;
+  });
 }
 
 export function fixtureScript(script: FixtureScript): TransitionScriptRecord {
@@ -123,25 +113,14 @@ export function fixtureScript(script: FixtureScript): TransitionScriptRecord {
 
 /** A line from `start` to `end`, 4 units wide, opaque. */
 export function fixtureLine(options: Readonly<{ id: string; start: Readonly<{ x: number; y: number }>; end: Readonly<{ x: number; y: number }>; opacity?: number }>): LineElement {
-  const template = fixtureShape({ id: options.id, frame: { x: 0, y: 0, width: 1, height: 1 } });
-  const left = Math.min(options.start.x, options.end.x);
-  const top = Math.min(options.start.y, options.end.y);
   return {
-    kind: "line",
-    id: template.id,
-    name: "",
-    description: "",
-    frame: { x: left, y: top, width: Math.abs(options.end.x - options.start.x), height: Math.abs(options.end.y - options.start.y), rotation: 0, flipHorizontal: false, flipVertical: false },
-    groupId: null,
-    morphKey: template.morphKey,
-    placeholder: null,
-    unsupportedKeys: [],
-    start: options.start,
-    end: options.end,
-    routing: "straight",
-    stroke: { width: 4, colour: literalColour({ hexadecimal: "#1c2333", alpha: 1 }), dash: "solid" },
-    startArrow: "none",
-    endArrow: "none",
+    ...lineElement({
+      id: elementIdOf(options.id),
+      start: options.start,
+      end: options.end,
+      stroke: { width: 4, colour: literalColour({ hexadecimal: "#1c2333", alpha: 1 }), dash: "solid" },
+      endArrow: "none",
+    }),
     opacity: options.opacity ?? 1,
   };
 }

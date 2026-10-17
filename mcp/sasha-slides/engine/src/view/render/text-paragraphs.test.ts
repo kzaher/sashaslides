@@ -14,12 +14,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TextBody } from "../../contracts/document.ts";
 import { listMarkerColour, type ListMarkerColour, type ListMembership, type ParagraphStylePatch } from "../../contracts/style.ts";
-import { documentSnapshot, fixtureDeckId, IdMinter, paragraph, run, textBody } from "../sample/snapshot-builders.ts";
+import { documentSnapshot, fixtureDeckId, createPrefixedIdMinter, paragraph, run, textBody } from "../../contracts/testing/snapshot-builders.ts";
 import { colourValue } from "./inline-styles.ts";
 import { LIST_INDENT_PER_LEVEL } from "./text-layout.ts";
 import { listLayout, TextParagraphs } from "./text-paragraphs.tsx";
 
-const ids = new IdMinter("TextParagraphs");
+const ids = createPrefixedIdMinter("TextParagraphs");
 const THEME = documentSnapshot({ deckId: fixtureDeckId("text-paragraphs"), title: "Lists", slides: [] }).theme;
 
 describe("a list paragraph's marker and text positions", () => {

@@ -13,7 +13,7 @@ import { after, before, describe, it } from "node:test";
 import { ASSETS_DIRECTORY, buildWeb, MANIFEST_FILE, RUNNER_DIRECTORY } from "../../build-web.ts";
 import { ADDON_FRAME_ANCESTORS, type WebBuildManifest } from "../contracts/deck-api.ts";
 import { PRESENTER_INLINE_STYLE_TEXTS } from "./content-security-policy.ts";
-import { arrayAt, parseOrNull, parseStructuredText, recordOf, stringAt } from "./parsing/untrusted-values.ts";
+import { arrayAt, parseOrNull, parseStructuredText, recordOf, stringAt } from "../shared/untrusted-values.ts";
 
 /** The presenter's fixed style elements, by hash: the only inline stylesheets the pages accept. */
 const PRESENTER_STYLE_HASHES = PRESENTER_INLINE_STYLE_TEXTS.map((text) => `'sha256-${createHash("sha256").update(text, "utf8").digest("base64")}'`).join(" ");
@@ -65,18 +65,6 @@ describe("11. build-web.ts", () => {
     assert.equal(embedded.length, plain.length);
     const differing = plain.flatMap((directive, index) => (directive === embedded[index] ? [] : [{ plain: directive, embedded: embedded[index] }]));
     assert.deepEqual(differing, [{ plain: "frame-ancestors 'none'", embedded: `frame-ancestors ${ADDON_FRAME_ANCESTORS.join(" ")}` }]);
-  });
-
-  it("hashes exactly the style texts the presenter inserts", () => {
-    // The presenter is frozen and builds these texts itself; if its sources change how, the hashes
-    // here stop matching and the browser blocks the presentation's styles, so the sources are pinned.
-    const presenterView = new URL("../presenter/view/", import.meta.url);
-    const speakerView = readFileSync(new URL("speaker-view.tsx", presenterView), "utf8");
-    assert.ok(speakerView.includes("style.textContent = `${tidepoolStylesheet(TIDEPOOL_TOKENS)}\\n${PRESENTER_RULES}`;"), "speaker-view.tsx joins the Tidepool sheet and the presenter rules");
-    for (const file of ["presentation.tsx", "transition-preview.tsx"]) {
-      const source = readFileSync(new URL(file, presenterView), "utf8");
-      assert.deepEqual([...source.matchAll(/<style>\{(\w+)\}<\/style>/g)].map((match) => match[1]), ["PRESENTER_RULES"], file);
-    }
   });
 
   it("ships the runner page and its policy", () => {

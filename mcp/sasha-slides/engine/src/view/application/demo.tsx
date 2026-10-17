@@ -24,14 +24,15 @@ import { LivelyShapes } from "../../theme/lively-shapes.tsx";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { connectInMemory, createDocumentStore, createMemoryAssetStore, createMemoryDiscussionStore, createMemoryPresenceHub } from "../../model/index.ts";
 import { sampleSlides } from "../sample/sample-deck.ts";
-import { fixtureDeckId } from "../sample/snapshot-builders.ts";
+import { SAMPLE_PHOTOGRAPH_MARKUP } from "../sample/sample-photograph.ts";
+import { fixtureDeckId } from "../../contracts/testing/snapshot-builders.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { composeEditor, type ComposedEditor } from "./compose-editor.ts";
 import { createDemoCollaborationSession, demoConnection, demoRole } from "./demo-collaboration.ts";
 import type { CollaborationSession } from "../../contracts/collaboration.ts";
 import type { DeckMember } from "../../contracts/deck-access.ts";
 import { EditorApplication } from "./editor-application.tsx";
-import { PAGE_CONFIGURATION_ID, PAGE_ROOT_ID } from "./editor-page.ts";
+import { PAGE_CONFIGURATION_ID, PAGE_ROOT_ID, parsePageConfiguration, type PageConfiguration } from "./editor-page.ts";
 
 type DemoEditor = Readonly<{ label: string; composed: ComposedEditor; assetStore: AssetStore }>;
 
@@ -101,7 +102,7 @@ function editorFor(options: Readonly<{ store: DocumentStore; assetStore: AssetSt
 
 /** Puts the sample photograph in the asset store and the sample slides after the seeded title slide. */
 async function addSampleSlides(options: Readonly<{ store: DocumentStore; assetStore: AssetStore; author: Person }>): Promise<void> {
-  const bytes = new TextEncoder().encode(SAMPLE_PHOTO_MARKUP).buffer;
+  const bytes = new TextEncoder().encode(SAMPLE_PHOTOGRAPH_MARKUP).buffer;
   const assetId: AssetId = await options.assetStore.put(bytes, "image/svg+xml");
   const asset: AssetRecord = { id: assetId, mediaType: "image/svg+xml", pixelWidth: 440, pixelHeight: 360, name: "Sample photograph", byteLength: bytes.byteLength };
   const snapshot = options.store.snapshot();
@@ -120,12 +121,9 @@ async function addSampleSlides(options: Readonly<{ store: DocumentStore; assetSt
   if (outcome.kind === "rejected") console.warn("[sasha engine demo] the sample slides were refused", outcome.rejection);
 }
 
-/** The page's configuration block, parsed at the boundary (editor-page.ts). */
-function readConfiguration(): Readonly<{ runnerAddress: string }> {
-  const text = document.getElementById(PAGE_CONFIGURATION_ID)?.textContent ?? "{}";
-  const parsed: unknown = JSON.parse(text);
-  const runnerAddress = typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, "runnerAddress") : undefined;
-  return { runnerAddress: typeof runnerAddress === "string" ? runnerAddress : "about:blank" };
+/** The page's configuration block (editor-page.ts); a missing or malformed one leaves the runner at "about:blank". */
+function readConfiguration(): PageConfiguration {
+  return parsePageConfiguration(document.getElementById(PAGE_CONFIGURATION_ID)?.textContent ?? null) ?? { runnerAddress: "about:blank" };
 }
 
 function person(options: Readonly<{ id: string; displayName: string; colourIndex: number }>): Person {
@@ -147,11 +145,9 @@ function DemoProblem(properties: Readonly<{ message: string }>): ReactElement {
   );
 }
 
-const SAMPLE_PHOTO_MARKUP = `<svg xmlns="http://www.w3.org/2000/svg" width="440" height="360" viewBox="0 0 440 360"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7dd3fc"/><stop offset="1" stop-color="#fde68a"/></linearGradient></defs><rect width="440" height="360" fill="url(#sky)"/><circle cx="330" cy="110" r="46" fill="#fb923c"/><path d="M0 260 L120 150 L230 250 L320 180 L440 270 L440 360 L0 360 Z" fill="#0e7490"/><path d="M0 300 L160 230 L300 300 L440 250 L440 360 L0 360 Z" fill="#047857"/></svg>`;
-
 // The page starts LAST, after every module constant above is initialised: started at the top, the
-// synchronous part of `startDemo` read SAMPLE_PHOTO_MARKUP before its declaration ran, and the
-// bundle (where `const` becomes `var`) stored an empty image -- the sample photograph never showed.
+// synchronous part of `startDemo` could read a constant before its declaration ran (in the bundle,
+// where `const` becomes `var`, that is `undefined`, not an error).
 const container = document.getElementById(PAGE_ROOT_ID);
 if (container !== null) {
   const root = createRoot(container);

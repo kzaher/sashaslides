@@ -25,10 +25,10 @@ import type { Composition, TextEditingState } from "../../contracts/editor-state
 import { useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
 import { sameTextTarget } from "../render/element-view.tsx";
 import type { EditableTextProperties } from "../render/render-context.ts";
-import { plainTextOfRange } from "../render/text-layout.ts";
 import { TextParagraphs } from "../render/text-paragraphs.tsx";
 import { indexFromPagePosition, pagePositionOfIndex } from "./dom-positions.ts";
 import { createTextEditorHandlers, type TextSelectionReading } from "./text-editor-handlers.ts";
+import { flattenBody, plainTextOfRange } from "../../shared/flat-text.ts";
 
 /** On the editable root, so the canvas and the application keyboard handler leave its events alone. */
 export const TEXT_EDITOR_ATTRIBUTE = "data-sasha-text-editor";
@@ -53,7 +53,7 @@ export function InlineTextEditor(properties: InlineTextEditorProperties): ReactE
         readSelection: () => readPageSelection(root.current),
         positionOf: (container, offset) => (root.current !== null && container instanceof Node ? indexFromPagePosition({ root: root.current, container, offset }) : null),
         richTextFrom: services.richTextFrom,
-        plainTextOf: (range) => plainTextOfRange({ body: latest.current.body, start: range.anchor, end: range.focus, slideNumber: latest.current.slideNumber }),
+        plainTextOf: (range) => plainTextOfRange({ items: flattenBody(latest.current.body), start: range.anchor, end: range.focus, slideNumber: latest.current.slideNumber }),
         primaryModifier: services.primaryModifier,
       }),
     [dispatch, services.richTextFrom, services.primaryModifier],

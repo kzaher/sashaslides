@@ -20,16 +20,12 @@ import {
   type TableElement,
 } from "../../contracts/index.ts";
 import { findElement, findSlide, tableOf } from "./document-lookup.ts";
-import { queueEnvelope } from "./editor-queue.ts";
+import { queueCommands } from "./editor-queue.ts";
 
 export function patchTableCells(state: EditorState, patch: TableCellPatch): EditorState {
   const cells = selectedTableCells(state);
   if (cells === null || cells.cells.length === 0) return state;
-  return queueEnvelope(state, {
-    commands: [{ kind: "updateTableCells", slideId: cells.slideId, elementId: cells.table.id, cells: cells.cells, patch }],
-    selectionAfter: state.selection,
-    mergeWithPrevious: false,
-  });
+  return queueCommands(state, [{ kind: "updateTableCells", slideId: cells.slideId, elementId: cells.table.id, cells: cells.cells, patch }]);
 }
 
 /** The table and cells the selection means (see the header), or null. */

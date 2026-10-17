@@ -27,9 +27,7 @@ import {
   type Feedback,
 } from "../../contracts/index.ts";
 import { reactSet } from "../rxfeedback/react-feedbacks.ts";
-import { messageOf } from "./document-feedbacks.ts";
-
-type ReportError = (error: unknown, context: string) => void;
+import { messageOf, type ReportError } from "./document-feedbacks.ts";
 
 export const NO_SESSION_REVERT: AgentRevertOutcome = { kind: "failed", message: "this deck is not shared, so there is no server to undo the edit on" };
 

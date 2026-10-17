@@ -25,18 +25,14 @@
 //  * IMAGES RESOLVE THROUGH THE CALLER'S `assetAddress`; a `data:` address keeps the file
 //    self-contained.
 
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { assertNever } from "../contracts/assert-never.ts";
 import type { DocumentSnapshot, ElementSnapshot, SlideSnapshot } from "../contracts/document.ts";
 import type { AssetId, SlideId } from "../contracts/ids.ts";
+import { fitBox } from "../shared/fit-box.ts";
 import { ELEMENT_ID_ATTRIBUTE, type FontFaceRequest } from "../contracts/render.ts";
-import { isSystemFontFamily } from "../view/application/browser-services.ts";
 import { SHRINK_MINIMUM_SCALE, SHRINK_STEP, TEXT_CONTENT_ATTRIBUTE, TEXT_LAYER_ATTRIBUTE } from "../view/render/element-view.tsx";
-import type { SlideRenderContext } from "../view/render/render-context.ts";
-import { fontMetricOverridesFor, withFontStandIns } from "../view/render/font-families.ts";
-import { fontFacesOf } from "../view/render/slide-markup.tsx";
-import { SlideRoot, slideNumberLookup } from "../view/render/static-slide.tsx";
+import { fontMetricOverridesFor, isSystemFontFamily, withFontStandIns } from "../view/render/font-families.ts";
+import { fontFacesOf, slideMarkupWith } from "../view/render/slide-markup.tsx";
 import { LIST_MARKER_ATTRIBUTE } from "../view/render/text-paragraphs.tsx";
 import { layOutExportedSlide, type ExportLayoutSettings, type ShrinkTarget } from "./export-layout.ts";
 
@@ -59,13 +55,13 @@ export function renderSlideHtml(options: SlideExportOptions): string {
   const slideIndex = options.snapshot.slides.findIndex((slide) => slide.id === options.slideId);
   const slide = options.snapshot.slides[slideIndex];
   if (slide === undefined) throw new Error(`The deck has no slide ${options.slideId}.`);
-  return slidePage({ snapshot: options.snapshot, slide, slideNumber: slideIndex + 1, assetAddress: options.assetAddress, slideNumberOf: slideNumberLookup(options.snapshot) });
+  return slidePage({ snapshot: options.snapshot, slide, slideNumber: slideIndex + 1, assetAddress: options.assetAddress });
 }
 
 /** The scale and offset that fit a 1280-wide page of `pageHeight` into the exported page. */
 export function pagePlacement(pageHeight: number): Readonly<{ scale: number; offsetX: number; offsetY: number }> {
-  const scale = Math.min(EXPORT_PAGE_SIZE.width / 1280, EXPORT_PAGE_SIZE.height / Math.max(1, pageHeight));
-  return { scale, offsetX: (EXPORT_PAGE_SIZE.width - 1280 * scale) / 2, offsetY: (EXPORT_PAGE_SIZE.height - pageHeight * scale) / 2 };
+  const fitted = fitBox({ container: EXPORT_PAGE_SIZE, content: { width: 1280, height: Math.max(1, pageHeight) } });
+  return { scale: fitted.scale, offsetX: fitted.left, offsetY: (EXPORT_PAGE_SIZE.height - pageHeight * fitted.scale) / 2 };
 }
 
 /** The text boxes of a slide that shrink their text on overflow, groups included. */
@@ -133,18 +129,8 @@ function slidePage(options: Readonly<{
   slide: SlideSnapshot;
   slideNumber: number;
   assetAddress: (assetId: AssetId) => string;
-  slideNumberOf: (slideId: SlideId) => number | null;
 }>): string {
-  const context: SlideRenderContext = {
-    theme: options.snapshot.theme,
-    slideId: options.slide.id,
-    slideNumber: options.slideNumber,
-    slideNumberOf: options.slideNumberOf,
-    assetAddress: options.assetAddress,
-    measurement: null,
-    editableText: null,
-  };
-  const slideMarkup = renderToStaticMarkup(createElement(SlideRoot, { slide: options.slide, document: options.snapshot, context }));
+  const slideMarkup = slideMarkupWith({ slide: options.slide, document: options.snapshot, slideNumber: options.slideNumber, assetAddress: options.assetAddress });
   const drawnFaces = fontFacesOf({ slide: options.slide, document: options.snapshot });
   const faces = withFontStandIns(drawnFaces);
   const settings: ExportLayoutSettings = {

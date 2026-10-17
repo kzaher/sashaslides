@@ -24,6 +24,7 @@
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { EditorEvent, PastedText, TextInput } from "../../contracts/editor-events.ts";
 import type { Paragraph } from "../../contracts/document.ts";
+import { parseColourText } from "../../shared/colour-text.ts";
 import { literalColour, type Colour } from "../../contracts/style.ts";
 
 /** The parts of a `DataTransfer` the parser reads. */
@@ -243,10 +244,8 @@ function pastedText(options: Readonly<{ event: BeforeInputLike; context: BeforeI
  */
 export function colourFromBrowser(data: string | null): Colour | null {
   if (data === null) return null;
-  const hexadecimal = /^#([0-9a-f]{6})$/i.exec(data.trim());
-  if (hexadecimal !== null) return literalColour({ hexadecimal: `#${(hexadecimal[1] ?? "000000").toLowerCase()}`, alpha: 1 });
-  const functional = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(data.trim());
-  if (functional === null) return null;
-  const channel = (text: string | undefined): string => Math.max(0, Math.min(255, Number(text ?? "0"))).toString(16).padStart(2, "0");
-  return literalColour({ hexadecimal: `#${channel(functional[1])}${channel(functional[2])}${channel(functional[3])}`, alpha: functional[4] === undefined ? 1 : Number(functional[4]) });
+  const parsed = parseColourText(data);
+  if (parsed === null) return null;
+  const channel = (value: number): string => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0");
+  return literalColour({ hexadecimal: `#${channel(parsed.red)}${channel(parsed.green)}${channel(parsed.blue)}`, alpha: parsed.alpha });
 }

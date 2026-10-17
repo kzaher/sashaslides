@@ -24,9 +24,11 @@ import type { CellAddress, TextTarget } from "../../contracts/selection.ts";
 import type { ListId } from "../../contracts/ids.ts";
 import type { Colour, ListGlyph, NoColour, ParagraphStyle, RunStyle } from "../../contracts/style.ts";
 import type { ElementKey } from "../../contracts/yjs-schema.ts";
-import { findElement, visibleFrame } from "../canvas/canvas-geometry.ts";
-import { paragraphBaseRunStyle, resolveParagraphStyle, resolveRunStyle, textStyleContextOf, type TextStyleContext } from "../render/text-layout.ts";
-import { listGlyphFamily } from "./list-glyphs.ts";
+import { findInTree, textTargetElementId, visibleFrame } from "../../shared/element-tree.ts";
+import { definedOnly, paragraphBaseRunStyle, resolveParagraphStyle, resolveRunStyle, textStyleContextOf, type TextStyleContext } from "../render/text-layout.ts";
+import { LIST_GLYPH } from "../../shared/list-glyphs.ts";
+import { roundTo } from "../../shared/numbers.ts";
+import { textBodiesOf } from "../../shared/text-bodies.ts";
 
 /** One control's value across everything it edits. */
 export type SharedValue<TValue> = Readonly<{ kind: "value"; value: TValue }> | Readonly<{ kind: "mixed" }> | Readonly<{ kind: "none" }>;
@@ -54,21 +56,21 @@ export function panelSubject(state: EditorState): PanelSubject {
     case "elements": {
       const slide = state.document.slides.find((candidate) => candidate.id === selection.slideId) ?? null;
       if (slide === null) return { kind: "none" };
-      const elements = selection.elementIds.map((id) => findElement(slide.elements, id)).filter((element): element is ElementSnapshot => element !== null);
+      const elements = selection.elementIds.map((id) => findInTree(slide.elements, id)).filter((element): element is ElementSnapshot => element !== null);
       return elements.length === 0 ? { kind: "slide", slide } : { kind: "elements", slide, elements };
     }
     case "text": {
       const target = selection.target;
       const slide = state.document.slides.find((candidate) => candidate.id === target.slideId) ?? null;
       if (slide === null) return { kind: "none" };
-      const elementId = textTargetElement(target);
-      const element = elementId === null ? null : findElement(slide.elements, elementId);
+      const elementId = textTargetElementId(target);
+      const element = elementId === null ? null : findInTree(slide.elements, elementId);
       if (element === null) return { kind: "slide", slide };
       return { kind: "text", slide, element, target, start: Math.min(selection.anchor, selection.focus), end: Math.max(selection.anchor, selection.focus) };
     }
     case "tableCells": {
       const slide = state.document.slides.find((candidate) => candidate.id === selection.slideId) ?? null;
-      const element = slide === null ? null : findElement(slide.elements, selection.elementId);
+      const element = slide === null ? null : findInTree(slide.elements, selection.elementId);
       if (slide === null || element === null) return { kind: "none" };
       return { kind: "text", slide, element, target: { kind: "tableCell", slideId: slide.id, elementId: element.id, cell: selection.anchor }, start: 0, end: Number.POSITIVE_INFINITY };
     }
@@ -207,26 +209,20 @@ export function sameValue<TValue>(first: TValue, second: TValue): boolean {
   return first === second || JSON.stringify(first) === JSON.stringify(second);
 }
 
-/** Rounds to `digits` decimals, without -0. */
-export function roundTo(value: number, digits: number): number {
-  const factor = 10 ** digits;
-  const rounded = Math.round(value * factor) / factor;
-  return rounded === 0 ? 0 : rounded;
-}
 
 type TextSource = Readonly<{ runs: readonly RunStyle[]; paragraphs: readonly ParagraphStyle[] }>;
 
 function textSources(subject: PanelSubject, state: EditorState): readonly TextSource[] {
   switch (subject.kind) {
     case "elements":
-      return subject.elements.flatMap((element) => elementBodies(element).map((body) => bodySource({ body, context: textStyleContextOf({ theme: state.document.theme, element }), start: 0, end: Number.POSITIVE_INFINITY })));
+      return subject.elements.flatMap((element) => textBodiesOf(element).map(({ owner, body }) => bodySource({ body, context: textStyleContextOf({ theme: state.document.theme, element: owner }), start: 0, end: Number.POSITIVE_INFINITY })));
     case "text": {
       const body = bodyOfTarget(subject.element, subject.target);
       if (body === null) return [];
       const context = textStyleContextOf({ theme: state.document.theme, element: subject.element });
       const source = bodySource({ body, context, start: subject.start, end: subject.end });
       if (subject.start !== subject.end || Object.keys(state.textEditing.typingStyle).length === 0) return [source];
-      return [{ ...source, runs: source.runs.map((style) => ({ ...style, ...definedPatch(state.textEditing.typingStyle) })) }];
+      return [{ ...source, runs: source.runs.map((style) => ({ ...style, ...definedOnly(state.textEditing.typingStyle) })) }];
     }
     case "slide":
     case "none":
@@ -270,27 +266,10 @@ function bodySource(options: Readonly<{ body: TextBody; context: TextStyleContex
   return { runs, paragraphs };
 }
 
-function elementBodies(element: ElementSnapshot): readonly TextBody[] {
-  switch (element.kind) {
-    case "shape":
-      return [element.text];
-    case "table":
-      return element.cells.map((cell) => cell.text);
-    case "group":
-      return element.children.flatMap(elementBodies);
-    case "image":
-    case "line":
-    case "unsupported":
-      return [];
-    default:
-      return assertNever(element);
-  }
-}
-
 function bodyOfTarget(element: ElementSnapshot, target: TextTarget): TextBody | null {
   switch (target.kind) {
     case "element":
-      return elementBodies(element)[0] ?? null;
+      return textBodiesOf(element)[0]?.body ?? null;
     case "tableCell":
       return tableCellBody(element, target.cell);
     case "speakerNotes":
@@ -315,25 +294,13 @@ function tableCellBody(element: ElementSnapshot, cell: CellAddress): TextBody | 
   }
 }
 
-function textTargetElement(target: TextTarget): ElementSnapshot["id"] | null {
-  switch (target.kind) {
-    case "element":
-    case "tableCell":
-      return target.elementId;
-    case "speakerNotes":
-      return null;
-    default:
-      return assertNever(target);
-  }
-}
-
 function listKindOf(style: ParagraphStyle): "none" | "bulleted" | "numbered" {
   const list = style.list;
   switch (list.kind) {
     case "none":
       return "none";
     case "list":
-      return listGlyphFamily(list.glyph);
+      return LIST_GLYPH[list.glyph].family;
     default:
       return assertNever(list);
   }
@@ -361,24 +328,4 @@ function listIdOf(style: ParagraphStyle): ListId | null {
     default:
       return assertNever(list);
   }
-}
-
-/** The leaves under an element (a group's children, recursively), the elements style edits reach. */
-export function leafElements(element: ElementSnapshot): readonly ElementSnapshot[] {
-  switch (element.kind) {
-    case "group":
-      return element.children.flatMap(leafElements);
-    case "shape":
-    case "image":
-    case "line":
-    case "table":
-    case "unsupported":
-      return [element];
-    default:
-      return assertNever(element);
-  }
-}
-
-function definedPatch(patch: Partial<RunStyle>): Partial<RunStyle> {
-  return Object.fromEntries(Object.entries(patch).filter((entry) => entry[1] !== undefined));
 }

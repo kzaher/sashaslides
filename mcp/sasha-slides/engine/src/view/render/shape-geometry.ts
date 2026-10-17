@@ -20,6 +20,7 @@
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { CustomOutline, OutlinePoint, ShapeElement, ShapePreset } from "../../contracts/document.ts";
 import type { CornerRadius } from "../../contracts/style.ts";
+import { roundTo } from "../../shared/numbers.ts";
 
 /** The text rectangle inside a shape, as fractions of its box from each side. */
 export type TextInset = Readonly<{ top: number; right: number; bottom: number; left: number }>;
@@ -244,7 +245,7 @@ const DEFAULT_CORNER_FRACTION: Readonly<Record<ShapePreset, number>> = {
 };
 
 function round(value: number): number {
-  return Math.round(value * 100) / 100;
+  return roundTo(value, 2);
 }
 
 function regularPolygon(sides: number): readonly (readonly [number, number])[] {

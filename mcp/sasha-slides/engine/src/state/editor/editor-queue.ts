@@ -8,7 +8,7 @@
 // replayed over it (text-model.ts), because the caret already lives in that future.
 //
 // AN EDIT THE PERSON MAY NOT MAKE IS REFUSED HERE, at the one door every document change passes
-// (access.ts): a viewer, a commenter, a closed connection or a newer document queues nothing and
+// (shared/access-refusals.ts): a viewer, a commenter, a closed connection or a newer document queues nothing and
 // sees why, once (`refuse` does not repeat a notice that is already showing).
 
 import {
@@ -22,7 +22,7 @@ import {
   type Selection,
   type TextTarget,
 } from "../../contracts/index.ts";
-import { editingRefusal } from "./access.ts";
+import { editingRefusal } from "../../shared/access-refusals.ts";
 import { asEditText } from "./command-kinds.ts";
 import { textBodyOf } from "./document-lookup.ts";
 import { createIdMinter } from "./id-minter.ts";
@@ -69,6 +69,11 @@ export function queueEnvelope(state: EditorState, request: EnvelopeRequest): Edi
       },
     ],
   };
+}
+
+/** Append one envelope of `commands` that leaves the selection where it is and never merges into the previous undo step. */
+export function queueCommands(state: EditorState, commands: readonly DocumentCommand[]): EditorState {
+  return queueEnvelope(state, { commands, selectionAfter: state.selection, mergeWithPrevious: false });
 }
 
 export function queueHistory(state: EditorState, direction: "undo" | "redo"): EditorState {

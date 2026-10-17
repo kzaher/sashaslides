@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { DEFAULT_PARAGRAPH_STYLE, type RunStyle } from "../contracts/style.ts";
 import { paragraphDeclarations, paragraphRunsDeclarations, runDeclarations } from "../view/render/inline-styles.ts";
 import { resolveRunStyle } from "../view/render/text-layout.ts";
-import { sampleTheme } from "../view/sample/snapshot-builders.ts";
+import { sampleTheme } from "../contracts/testing/snapshot-builders.ts";
 import { layOutExportedSlide, type ExportLayoutSettings } from "./export-layout.ts";
 
 const theme = sampleTheme();

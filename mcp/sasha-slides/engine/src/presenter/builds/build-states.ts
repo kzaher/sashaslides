@@ -18,7 +18,9 @@
 //    their own rotation); a motion path translates; a fill colour change makes the fill solid (a
 //    box's fill, a line's stroke colour, every table cell's fill) and a text colour change recolours
 //    every run. Pulse changes nothing. Text is not resized by grow or shrink: the frame is what the
-//    declared outcome names, and the in-page player animates frames the same way.
+//    declared outcome names, and the in-page player animates frames the same way. A group whose
+//    leaves moved gets its frame derived again by the model's own rule (shared/element-tree.ts
+//    `derivedGroupFrame`), so a built slide's group is the one the document would store.
 //
 //  * THE STEPS THAT COUNT ARE EXACTLY THE ONES `buildSegmentsOf` PLAYS: a step whose element is gone
 //    or that carries values this client does not understand is skipped by both, so the derived state
@@ -38,19 +40,10 @@ import {
 } from "../../contracts/animations.ts";
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { ElementSnapshot, GroupElement, SlideSnapshot, TableElement, TextBody } from "../../contracts/document.ts";
-import {
-  MINIMUM_FRAME_SIZE,
-  boundsOfPoints,
-  frameCentre,
-  frameCorners,
-  lineFrame,
-  normaliseRotation,
-  rotatePoint,
-  type Frame,
-  type Point,
-} from "../../contracts/geometry.ts";
+import { MINIMUM_FRAME_SIZE, frameCentre, lineFrame, normaliseRotation, rotatePoint, type Frame, type Point } from "../../contracts/geometry.ts";
 import type { ElementId } from "../../contracts/ids.ts";
 import type { Colour } from "../../contracts/style.ts";
+import { childrenOf, derivedGroupFrame, elementOfKind } from "../../shared/element-tree.ts";
 
 /** The slide after its first `completed` build segments (see the header). */
 export function slideAtBuild(options: Readonly<{ slide: SlideSnapshot; completed: number }>): SlideSnapshot {
@@ -128,81 +121,6 @@ export function buildSegmentTimeline(options: Readonly<{ slide: SlideSnapshot; c
     trees.push(progress.elements);
   }
   return { segment: options.segment, before, after: visibleSlide({ slide, progress }), trees };
-}
-
-/** The element with this id anywhere in the tree; null when absent. */
-export function findElement(options: Readonly<{ elements: readonly ElementSnapshot[]; elementId: string }>): ElementSnapshot | null {
-  for (const element of options.elements) {
-    if (element.id === options.elementId) return element;
-    const inside = findElement({ elements: childrenOf(element), elementId: options.elementId });
-    if (inside !== null) return inside;
-  }
-  return null;
-}
-
-/** The leaves of an element: itself for a leaf, every leaf below it for a group. */
-export function leavesOf(element: ElementSnapshot): readonly ElementSnapshot[] {
-  switch (element.kind) {
-    case "group":
-      return element.children.flatMap(leavesOf);
-    case "shape":
-    case "image":
-    case "line":
-    case "table":
-    case "unsupported":
-      return [element];
-    default:
-      return assertNever(element);
-  }
-}
-
-/** The element as a group; null for a leaf. */
-export function asGroup(element: ElementSnapshot): GroupElement | null {
-  switch (element.kind) {
-    case "group":
-      return element;
-    case "shape":
-    case "image":
-    case "line":
-    case "table":
-    case "unsupported":
-      return null;
-    default:
-      return assertNever(element);
-  }
-}
-
-export function childrenOf(element: ElementSnapshot): readonly ElementSnapshot[] {
-  switch (element.kind) {
-    case "group":
-      return element.children;
-    case "shape":
-    case "image":
-    case "line":
-    case "table":
-    case "unsupported":
-      return [];
-    default:
-      return assertNever(element);
-  }
-}
-
-/** A group's box, as the model derives it: its children's corners measured in the group's rotated axes. */
-export function groupFrameOf(options: Readonly<{ children: readonly ElementSnapshot[]; rotation: number }>): Frame {
-  const corners = options.children.flatMap((child) => frameCorners(child.frame));
-  const axisAligned = boundsOfPoints(corners) ?? { x: 0, y: 0, width: 0, height: 0 };
-  const centre = frameCentre(axisAligned);
-  const local = boundsOfPoints(corners.map((point) => rotatePoint({ point, centre, degrees: -options.rotation }))) ?? axisAligned;
-  const localCentre = rotatePoint({ point: frameCentre(local), centre, degrees: options.rotation });
-  return {
-    x: localCentre.x - local.width / 2,
-    y: localCentre.y - local.height / 2,
-    width: local.width,
-    height: local.height,
-    rotation: options.rotation,
-    flipHorizontal: false,
-    flipVertical: false,
-  };
 }
 
 /** The tree and which elements are hidden, part way through the sequence. */
@@ -316,7 +234,7 @@ function replaceInTree(
       changed = true;
       return options.change(element);
     }
-    const group = asGroup(element);
+    const group = elementOfKind(element, "group");
     if (group === null) return element;
     const children = replaceInTree({ elements: group.children, elementId: options.elementId, change: options.change });
     if (children === group.children) return element;
@@ -327,7 +245,7 @@ function replaceInTree(
 }
 
 function regrouped(options: Readonly<{ group: GroupElement; children: readonly ElementSnapshot[]; rotation: number }>): GroupElement {
-  return { ...options.group, children: options.children, frame: groupFrameOf({ children: options.children, rotation: options.rotation }) };
+  return { ...options.group, children: options.children, frame: derivedGroupFrame({ rotation: options.rotation, children: options.children }) };
 }
 
 function scaleElement(options: Readonly<{ element: ElementSnapshot; pivot: Point; factor: number }>): ElementSnapshot {
@@ -491,7 +409,7 @@ function withoutHidden(options: Readonly<{ elements: readonly ElementSnapshot[];
       changed = true;
       continue;
     }
-    const group = asGroup(element);
+    const group = elementOfKind(element, "group");
     const children = group === null ? null : withoutHidden({ elements: group.children, hidden: options.hidden });
     if (group === null || children === null || children === group.children) {
       kept.push(element);

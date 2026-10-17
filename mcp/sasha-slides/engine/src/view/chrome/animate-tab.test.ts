@@ -17,7 +17,7 @@ import { createDocumentStore } from "../../model/index.ts";
 import { EditorGestureContext, EditorServicesContext } from "../application/editor-services.tsx";
 import { AnimationBadgeLayer, animateTabShowing } from "../canvas/build-overlays.tsx";
 import { sampleSlides } from "../sample/sample-deck.ts";
-import { fixtureAssetId, fixtureDeckId } from "../sample/snapshot-builders.ts";
+import { fixtureAssetId, fixtureDeckId } from "../../contracts/testing/snapshot-builders.ts";
 import { createRecordingSystem, fixtureServices, recordingCapabilities } from "../testing/editor-fixtures.ts";
 import { ADD_ANIMATION_LABEL, AnimateTab, NEWER_VERSION_EXPLANATION, NO_ANIMATIONS_YET, SELECT_TO_ANIMATE, UNAPPROVED_SCRIPT_NOTE, rowKeyIntent, scriptApproved } from "./animate-tab.tsx";
 import { ELEMENT_REMOVED_LABEL, NEWER_VERSION_LABEL, animationBadges, animationRows, dropMoveFor, effectWithKind, elementLabel, stepMoveFor } from "./animate-values.ts";

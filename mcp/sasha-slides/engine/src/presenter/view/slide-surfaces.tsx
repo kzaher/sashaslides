@@ -23,6 +23,7 @@ import type { AssetId, SlideId } from "../../contracts/ids.ts";
 import type { PresenterDependencies, TransitionRun } from "../../contracts/presenter.ts";
 import type { AssetAddressResolver } from "../../contracts/render.ts";
 import type { InPageStageRegistry } from "../in-page/in-page-run-feedback.ts";
+import { fitBox } from "../../shared/fit-box.ts";
 import { slideAtBuild } from "../builds/build-states.ts";
 import { slideOnSide } from "../builds/run-slides.ts";
 import { hostRunnerId } from "../presenter-queries.ts";
@@ -34,10 +35,7 @@ import { PRESENTATION_SURFACE, PRESENTER_CLASS } from "./presenter-stylesheet.ts
 export type ViewportBox = Readonly<{ left: number; top: number; width: number; height: number; scale: number }>;
 
 export function fitSlide(options: Readonly<{ width: number; height: number; pageHeight: number; slideWidth: number }>): ViewportBox {
-  const scale = Math.max(0, Math.min(options.width / options.slideWidth, options.height / options.pageHeight));
-  const width = options.slideWidth * scale;
-  const height = options.pageHeight * scale;
-  return { left: (options.width - width) / 2, top: (options.height - height) / 2, width, height, scale };
+  return fitBox({ container: { width: options.width, height: options.height }, content: { width: options.slideWidth, height: options.pageHeight } });
 }
 
 /** Measures itself and hands its children the letterboxed slide box. */

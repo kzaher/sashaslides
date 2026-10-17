@@ -14,12 +14,12 @@
 import type { ElementPatch } from "../engine/src/contracts/commands.ts";
 import type { ElementSnapshot, ImageCrop } from "../engine/src/contracts/document.ts";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
-import { themeColour, type Border, type BoxStyle, type Shadow, type Stroke } from "../engine/src/contracts/style.ts";
+import type { Border, BoxStyle, Stroke } from "../engine/src/contracts/style.ts";
+import { DEFAULT_SHADOW, DEFAULT_STROKE } from "../engine/src/shared/element-defaults.ts";
 import type { AssistantStylePatch, BorderPatch } from "./assistant-edit-request.ts";
 
-/** What a border, a line or a shadow starts from when the element had none (the editor's own defaults). */
-export const DEFAULT_STROKE: Stroke = { width: 2, colour: themeColour({ slot: "dark1", alpha: 1 }), dash: "solid" };
-export const DEFAULT_SHADOW: Shadow = { offsetX: 0, offsetY: 4, blur: 12, spread: 0, colour: themeColour({ slot: "dark1", alpha: 0.25 }) };
+/** A border, a line or a shadow starts from the editor's own defaults when the element had none; the expansion's new lines too. */
+export { DEFAULT_STROKE } from "../engine/src/shared/element-defaults.ts";
 
 /** The whole-group patch for `element` (see the header). */
 export function mergeStylePatch(options: Readonly<{ element: ElementSnapshot; patch: AssistantStylePatch }>): ElementPatch {

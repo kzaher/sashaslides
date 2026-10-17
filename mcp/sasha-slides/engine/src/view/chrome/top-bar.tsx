@@ -26,12 +26,12 @@ import type { CollaborationStatus } from "../../contracts/collaboration.ts";
 import type { DeckRole } from "../../contracts/deck-access.ts";
 import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { InsertTool, Tool, ZoomSetting } from "../../contracts/editor-state.ts";
+import { commentingRefusal, editingRefusal } from "../../shared/access-refusals.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { FloatingLayerContext, arrayItemsEqual, shallowEqual, useEditorSelector, useEditorServices, useGestureContext } from "../application/editor-services.tsx";
 import { handlePresent } from "../application/gesture-handlers.ts";
 import { peerColour } from "../canvas/canvas-overlay.tsx";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
-import { commentingDisabledReason, editingDisabledReason } from "./access.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { MenuBar, MenuPopover, shortcutStyle } from "./menus.tsx";
 import type { MenuEntry } from "./menu-model.ts";
@@ -252,7 +252,7 @@ export const Toolbar = memo(function Toolbar(): ReactElement {
   const services = useEditorServices();
   const dispatch = services.system.dispatch;
   const view = useEditorSelector(
-    (state) => ({ tool: state.tool, history: state.history, zoom: state.viewport.zoom, scale: state.viewport.scale, editing: editingDisabledReason(state), commenting: commentingDisabledReason(state) }),
+    (state) => ({ tool: state.tool, history: state.history, zoom: state.viewport.zoom, scale: state.viewport.scale, editing: editingRefusal(state), commenting: commentingRefusal(state) }),
     shallowEqual,
   );
   const [picker, setPicker] = useState<Readonly<{ kind: "shape" | "line"; left: number; top: number }> | null>(null);

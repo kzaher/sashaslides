@@ -28,7 +28,10 @@ import {
 } from "../../contracts/index.ts";
 import { react } from "../rxfeedback/react-feedbacks.ts";
 
-export function applyEditsFeedback(dependencies: Readonly<{ documentStore: DocumentStore; reportError: (error: unknown, context: string) => void }>): Feedback<EditorState, EditorEvent> {
+/** How a feedback reports a failure it handled (the application logs it with what was being attempted). */
+export type ReportError = (error: unknown, context: string) => void;
+
+export function applyEditsFeedback(dependencies: Readonly<{ documentStore: DocumentStore; reportError: ReportError }>): Feedback<EditorState, EditorEvent> {
   return react<EditorState, QueuedEdit, EditorEvent>({
     query: (state) => (state.inFlightCommandIds.length === 0 ? (state.pendingEdits[0] ?? null) : null),
     areEqual: (previous, next) => queuedEditId(previous) === queuedEditId(next),
@@ -48,7 +51,7 @@ export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function applyOne(edit: QueuedEdit, dependencies: Readonly<{ documentStore: DocumentStore; reportError: (error: unknown, context: string) => void }>): EditorEvent {
+function applyOne(edit: QueuedEdit, dependencies: Readonly<{ documentStore: DocumentStore; reportError: ReportError }>): EditorEvent {
   try {
     switch (edit.kind) {
       case "apply":

@@ -11,7 +11,7 @@ import type { Frame } from "../../contracts/geometry.ts";
 import { ASSET_ADDRESS_SCHEME, SLIDE_ROOT_CLASS } from "../../contracts/render.ts";
 import { literalColour, themeColour, type DashStyle, type ImageFit, type ListGlyph, type RunStylePatch, type Stroke } from "../../contracts/style.ts";
 import {
-  IdMinter,
+  createPrefixedIdMinter,
   documentSnapshot,
   fixtureAssetId,
   fixtureDeckId,
@@ -25,13 +25,13 @@ import {
   tableElement,
   textBody,
   unsupportedElement,
-} from "../sample/snapshot-builders.ts";
+} from "../../contracts/testing/snapshot-builders.ts";
 import { renderSlideMarkup } from "./slide-markup.tsx";
 import { StaticSlide } from "./static-slide.tsx";
 import { BORDER_STYLE_FOR_DASH } from "./inline-styles.ts";
 import { listMarkers, textStyleContextOf } from "./text-layout.ts";
 
-const ids = new IdMinter("Renderer");
+const ids = createPrefixedIdMinter("Renderer");
 const ink = literalColour({ hexadecimal: "#1c2333", alpha: 1 });
 const ASSET = fixtureAssetId("photograph");
 

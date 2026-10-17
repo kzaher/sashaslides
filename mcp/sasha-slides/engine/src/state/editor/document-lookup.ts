@@ -18,10 +18,12 @@ import {
   type ShapeElement,
   type SlideId,
   type SlideSnapshot,
-  type TableElement,
   type TextBody,
   type TextTarget,
 } from "../../contracts/index.ts";
+import { childrenOf, findInTree, withMeasuredHeight } from "../../shared/element-tree.ts";
+
+export { childrenOf, leavesOf, tableOf, withMeasuredHeight } from "../../shared/element-tree.ts";
 
 export function findSlide(document: DocumentSnapshot, slideId: SlideId): SlideSnapshot | null {
   return document.slides.find((slide) => slide.id === slideId) ?? null;
@@ -33,7 +35,7 @@ export function findSlideIndex(document: DocumentSnapshot, slideId: SlideId): nu
 
 /** The element with `elementId` anywhere in the slide's tree. */
 export function findElement(slide: SlideSnapshot, elementId: ElementId): ElementSnapshot | null {
-  return findInList(slide.elements, elementId);
+  return findInTree(slide.elements, elementId);
 }
 
 /** The ancestors of `elementId`, outermost first, ending with the element itself; null when absent. */
@@ -47,37 +49,6 @@ export function selectableElements(slide: SlideSnapshot, enteredGroupId: Element
   const group = findElement(slide, enteredGroupId);
   if (group === null) return slide.elements;
   return childrenOf(group);
-}
-
-export function childrenOf(element: ElementSnapshot): readonly ElementSnapshot[] {
-  switch (element.kind) {
-    case "group":
-      return element.children;
-    case "shape":
-    case "image":
-    case "line":
-    case "table":
-    case "unsupported":
-      return [];
-    default:
-      return assertNever(element);
-  }
-}
-
-/** Every non-group element in the subtree, in z-order (the element itself when it is a leaf). */
-export function leavesOf(element: ElementSnapshot): readonly ElementSnapshot[] {
-  switch (element.kind) {
-    case "group":
-      return element.children.flatMap(leavesOf);
-    case "shape":
-    case "image":
-    case "line":
-    case "table":
-    case "unsupported":
-      return [element];
-    default:
-      return assertNever(element);
-  }
 }
 
 /** Every group in the subtree, outermost first (the element itself when it is a group). */
@@ -110,22 +81,6 @@ export function textShapeOf(element: ElementSnapshot): ShapeElement | null {
     case "image":
     case "line":
     case "table":
-    case "unsupported":
-      return null;
-    default:
-      return assertNever(element);
-  }
-}
-
-/** The element as a table, or null for every other kind. */
-export function tableOf(element: ElementSnapshot): TableElement | null {
-  switch (element.kind) {
-    case "table":
-      return element;
-    case "group":
-    case "shape":
-    case "image":
-    case "line":
     case "unsupported":
       return null;
     default:
@@ -189,22 +144,6 @@ export function measuredFrame(element: ElementSnapshot, measuredLayouts: Readonl
   return withMeasuredHeight(element.id, element.frame, measuredLayouts);
 }
 
-/** `frame` with the measured table height of `elementId` when one is larger (see `measuredFrame`). */
-export function withMeasuredHeight(elementId: ElementId, frame: Frame, measuredLayouts: ReadonlyMap<ElementId, ElementMeasurement>): Frame {
-  const measurement = measuredLayouts.get(elementId);
-  if (measurement === undefined) return frame;
-  switch (measurement.kind) {
-    case "table": {
-      const height = measurement.rowHeights.reduce((total, row) => total + row.height, 0);
-      return height > frame.height ? { ...frame, height } : frame;
-    }
-    case "text":
-      return frame;
-    default:
-      return assertNever(measurement);
-  }
-}
-
 /** The axis-aligned box an element covers on the slide (rotation and measured heights included). */
 export function elementBounds(element: ElementSnapshot, measuredLayouts: ReadonlyMap<ElementId, ElementMeasurement>): Box {
   switch (element.kind) {
@@ -244,15 +183,6 @@ export function elementsById(slide: SlideSnapshot, elementIds: readonly ElementI
     if (element !== null) found.push(element);
   }
   return found;
-}
-
-function findInList(elements: readonly ElementSnapshot[], elementId: ElementId): ElementSnapshot | null {
-  for (const element of elements) {
-    if (element.id === elementId) return element;
-    const inside = findInList(childrenOf(element), elementId);
-    if (inside !== null) return inside;
-  }
-  return null;
 }
 
 function pathInList(elements: readonly ElementSnapshot[], elementId: ElementId): readonly ElementSnapshot[] | null {

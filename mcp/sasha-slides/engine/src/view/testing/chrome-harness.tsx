@@ -22,7 +22,8 @@ import { INK_WIPE_EXAMPLE_SCRIPT } from "../../presenter/testing/ink-wipe.ts";
 import { EditorShell } from "../application/editor-shell.tsx";
 import { pageBrowserCapabilities, primaryModifierOf, readImageFile, richTextFromMarkup } from "../application/browser-services.ts";
 import { sampleSlides } from "../sample/sample-deck.ts";
-import { IdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, plainBody, shapeElement, slideSnapshot, tableElement } from "../sample/snapshot-builders.ts";
+import { SAMPLE_PHOTOGRAPH_ADDRESS } from "../sample/sample-photograph.ts";
+import { createPrefixedIdMinter, type IdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, plainBody, shapeElement, slideSnapshot, tableElement } from "../../contracts/testing/snapshot-builders.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import { EMPTY_ASSET_STORE, createRecordingSystem, fixtureEditorState, fixtureServices, type RecordingSystem } from "./editor-fixtures.ts";
 import { harnessReduce } from "./harness-reducer.ts";
@@ -41,7 +42,7 @@ export function mountHarness(options: Readonly<{ container: HTMLElement; scenari
   const image = fixtureAssetId("harness-photo");
   const state = scenarioState({ scenario: options.scenario, image });
   const system = createRecordingSystem({ initial: state, reduce: harnessReduce });
-  const assetStore = { ...EMPTY_ASSET_STORE, addressFor: (assetId: AssetId) => (assetId === image ? SAMPLE_PHOTO : null) };
+  const assetStore = { ...EMPTY_ASSET_STORE, addressFor: (assetId: AssetId) => (assetId === image ? SAMPLE_PHOTOGRAPH_ADDRESS : null) };
   const services = {
     ...fixtureServices({ system, assetStore, arrangeThreads: fakeArrangeThreads, richTextFrom: richTextFromMarkup, measurePointerMoves: true }),
     browser: pageBrowserCapabilities(window),
@@ -108,7 +109,7 @@ export function scenarioState(options: Readonly<{ scenario: HarnessScenario; ima
 
 /** The drag and measure scenarios replace the deck with a slide built for them. */
 function scenarioDocument(options: Readonly<{ scenario: HarnessScenario; document: DocumentSnapshot }>): DocumentSnapshot {
-  const ids = new IdMinter("Harness1");
+  const ids = createPrefixedIdMinter("Harness1");
   switch (options.scenario) {
     case "drag":
       return { ...options.document, slides: [slideSnapshot({ ids, elements: twoHundredElements(ids) }), ...options.document.slides] };
@@ -151,7 +152,7 @@ function measuredSlide(ids: IdMinter): SlideSnapshot {
 }
 
 function sampleScript(): TransitionScriptRecord {
-  const ids = new IdMinter("Script01");
+  const ids = createPrefixedIdMinter("Script01");
   return {
     id: ids.next("transitionScript"),
     name: "Ink wipe",
@@ -185,7 +186,7 @@ function samplePeers(slide: SlideSnapshot): readonly PeerPresence[] {
 }
 
 function sampleDiscussion(slide: SlideSnapshot): DiscussionSnapshot {
-  const ids = new IdMinter("Thread01");
+  const ids = createPrefixedIdMinter("Thread01");
   const ada = parsePersonId("person_ada");
   const claude = parsePersonId("agent_claude");
   if (ada === null || claude === null) return EMPTY_DISCUSSION;
@@ -237,7 +238,7 @@ function fakeArrangeThreads(input: Readonly<{ discussion: DiscussionSnapshot; do
 
 /** Seven notices of every tone, oldest first, as a busy session raises them (the notice stack's screenshot). */
 function sampleNotices(scriptId: TransitionScriptRecord["id"]): EditorState["notices"] {
-  const ids = new IdMinter("Notices2");
+  const ids = createPrefixedIdMinter("Notices2");
   const notice = (tone: EditorState["notices"][number]["tone"], message: string, action: EditorState["notices"][number]["action"]): EditorState["notices"][number] => ({ id: ids.next("notice"), tone, message, action, expiresAfterMilliseconds: null });
   return [
     notice("information", "Exported to Google Slides.", null),
@@ -251,10 +252,6 @@ function sampleNotices(scriptId: TransitionScriptRecord["id"]): EditorState["not
 }
 
 function noticeId(): EditorState["notices"][number]["id"] {
-  return new IdMinter("Notices1").next("notice");
+  return createPrefixedIdMinter("Notices1").next("notice");
 }
 
-/** A small landscape drawn as markup, standing in for an uploaded photograph. */
-const SAMPLE_PHOTO = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="440" height="360" viewBox="0 0 440 360"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7dd3fc"/><stop offset="1" stop-color="#fde68a"/></linearGradient></defs><rect width="440" height="360" fill="url(#sky)"/><circle cx="330" cy="110" r="46" fill="#fb923c"/><path d="M0 260 L120 150 L230 250 L320 180 L440 270 L440 360 L0 360 Z" fill="#0e7490"/><path d="M0 300 L160 230 L300 300 L440 250 L440 360 L0 360 Z" fill="#047857"/></svg>`,
-)}`;

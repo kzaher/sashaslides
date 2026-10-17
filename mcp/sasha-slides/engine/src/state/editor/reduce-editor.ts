@@ -16,10 +16,11 @@ import {
   type Point,
   type ShapePreset,
 } from "../../contracts/index.ts";
+import { commentingRefusal, editingRefusal } from "../../shared/access-refusals.ts";
+import { textTargetElementId } from "../../shared/element-tree.ts";
 import { addAnimation, chooseAnimationStep, endBuildPreview, moveAnimationSteps, patchAnimationStep, previewBuilds, removeAnimationStep, surviveAnimationChoice } from "./animations.ts";
 import { reduceArrange, editFrameField, nudgeSelection } from "./arrange.ts";
-import { commentingRefusal, editingRefusal } from "./access.ts";
-import { cutSelection, pasteContent } from "./clipboard.ts";
+import { pasteContent } from "./clipboard.ts";
 import {
   announceAgentScripts,
   newUnapprovedAgentScripts,
@@ -32,16 +33,16 @@ import {
 import { markDiscussionSent, openComposer, queueDiscussion, reduceDiscussionSettled, replyToThread, submitComment } from "./comments.ts";
 import { reduceDocumentChanged, reduceEditSettled } from "./document-changes.ts";
 import { findElementPath, findSlide, leavesOf, textShapeOf } from "./document-lookup.ts";
-import { queueEnvelope, queueHistory, raiseNotice, refuse } from "./editor-queue.ts";
+import { queueCommands, queueHistory, raiseNotice, refuse } from "./editor-queue.ts";
 import { perElementPatches } from "./element-patches.ts";
-import { elementIdOfTarget, selectedElements, selectElements, textSelectionOf } from "./editor-selection.ts";
+import { selectedElements, selectElements, textSelectionOf } from "./editor-selection.ts";
 import { captureFormat } from "./format-painter.ts";
 import { scaleFor } from "./initial-editor-state.ts";
 import { chordToIntent, type KeyIntent } from "./keyboard.ts";
 import { reduceSlideLayoutChosen } from "./layout-remap.ts";
 import { withRecentColour } from "./recent-colours.ts";
 import { reduceLayoutMeasured } from "./measured-layout.ts";
-import { cancelGesture, gestureIsIdle, reducePointerDown, reducePointerMove, reducePointerUp } from "./pointer-gestures.ts";
+import { cancelGesture, gestureIsIdle, reducePointerDown, reducePointerMove, reducePointerUp, toolIsSelect } from "./pointer-gestures.ts";
 import {
   activateSlide,
   deleteSelection,
@@ -254,7 +255,8 @@ function reduceEvent(state: EditorState, event: EditorEvent): EditorState {
     case "copied":
       return { ...state, clipboard: { pasteCascade: null } };
     case "cutRequested":
-      return cutSelection({ ...state, clipboard: { pasteCascade: null } });
+      // The view's cut handler has written the clipboard; remove what was cut.
+      return deleteSelection({ ...state, clipboard: { pasteCascade: null } });
     case "pasteReceived":
       return pasteContent(state, event.content, event.at);
     case "clipboardUnavailable":
@@ -394,7 +396,7 @@ function escape(state: EditorState): EditorState {
   if (composerIsOpen(state)) return { ...state, chrome: { ...state.chrome, composer: { kind: "closed" } } };
   if (textSelectionOf(state.selection) !== null) return endTextEditing(state);
   if (state.enteredGroupId !== null) return leaveGroup(state, state.enteredGroupId);
-  if (!toolIsSelect(state)) return { ...state, tool: { kind: "select" } };
+  if (!toolIsSelect(state.tool)) return { ...state, tool: { kind: "select" } };
   return selectElements(state, []);
 }
 
@@ -439,7 +441,7 @@ function commentOnSelection(state: EditorState): EditorState {
   const text = textSelectionOf(state.selection);
   if (text !== null) {
     const range = rangeOf(text);
-    const elementId = elementIdOfTarget(text.target);
+    const elementId = textTargetElementId(text.target);
     return openComposer(state, { slideId, elementId, textRange: range.end > range.start ? { target: text.target, start: range.start, end: range.end } : null, region: null });
   }
   const selected = selectedElements(state);
@@ -489,11 +491,7 @@ function patchSelectedElements(state: EditorState, patch: ElementPatch): EditorS
   const selected = selectedElements(state);
   if (selected === null) return state;
   const groups = perElementPatches({ leaves: selected.elements.flatMap(leavesOf), patch });
-  return queueEnvelope(state, {
-    commands: groups.map((group) => ({ kind: "updateElements", slideId: selected.slide.id, elementIds: group.elementIds, patch: group.patch })),
-    selectionAfter: state.selection,
-    mergeWithPrevious: false,
-  });
+  return queueCommands(state, groups.map((group) => ({ kind: "updateElements", slideId: selected.slide.id, elementIds: group.elementIds, patch: group.patch })));
 }
 
 function changePreset(state: EditorState, preset: ShapePreset): EditorState {
@@ -501,11 +499,7 @@ function changePreset(state: EditorState, preset: ShapePreset): EditorState {
   if (selected === null) return state;
   const shapeIds = selected.elements.flatMap(leavesOf).flatMap((leaf) => textShapeOf(leaf)?.id ?? []);
   if (shapeIds.length === 0) return state;
-  return queueEnvelope(state, {
-    commands: [{ kind: "updateElements", slideId: selected.slide.id, elementIds: shapeIds, patch: { preset } }],
-    selectionAfter: state.selection,
-    mergeWithPrevious: false,
-  });
+  return queueCommands(state, [{ kind: "updateElements", slideId: selected.slide.id, elementIds: shapeIds, patch: { preset } }]);
 }
 
 function updateComposer(
@@ -618,23 +612,6 @@ function composerIsOpen(state: EditorState): boolean {
   }
 }
 
-function toolIsSelect(state: EditorState): boolean {
-  switch (state.tool.kind) {
-    case "select":
-      return true;
-    case "shape":
-    case "line":
-    case "table":
-    case "comment":
-    case "annotate":
-    case "pan":
-    case "formatPainter":
-      return false;
-    default:
-      return assertNever(state.tool);
-  }
-}
-
 /** The hover pointer (EditorState `pointer`); the same state when it did not move. */
 function withPointer(state: EditorState, pointer: Point | null): EditorState {
   const current = state.pointer;
@@ -647,5 +624,5 @@ function renameDeck(state: EditorState, title: string): EditorState {
   const closed: EditorState = { ...state, chrome: { ...state.chrome, dialog: { kind: "none" } } };
   const trimmed = title.trim();
   if (trimmed.length === 0 || trimmed === state.document.title) return closed;
-  return queueEnvelope(closed, { commands: [{ kind: "setTitle", title: trimmed }], selectionAfter: state.selection, mergeWithPrevious: false });
+  return queueCommands(closed, [{ kind: "setTitle", title: trimmed }]);
 }

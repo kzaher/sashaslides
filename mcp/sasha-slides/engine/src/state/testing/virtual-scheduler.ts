@@ -13,6 +13,11 @@ export type VirtualScheduler = SchedulerLike &
   Readonly<{
     /** Run every action due within the next `milliseconds`, in time order, then set the clock. */
     advanceBy: (milliseconds: number) => void;
+    /**
+     * Like `advanceBy`, but lets pending promise callbacks run (one `setTimeout(0)`) before each action and
+     * at the end, for code that awaits promises between timer steps (the presenter's prepare step).
+     */
+    advanceBySettling: (milliseconds: number) => Promise<void>;
     /** How many actions are waiting. */
     pendingCount: () => number;
   }>;
@@ -60,9 +65,27 @@ export function createVirtualScheduler(options: Readonly<{ startAt: number }>): 
       }
       clock = target;
     },
+    advanceBySettling: async (milliseconds: number) => {
+      const target = clock + milliseconds;
+      for (;;) {
+        await settlePromises();
+        const next = queue[0];
+        if (next === undefined || next.dueAt > target) break;
+        queue.shift();
+        clock = next.dueAt;
+        next.run();
+      }
+      clock = target;
+      await settlePromises();
+    },
     pendingCount: () => queue.length,
   };
   return scheduler;
+}
+
+/** Resolves after every promise callback already queued (and those they queue) has run. */
+function settlePromises(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 type ScheduledEntry = {

@@ -15,8 +15,8 @@
 //    local state to the server never echoes a peer's state back.
 
 import { applyAwarenessUpdate, Awareness, encodeAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness";
-import * as encoding from "lib0/encoding";
-import { AWARENESS_PRESENCE_FIELD, BINARY_MESSAGE_TYPE } from "../../contracts/collaboration.ts";
+import { AWARENESS_PRESENCE_FIELD } from "../../contracts/collaboration.ts";
+import { awarenessFrame as frameOfAwarenessUpdate } from "../../shared/sync-frames.ts";
 import type { PeerPresence, PresenceChannel } from "../../contracts/presence.ts";
 import { parseLocalPresence } from "../parsing/collaboration-values.ts";
 import type { Doc } from "yjs";
@@ -115,10 +115,7 @@ export function createAwarenessPresence(options: Readonly<{ sharedDocument: Doc;
 
 /** The binary frame carrying `clientIds`' states: y-websocket's framing (collaboration.ts). */
 export function awarenessFrame(options: Readonly<{ awareness: Awareness; clientIds: readonly number[] }>): Uint8Array {
-  const encoder = encoding.createEncoder();
-  encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.awareness);
-  encoding.writeVarUint8Array(encoder, encodeAwarenessUpdate(options.awareness, [...options.clientIds]));
-  return encoding.toUint8Array(encoder);
+  return frameOfAwarenessUpdate(encodeAwarenessUpdate(options.awareness, [...options.clientIds]));
 }
 
 type AwarenessChanges = Readonly<{ added: readonly number[]; updated: readonly number[]; removed: readonly number[] }>;

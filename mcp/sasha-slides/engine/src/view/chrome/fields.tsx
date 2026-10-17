@@ -16,6 +16,7 @@ import { createPortal } from "react-dom";
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { ThemeSnapshot } from "../../contracts/document.ts";
 import { THEME_COLOUR_SLOTS, literalColour, themeColour, type Colour, type ThemeColourSlot } from "../../contracts/style.ts";
+import { sameColour } from "../../shared/colours.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { FloatingLayerContext, arrayItemsEqual, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
 import { colourValue } from "../render/inline-styles.ts";
@@ -394,17 +395,5 @@ function colourLabel(value: SharedValue<Colour>, theme: ThemeSnapshot): string {
       return "None";
     default:
       return assertNever(value);
-  }
-}
-
-/** Same kind, value and alpha (the state module's recent-colours rule). */
-function sameColour(first: Colour, second: Colour): boolean {
-  switch (first.kind) {
-    case "literal":
-      return second.kind === "literal" && first.hexadecimal === second.hexadecimal && first.alpha === second.alpha;
-    case "theme":
-      return second.kind === "theme" && first.slot === second.slot && first.alpha === second.alpha;
-    default:
-      return assertNever(first);
   }
 }

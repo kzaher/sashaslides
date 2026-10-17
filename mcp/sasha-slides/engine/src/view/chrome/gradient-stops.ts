@@ -4,6 +4,7 @@
 // Positions are fractions 0 to 1 in the fill; the panel shows them as percent.
 
 import type { Fill, GradientStop } from "../../contracts/style.ts";
+import { roundTo } from "../../shared/numbers.ts";
 
 export type GradientFill = Extract<Fill, { kind: "linearGradient" | "radialGradient" }>;
 
@@ -73,5 +74,5 @@ function clampFraction(value: number): number {
 
 /** Four decimals: a typed "40 %" stays exactly 0.4, not 0.39999999999999997. */
 function roundFraction(value: number): number {
-  return Math.round(value * 10_000) / 10_000;
+  return roundTo(value, 4);
 }

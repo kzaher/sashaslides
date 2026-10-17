@@ -53,7 +53,8 @@ import {
   readGoogleSlidesImportBody,
   readInviteBody,
 } from "../parsing/deck-api-bodies.ts";
-import { keysOf, parseOrNull, parseStructuredText } from "../parsing/untrusted-values.ts";
+import { parseOrNull, parseStructuredText } from "../../shared/untrusted-values.ts";
+import { parseAssetMediaType } from "../../shared/media-types.ts";
 
 export type ApiResult<TBody> =
   | Readonly<{ kind: "ok"; body: TBody }>
@@ -311,10 +312,8 @@ async function bodyOf<TBody>(options: Readonly<{ response: Response; read: ApiRe
 
 function assetMediaTypeOf(contentType: string | null): AssetMediaType | null {
   const essence = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-  return ASSET_MEDIA_TYPES.find((mediaType) => mediaType === essence) ?? null;
+  return parseAssetMediaType(essence);
 }
-
-const ASSET_MEDIA_TYPES = keysOf<AssetMediaType>({ "image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true, "image/svg+xml": true });
 
 function malformed(status: number): ApiResult<never> {
   return { kind: "failed", status, error: { error: "serverError", message: "The server answered with something this page does not understand.", signInAddress: null, connectAddress: null, retryAfterSeconds: null } };

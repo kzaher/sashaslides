@@ -7,7 +7,7 @@
 // fingerprint.
 
 import { assertNever, type EditorState, type ScriptPurpose, type SlideId, type TransitionScriptDraft, type TransitionScriptId } from "../../contracts/index.ts";
-import { queueEnvelope } from "./editor-queue.ts";
+import { queueCommands } from "./editor-queue.ts";
 import { createIdMinter } from "./id-minter.ts";
 
 /** What "New script" starts from: a working fade the user (or Claude) edits. */
@@ -86,11 +86,7 @@ export function saveScript(state: EditorState, overwrite: boolean): EditorState 
   if (editor === null) return state;
   const record = state.document.transitionScripts.find((script) => script.id === editor.draft.id);
   const basedOnUpdatedAt = overwrite ? (record?.updatedAt ?? null) : editor.basedOnUpdatedAt;
-  const queued = queueEnvelope(state, {
-    commands: [{ kind: "upsertTransitionScript", script: editor.draft, basedOnUpdatedAt, approval: "authorDecides" }],
-    selectionAfter: state.selection,
-    mergeWithPrevious: false,
-  });
+  const queued = queueCommands(state, [{ kind: "upsertTransitionScript", script: editor.draft, basedOnUpdatedAt, approval: "authorDecides" }]);
   return withEditor(queued, { ...editor, conflict: false });
 }
 
@@ -102,7 +98,7 @@ export function reloadScript(state: EditorState): EditorState {
 }
 
 export function approveScript(state: EditorState, scriptId: TransitionScriptId, fingerprint: string): EditorState {
-  return queueEnvelope(state, { commands: [{ kind: "approveTransitionScript", scriptId, fingerprint }], selectionAfter: state.selection, mergeWithPrevious: false });
+  return queueCommands(state, [{ kind: "approveTransitionScript", scriptId, fingerprint }]);
 }
 
 export function previewTransition(state: EditorState, slideId: SlideId): EditorState {

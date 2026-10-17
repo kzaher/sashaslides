@@ -16,11 +16,10 @@ import { useLayoutEffect, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 import { plainText } from "../../contracts/document.ts";
 import type { PresenterDependencies, PresenterEvent } from "../../contracts/presenter.ts";
-import { TIDEPOOL_CLASS, tidepoolStylesheet } from "../../theme/tidepool-stylesheet.ts";
-import { TIDEPOOL_TOKENS } from "../../theme/tidepool-theme.ts";
+import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { currentBuildOf, currentSlideOf, deckSlideNumber, slideById, type PresenterSystemState } from "../presenter-state.ts";
 import { PresenterControls, buildCounterText, slideCounterText } from "./presenter-controls.tsx";
-import { PRESENTER_CLASS, PRESENTER_RULES } from "./presenter-stylesheet.ts";
+import { PRESENTER_CLASS, SPEAKER_VIEW_STYLE_TEXT } from "./presenter-stylesheet.ts";
 import { PlacedSlide, SlideViewport } from "./slide-surfaces.tsx";
 
 export function SpeakerViewPortal(
@@ -36,7 +35,7 @@ export function SpeakerViewPortal(
   useLayoutEffect(() => {
     const document = speakerWindow.document;
     const style = document.createElement("style");
-    style.textContent = `${tidepoolStylesheet(TIDEPOOL_TOKENS)}\n${PRESENTER_RULES}`;
+    style.textContent = SPEAKER_VIEW_STYLE_TEXT;
     document.head.appendChild(style);
     const previousTitle = document.title;
     document.title = `Speaker view: ${title}`;

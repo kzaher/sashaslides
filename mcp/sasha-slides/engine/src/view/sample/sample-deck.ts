@@ -10,7 +10,7 @@ import type { SlideSnapshot } from "../../contracts/document.ts";
 import type { AssetId, DeckId } from "../../contracts/ids.ts";
 import { literalColour, themeColour, type Stroke } from "../../contracts/style.ts";
 import {
-  IdMinter,
+  createPrefixedIdMinter,
   animationStep,
   groupElement,
   imageElement,
@@ -23,7 +23,7 @@ import {
   tableElement,
   textBody,
   unsupportedElement,
-} from "./snapshot-builders.ts";
+} from "../../contracts/testing/snapshot-builders.ts";
 
 export type SampleDeckOptions = Readonly<{
   deckId: DeckId;
@@ -35,7 +35,7 @@ export type SampleDeckOptions = Readonly<{
 
 /** The showcase slides, then `extraSlideCount` numbered ones. */
 export function sampleSlides(options: SampleDeckOptions): readonly SlideSnapshot[] {
-  const ids = new IdMinter("Sample01");
+  const ids = createPrefixedIdMinter("Sample01");
   const ink = themeColour({ slot: "dark1", alpha: 1 });
   const accent = themeColour({ slot: "accent1", alpha: 1 });
   const thick = (hexadecimal: string, dash: Stroke["dash"]): Stroke => ({ width: 6, colour: literalColour({ hexadecimal, alpha: 1 }), dash });

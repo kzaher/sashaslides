@@ -8,9 +8,9 @@
 //  * THE PREVIEW REPLACES ONLY WHAT MOVES. `applyFramePreview` returns the same slide object when
 //    there is nothing to preview and replaces only the touched elements otherwise, so the element
 //    components of everything else bail out of rendering (render-context.ts).
-//  * A GROUP'S BOX DURING A PREVIEW is re-derived from its previewed children in the group's own
-//    rotated axes, the same rule the model uses for snapshots (document.ts "every element has a
-//    frame"), so the handles follow the drag.
+//  * A GROUP'S BOX DURING A PREVIEW is re-derived from its previewed leaves by the model's own
+//    `derivedGroupFrame` (shared/element-tree.ts), so the handles follow the drag and stay put on
+//    release.
 //  * HIT TESTING READS THE STABLE DATA ATTRIBUTES (contracts/render.ts) on the event target's
 //    ancestors, and turns attribute strings back into typed ids by finding them in the snapshot --
 //    never by casting a string to an id.
@@ -20,22 +20,11 @@ import type { FrameUpdate } from "../../contracts/commands.ts";
 import type { CommentThread, DiscussionSnapshot } from "../../contracts/discussion.ts";
 import type { ElementSnapshot, SlideSnapshot, TableElement } from "../../contracts/document.ts";
 import type { ElementMeasurement, HitTarget } from "../../contracts/editor-state.ts";
-import {
-  boundsOfBoxes,
-  boundsOfPoints,
-  frameCentre,
-  frameCorners,
-  lineFrame,
-  rotatePoint,
-  rotatedBounds,
-  type Box,
-  type Frame,
-  type Point,
-  type ResizeHandle,
-} from "../../contracts/geometry.ts";
+import { boundsOfBoxes, lineFrame, rotatedBounds, type Box, type Frame, type Point, type ResizeHandle } from "../../contracts/geometry.ts";
 import type { ElementId } from "../../contracts/ids.ts";
 import { ELEMENT_ID_ATTRIBUTE, SLIDE_ID_ATTRIBUTE } from "../../contracts/render.ts";
 import type { Selection, TextTarget } from "../../contracts/selection.ts";
+import { derivedGroupFrame, findInTree, tableOf, textTargetElementId, visibleFrame } from "../../shared/element-tree.ts";
 import { TABLE_CELL_COLUMN_ATTRIBUTE, TABLE_ROW_ATTRIBUTE } from "../render/element-view.tsx";
 
 export const HANDLE_ATTRIBUTE = "data-sasha-handle";
@@ -75,7 +64,7 @@ export function hitTargetOf(options: Readonly<{ path: readonly AttributeReader[]
     if (special !== null) return special;
     const elementId = read(ELEMENT_ID_ATTRIBUTE);
     if (elementId !== null && options.slide !== null) {
-      const element = findElement(options.slide.elements, elementId);
+      const element = findInTree(options.slide.elements, elementId);
       if (element !== null) elementIds.push(element.id);
     }
     if (read(SLIDE_ID_ATTRIBUTE) !== null) onSlide = true;
@@ -99,25 +88,13 @@ export function tableCellTargetOf(options: Readonly<{ path: readonly AttributeRe
     rowText ??= read(TABLE_ROW_ATTRIBUTE);
     const elementText = read(ELEMENT_ID_ATTRIBUTE);
     if (elementText === null) continue;
-    const element = findElement(slide.elements, elementText);
-    const table = element === null ? null : tableElementOf(element);
+    const element = findInTree(slide.elements, elementText);
+    const table = element === null ? null : tableOf(element);
     if (table === null) return null;
     const row = table.rows.find((candidate) => candidate.id === rowText);
     const column = table.columns.find((candidate) => candidate.id === columnText);
     if (row === undefined || column === undefined) return null;
     return { kind: "tableCell", slideId: slide.id, elementId: table.id, cell: { rowId: row.id, columnId: column.id } };
-  }
-  return null;
-}
-
-/** An element anywhere in a tree, by id text. */
-export function findElement(elements: readonly ElementSnapshot[], id: string): ElementSnapshot | null {
-  for (const element of elements) {
-    if (element.id === id) return element;
-    const inside = childElements(element);
-    if (inside.length === 0) continue;
-    const found = findElement(inside, id);
-    if (found !== null) return found;
   }
   return null;
 }
@@ -140,7 +117,7 @@ export function selectionOutline(options: Readonly<{ slide: SlideSnapshot | null
       return { kind: "none" };
     case "elements": {
       if (selection.slideId !== slide.id) return { kind: "none" };
-      const elements = selection.elementIds.map((id) => findElement(slide.elements, id)).filter((element): element is ElementSnapshot => element !== null);
+      const elements = selection.elementIds.map((id) => findInTree(slide.elements, id)).filter((element): element is ElementSnapshot => element !== null);
       const only = elements[0];
       if (elements.length === 1 && only !== undefined) return { kind: "single", element: only, frame: visibleFrame({ element: only, measured: options.measured }), showHandles: true };
       if (elements.length === 0) return { kind: "none" };
@@ -153,27 +130,11 @@ export function selectionOutline(options: Readonly<{ slide: SlideSnapshot | null
       const elementId = selection.kind === "text" ? textTargetElementId(selection.target) : selection.elementId;
       const slideId = selection.kind === "text" ? selection.target.slideId : selection.slideId;
       if (elementId === null || slideId !== slide.id) return { kind: "none" };
-      const element = findElement(slide.elements, elementId);
+      const element = findInTree(slide.elements, elementId);
       return element === null ? { kind: "none" } : { kind: "single", element, frame: visibleFrame({ element, measured: options.measured }), showHandles: false };
     }
     default:
       return assertNever(selection);
-  }
-}
-
-/** An element's frame as it shows: a table's height is its measured rows when known. */
-export function visibleFrame(options: Readonly<{ element: ElementSnapshot; measured: ReadonlyMap<ElementId, ElementMeasurement> }>): Frame {
-  const measurement = options.measured.get(options.element.id);
-  if (measurement === undefined) return options.element.frame;
-  switch (measurement.kind) {
-    case "table": {
-      const height = measurement.rowHeights.reduce((total, row) => total + row.height, 0);
-      return height > options.element.frame.height ? { ...options.element.frame, height } : options.element.frame;
-    }
-    case "text":
-      return options.element.frame;
-    default:
-      return assertNever(measurement);
   }
 }
 
@@ -249,7 +210,7 @@ function previewElement(element: ElementSnapshot, updates: ReadonlyMap<ElementId
       const children = previewElements(element.children, updates);
       const rotation = groupRotationOf(update) ?? element.frame.rotation;
       if (children === element.children && rotation === element.frame.rotation) return element;
-      return { ...element, children, frame: groupFrame({ children, rotation }) };
+      return { ...element, children, frame: derivedGroupFrame({ rotation, children }) };
     }
     case "line": {
       const ends = lineEndsOf(update);
@@ -307,31 +268,6 @@ function groupRotationOf(update: FrameUpdate | null): number | null {
   }
 }
 
-/** A group's box: its children's corners measured in the group's rotated axes (see the header). */
-export function groupFrame(options: Readonly<{ children: readonly ElementSnapshot[]; rotation: number }>): Frame {
-  const corners = options.children.flatMap((child) => frameCorners(child.frame));
-  const axisAligned = boundsOfPoints(corners) ?? { x: 0, y: 0, width: 0, height: 0 };
-  const centre = frameCentre(axisAligned);
-  const local = boundsOfPoints(corners.map((point) => rotatePoint({ point, centre, degrees: -options.rotation }))) ?? axisAligned;
-  const localCentre = rotatePoint({ point: frameCentre(local), centre, degrees: options.rotation });
-  return { x: localCentre.x - local.width / 2, y: localCentre.y - local.height / 2, width: local.width, height: local.height, rotation: options.rotation, flipHorizontal: false, flipVertical: false };
-}
-
-function childElements(element: ElementSnapshot): readonly ElementSnapshot[] {
-  switch (element.kind) {
-    case "group":
-      return element.children;
-    case "shape":
-    case "image":
-    case "line":
-    case "table":
-    case "unsupported":
-      return [];
-    default:
-      return assertNever(element);
-  }
-}
-
 function specialTarget(options: Readonly<{ read: AttributeReader; slide: SlideSnapshot | null; discussion: DiscussionSnapshot }>): HitTarget | null {
   const read = options.read;
   const pin = read(COMMENT_PIN_ATTRIBUTE);
@@ -341,7 +277,7 @@ function specialTarget(options: Readonly<{ read: AttributeReader; slide: SlideSn
   }
   const handleElement = read(HANDLE_ELEMENT_ATTRIBUTE);
   if (handleElement === null || options.slide === null) return null;
-  const element = findElement(options.slide.elements, handleElement);
+  const element = findInTree(options.slide.elements, handleElement);
   if (element === null) return null;
   const lineEnd = read(LINE_END_ATTRIBUTE);
   if (lineEnd === "start" || lineEnd === "end") return { kind: "lineEnd", elementId: element.id, end: lineEnd };
@@ -356,48 +292,6 @@ function specialTarget(options: Readonly<{ read: AttributeReader; slide: SlideSn
   return null;
 }
 
-function tableOf(element: ElementSnapshot): TableElement | null {
-  switch (element.kind) {
-    case "table":
-      return element;
-    case "shape":
-    case "image":
-    case "line":
-    case "group":
-    case "unsupported":
-      return null;
-    default:
-      return assertNever(element);
-  }
-}
-
-function textTargetElementId(target: Extract<Selection, { kind: "text" }>["target"]): ElementId | null {
-  switch (target.kind) {
-    case "element":
-    case "tableCell":
-      return target.elementId;
-    case "speakerNotes":
-      return null;
-    default:
-      return assertNever(target);
-  }
-}
-
 function parseResizeHandle(text: string): ResizeHandle | null {
   return RESIZE_HANDLES.find((handle) => handle === text) ?? null;
-}
-
-function tableElementOf(element: ElementSnapshot): TableElement | null {
-  switch (element.kind) {
-    case "table":
-      return element;
-    case "group":
-    case "shape":
-    case "image":
-    case "line":
-    case "unsupported":
-      return null;
-    default:
-      return assertNever(element);
-  }
 }

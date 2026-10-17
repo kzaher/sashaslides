@@ -242,7 +242,8 @@ function retryTimerGenerationOf(phase: ConnectionPhase): number | null {
   }
 }
 
-function refreshGenerationOf(phase: ConnectionPhase): number | null {
+/** The generation of the session refresh in flight; null in every other phase. */
+export function refreshGenerationOf(phase: ConnectionPhase): number | null {
   switch (phase.kind) {
     case "refreshingSession":
       return phase.generation;

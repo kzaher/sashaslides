@@ -11,8 +11,8 @@ import {
   type Selection,
   type SlideId,
   type SlideSnapshot,
-  type TextTarget,
 } from "../../contracts/index.ts";
+import { textTargetElementId } from "../../shared/element-tree.ts";
 import { elementsById, findSlide, textBodyOf } from "./document-lookup.ts";
 
 export type TextSelection = Extract<Selection, { kind: "text" }>;
@@ -48,7 +48,7 @@ export function selectedElementReference(selection: Selection): Readonly<{ slide
     case "elements":
       return { slideId: selection.slideId, elementIds: selection.elementIds };
     case "text": {
-      const elementId = elementIdOfTarget(selection.target);
+      const elementId = textTargetElementId(selection.target);
       return elementId === null ? null : { slideId: selection.target.slideId, elementIds: [elementId] };
     }
     case "tableCells":
@@ -58,18 +58,6 @@ export function selectedElementReference(selection: Selection): Readonly<{ slide
       return null;
     default:
       return assertNever(selection);
-  }
-}
-
-export function elementIdOfTarget(target: TextTarget): ElementId | null {
-  switch (target.kind) {
-    case "element":
-    case "tableCell":
-      return target.elementId;
-    case "speakerNotes":
-      return null;
-    default:
-      return assertNever(target);
   }
 }
 
@@ -124,7 +112,7 @@ export function surviveDocument(state: EditorState): Selection {
     }
     case "text": {
       if (textBodyOf(state.document, selection.target) !== null) return selection;
-      const elementId = elementIdOfTarget(selection.target);
+      const elementId = textTargetElementId(selection.target);
       const slide = findSlide(state.document, selection.target.slideId);
       if (elementId === null || slide === null || elementsById(slide, [elementId]).length === 0) return { kind: "none" };
       return { kind: "elements", slideId: selection.target.slideId, elementIds: [elementId] };

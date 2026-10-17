@@ -11,25 +11,26 @@
 //    addresses for the bytes it receives.
 //  * LEAVES ONLY, UNROTATED FRAMES. A group is a wrapper and is never animated itself; each leaf's
 //    record carries its unrotated frame (what a morph interpolates) and its rotated bounds
-//    separately, plus the groups it sits in, outermost first.
+//    separately, plus the groups it sits in, outermost first (shared/stage-elements.ts, which the
+//    in-page presenter host reads too).
 //  * NO LAYOUT EFFECTS RUN on the server renderer, so text set to shrink on overflow is in the
 //    markup at full size and table rows at their stored minimum; the runner lays them out itself.
 
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertNever } from "../../contracts/assert-never.ts";
-import type { DocumentSnapshot, ElementSnapshot, SlideSnapshot, TextBody } from "../../contracts/document.ts";
-import { rotatedBounds } from "../../contracts/geometry.ts";
-import type { AssetId, ElementId } from "../../contracts/ids.ts";
-import { assetAddressToken, type AssetAddressResolver, type FontFaceRequest, type RenderSlideMarkup, type StageElementRecord } from "../../contracts/render.ts";
-import type { Fill } from "../../contracts/style.ts";
+import type { DocumentSnapshot, SlideSnapshot } from "../../contracts/document.ts";
+import type { AssetId } from "../../contracts/ids.ts";
+import { assetAddressToken, type AssetAddressResolver, type FontFaceRequest, type RenderSlideMarkup } from "../../contracts/render.ts";
+import { referencedAssetIdsOf } from "../../shared/asset-references.ts";
+import { stageElementRecordsOf } from "../../shared/stage-elements.ts";
+import { textBodiesOf } from "../../shared/text-bodies.ts";
 import { withFontStandIns } from "./font-families.ts";
 import type { SlideRenderContext } from "./render-context.ts";
 import { SlideRoot, slideBackground, slideNumberLookup } from "./static-slide.tsx";
-import { resolvedRunStylesOf, textStyleContextOf, type TextStyleContext } from "./text-layout.ts";
+import { resolvedRunStylesOf, textStyleContextOf } from "./text-layout.ts";
 
 export const renderSlideMarkup: RenderSlideMarkup = (input) => ({
   markup: slideMarkupWith({ ...input, assetAddress: assetAddressToken }),
-  elements: stageElementRecords(input.slide.elements),
+  elements: stageElementRecordsOf(input.slide),
   assetIds: referencedAssetIds({ slide: input.slide, document: input.document }),
   fontFaces: withFontStandIns(fontFacesOf({ slide: input.slide, document: input.document })),
 });
@@ -52,106 +53,19 @@ export function slideMarkupWith(input: Readonly<{ slide: SlideSnapshot; document
   return renderToStaticMarkup(<SlideRoot slide={input.slide} document={input.document} context={context} />);
 }
 
-/** Every leaf, back to front, with its unrotated frame, rotated bounds and enclosing groups. */
-export function stageElementRecords(elements: readonly ElementSnapshot[]): readonly StageElementRecord[] {
-  const records: StageElementRecord[] = [];
-  const visit = (element: ElementSnapshot, groupPath: readonly ElementId[]): void => {
-    switch (element.kind) {
-      case "group":
-        for (const child of element.children) visit(child, [...groupPath, element.id]);
-        return;
-      case "shape":
-      case "image":
-      case "line":
-      case "table":
-      case "unsupported":
-        records.push({ elementId: element.id, morphKey: element.morphKey, kind: element.kind, frame: element.frame, bounds: rotatedBounds(element.frame), groupPath });
-        return;
-      default:
-        assertNever(element);
-    }
-  };
-  for (const element of elements) visit(element, []);
-  return records;
-}
-
 /** The assets the slide's markup refers to: its background, image elements and image fills. */
 export function referencedAssetIds(options: Readonly<{ slide: SlideSnapshot; document: DocumentSnapshot }>): readonly AssetId[] {
-  const found = new Set<AssetId>();
-  const addFill = (fill: Fill): void => {
-    const assetId = fillAssetId(fill);
-    if (assetId !== null) found.add(assetId);
-  };
-  addFill(slideBackground(options));
-  const visit = (element: ElementSnapshot): void => {
-    switch (element.kind) {
-      case "shape":
-        addFill(element.box.fill);
-        return;
-      case "image":
-        found.add(element.assetId);
-        addFill(element.box.fill);
-        return;
-      case "table":
-        for (const cell of element.cells) addFill(cell.fill);
-        return;
-      case "group":
-        element.children.forEach(visit);
-        return;
-      case "line":
-      case "unsupported":
-        return;
-      default:
-        assertNever(element);
-    }
-  };
-  options.slide.elements.forEach(visit);
-  return [...found];
+  return referencedAssetIdsOf({ backgrounds: [slideBackground(options)], elements: options.slide.elements });
 }
 
 /** The distinct font faces the slide's text draws with. */
 export function fontFacesOf(options: Readonly<{ slide: SlideSnapshot; document: DocumentSnapshot }>): readonly FontFaceRequest[] {
   const faces = new Map<string, FontFaceRequest>();
-  const addBody = (body: TextBody, context: TextStyleContext): void => {
-    for (const style of resolvedRunStylesOf(body, context)) {
+  for (const { owner, body } of options.slide.elements.flatMap(textBodiesOf)) {
+    for (const style of resolvedRunStylesOf(body, textStyleContextOf({ theme: options.document.theme, element: owner }))) {
       const face: FontFaceRequest = { family: style.fontFamily, weight: style.fontWeight, style: style.fontStyle };
       faces.set(`${face.family}|${face.weight}|${face.style}`, face);
     }
-  };
-  const visit = (element: ElementSnapshot): void => {
-    const context = textStyleContextOf({ theme: options.document.theme, element });
-    switch (element.kind) {
-      case "shape":
-        addBody(element.text, context);
-        return;
-      case "table":
-        for (const cell of element.cells) addBody(cell.text, context);
-        return;
-      case "group":
-        element.children.forEach(visit);
-        return;
-      case "image":
-      case "line":
-      case "unsupported":
-        return;
-      default:
-        assertNever(element);
-    }
-  };
-  options.slide.elements.forEach(visit);
-  return [...faces.values()];
-}
-
-function fillAssetId(fill: Fill): AssetId | null {
-  switch (fill.kind) {
-    case "image":
-      return fill.assetId;
-    case "none":
-    case "solid":
-    case "linearGradient":
-    case "radialGradient":
-      return null;
-    default:
-      return assertNever(fill);
   }
+  return [...faces.values()];
 }

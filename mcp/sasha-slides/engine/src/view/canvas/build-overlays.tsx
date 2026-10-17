@@ -20,7 +20,8 @@ import type { PropertiesTab } from "../../contracts/editor-state.ts";
 import { rotatedBounds } from "../../contracts/geometry.ts";
 import type { SlideId } from "../../contracts/ids.ts";
 import { useEditorServices } from "../application/editor-services.tsx";
-import { animationBadges, findElement } from "../chrome/animate-values.ts";
+import { findInTree } from "../../shared/element-tree.ts";
+import { animationBadges } from "../chrome/animate-values.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 
 export const AnimationBadgeLayer = memo(function AnimationBadgeLayer(properties: Readonly<{ slide: SlideSnapshot; scale: number }>): ReactElement | null {
@@ -29,7 +30,7 @@ export const AnimationBadgeLayer = memo(function AnimationBadgeLayer(properties:
   return (
     <div className={VIEW_CLASS.overlay} data-animation-badges="true">
       {[...badges].map(([elementId, positions]) => {
-        const element = findElement(properties.slide.elements, elementId);
+        const element = findInTree(properties.slide.elements, elementId);
         if (element === null) return null;
         const bounds = rotatedBounds(element.frame);
         return (

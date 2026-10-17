@@ -30,6 +30,7 @@ import {
 import { assertNever } from "../../contracts/assert-never.ts";
 import { plainText, type DocumentSnapshot, type ElementSnapshot, type SlideSnapshot, type TransitionScriptRecord } from "../../contracts/document.ts";
 import type { AnimationStepId, ElementId } from "../../contracts/ids.ts";
+import { findInTree } from "../../shared/element-tree.ts";
 
 /** "Add animation", grouped as Slides, PowerPoint and Keynote group them. */
 export const ANIMATION_EFFECT_GROUPS: readonly Readonly<{ label: string; kinds: readonly BuiltinAnimationEffectKind[] }>[] = [
@@ -60,7 +61,7 @@ export const NEWER_VERSION_LABEL = "made with a newer version";
 
 export function animationRows(options: Readonly<{ slide: SlideSnapshot; scripts: readonly TransitionScriptRecord[] }>): readonly AnimationRow[] {
   return options.slide.animations.map((step, index) => {
-    const element = findElement(options.slide.elements, step.elementId);
+    const element = findInTree(options.slide.elements, step.elementId);
     return {
       step,
       number: index + 1,
@@ -208,20 +209,10 @@ export function dropMoveFor(options: Readonly<{ order: readonly AnimationStepId[
 export function animationBadges(slide: SlideSnapshot): ReadonlyMap<ElementId, string> {
   const numbers = new Map<ElementId, number[]>();
   slide.animations.forEach((step, index) => {
-    if (findElement(slide.elements, step.elementId) === null) return;
+    if (findInTree(slide.elements, step.elementId) === null) return;
     numbers.set(step.elementId, [...(numbers.get(step.elementId) ?? []), index + 1]);
   });
   return new Map([...numbers].map(([elementId, positions]) => [elementId, positions.join(", ")]));
-}
-
-/** The element anywhere in the trees, groups included. */
-export function findElement(elements: readonly ElementSnapshot[], elementId: ElementId): ElementSnapshot | null {
-  for (const element of elements) {
-    if (element.id === elementId) return element;
-    const inside = findElement(childrenOf(element), elementId);
-    if (inside !== null) return inside;
-  }
-  return null;
 }
 
 /** The range a number field accepts, from ANIMATION_LIMITS, for clamping what is typed. */
@@ -271,21 +262,6 @@ function textOf(element: ElementSnapshot): string {
     case "line":
     case "unsupported":
       return "";
-    default:
-      return assertNever(element);
-  }
-}
-
-function childrenOf(element: ElementSnapshot): readonly ElementSnapshot[] {
-  switch (element.kind) {
-    case "group":
-      return element.children;
-    case "shape":
-    case "image":
-    case "line":
-    case "table":
-    case "unsupported":
-      return [];
     default:
       return assertNever(element);
   }

@@ -16,7 +16,7 @@ import {
   type SlideSnapshot,
 } from "../../contracts/index.ts";
 import { findSlide, findSlideIndex, selectableElements } from "./document-lookup.ts";
-import { optimisticText, queueEnvelope } from "./editor-queue.ts";
+import { optimisticText, queueCommands, queueEnvelope } from "./editor-queue.ts";
 import { selectedElements, selectElements } from "./editor-selection.ts";
 import { reidentifyElement, reidentifySlide, translateElement } from "./element-factory.ts";
 import { createIdMinter } from "./id-minter.ts";
@@ -181,7 +181,7 @@ export function endSlideDrag(state: EditorState, dropped: boolean): EditorState 
   switch (gesture.kind) {
     case "draggingSlides": {
       const idle: EditorState = { ...state, gesture: { kind: "idle" } };
-      if (!dropped || orderUnchanged(state, gesture.slideIds, gesture.dropAfter)) return idle;
+      if (!dropped || orderUnchanged({ order: state.document.slides.map((slide) => slide.id), moving: gesture.slideIds, after: gesture.dropAfter })) return idle;
       return queueEnvelope(idle, {
         commands: [{ kind: "moveSlides", slideIds: gesture.slideIds, after: gesture.dropAfter }],
         selectionAfter: { kind: "slides", slideIds: gesture.slideIds },
@@ -210,7 +210,7 @@ export function setSlideProperties(state: EditorState, patch: SlidePropertiesPat
   const slideIds = selectedSlideIds(state);
   const targets = slideIds.length > 0 ? slideIds : state.currentSlideId === null ? [] : [state.currentSlideId];
   const commands: DocumentCommand[] = targets.map((slideId) => ({ kind: "setSlideProperties", slideId, patch }));
-  return queueEnvelope(state, { commands, selectionAfter: state.selection, mergeWithPrevious: false });
+  return queueCommands(state, commands);
 }
 
 /** Page Up / Page Down. */
@@ -324,12 +324,13 @@ function slidesForMode(
   }
 }
 
-function orderUnchanged(state: EditorState, slideIds: readonly SlideId[], dropAfter: SlideId | null): boolean {
-  const order = state.document.slides.map((slide) => slide.id);
-  const remaining = order.filter((slideId) => !slideIds.includes(slideId));
-  const insertAt = dropAfter === null ? 0 : remaining.indexOf(dropAfter) + 1;
-  const moved = [...remaining.slice(0, insertAt), ...order.filter((slideId) => slideIds.includes(slideId)), ...remaining.slice(insertAt)];
-  return moved.every((slideId, index) => order[index] === slideId);
+/** True when dropping `moving` (kept in their current relative order) just after `after` leaves `order` as it is. */
+export function orderUnchanged<Id>(options: Readonly<{ order: readonly Id[]; moving: readonly Id[]; after: Id | null }>): boolean {
+  const remaining = options.order.filter((id) => !options.moving.includes(id));
+  const insertAt = options.after === null ? 0 : remaining.indexOf(options.after) + 1;
+  const movedInOrder = options.order.filter((id) => options.moving.includes(id));
+  const result = [...remaining.slice(0, insertAt), ...movedInOrder, ...remaining.slice(insertAt)];
+  return result.every((id, index) => options.order[index] === id);
 }
 
 function emptiedPlaceholder(element: ElementSnapshot): ElementSnapshot {

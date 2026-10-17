@@ -18,9 +18,10 @@ import type { ChosenImageFile } from "../../contracts/editor-events.ts";
 import type { BrowserCapabilities } from "../../contracts/editor-system.ts";
 import { slideUnitsFromPoints } from "../../contracts/geometry.ts";
 import type { RunStylePatch } from "../../contracts/style.ts";
-import { assertNever } from "../../contracts/assert-never.ts";
-import { applyFontMetricOverrides, fontMetricOverridesFor, fontStandInOf } from "../render/font-families.ts";
+import { parseAssetMediaType } from "../../shared/media-types.ts";
+import { applyFontMetricOverrides, fontMetricOverridesFor, fontStandInOf, isSystemFontFamily } from "../render/font-families.ts";
 import { colourFromBrowser } from "../text/input-parser.ts";
+import { textBodiesOf } from "../../shared/text-bodies.ts";
 
 /** The real browser operations (contracts/editor-system.ts `BrowserCapabilities`). */
 export function pageBrowserCapabilities(page: Window): BrowserCapabilities {
@@ -84,7 +85,7 @@ export function richTextFromMarkup(markup: string): readonly Paragraph[] | null 
 
 /** An image file's bytes and pixel size; null for anything that is not a supported image. */
 export async function readImageFile(file: File): Promise<ChosenImageFile | null> {
-  const mediaType = assetMediaType(file.type);
+  const mediaType = parseAssetMediaType(file.type);
   if (mediaType === null) return null;
   const bytes = await file.arrayBuffer();
   const size = await pixelSize({ bytes, mediaType });
@@ -108,11 +109,6 @@ export function loadDeckFonts(options: Readonly<{ page: Document; document: Docu
   }
 }
 
-/** Whether a family is a system or generic one, which is never requested from Google Fonts. */
-export function isSystemFontFamily(family: string): boolean {
-  return SYSTEM_FAMILIES.has(family.toLowerCase());
-}
-
 /** Every family the deck's theme and text name. */
 export function deckFontFamilies(document: DocumentSnapshot): ReadonlySet<string> {
   const families = new Set<string>([document.theme.headingFontFamily, document.theme.bodyFontFamily, document.theme.defaultRunStyle.fontFamily]);
@@ -122,36 +118,15 @@ export function deckFontFamilies(document: DocumentSnapshot): ReadonlySet<string
 }
 
 const BLOCK_TAGS: ReadonlySet<string> = new Set(["p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "tr"]);
-const SYSTEM_FAMILIES: ReadonlySet<string> = new Set(["arial", "helvetica", "times new roman", "georgia", "courier new", "verdana", "sans-serif", "serif", "monospace", "system-ui"]);
 const FAMILIES_OF_SLIDE = new WeakMap<DocumentSnapshot["slides"][number], ReadonlySet<string>>();
 
 function slideFamilies(slide: DocumentSnapshot["slides"][number]): ReadonlySet<string> {
   const cached = FAMILIES_OF_SLIDE.get(slide);
   if (cached !== undefined) return cached;
   const families = new Set<string>();
-  const addBody = (body: { readonly paragraphs: readonly Paragraph[] }): void => {
+  for (const { body } of slide.elements.flatMap(textBodiesOf)) {
     for (const paragraph of body.paragraphs) for (const run of paragraph.runs) if (run.style.fontFamily !== undefined) families.add(run.style.fontFamily);
-  };
-  const visit = (element: DocumentSnapshot["slides"][number]["elements"][number]): void => {
-    switch (element.kind) {
-      case "shape":
-        addBody(element.text);
-        return;
-      case "table":
-        for (const cell of element.cells) addBody(cell.text);
-        return;
-      case "group":
-        element.children.forEach(visit);
-        return;
-      case "image":
-      case "line":
-      case "unsupported":
-        return;
-      default:
-        assertNever(element);
-    }
-  };
-  slide.elements.forEach(visit);
+  }
   FAMILIES_OF_SLIDE.set(slide, families);
   return families;
 }
@@ -189,19 +164,6 @@ export function pastedRunStyleOf(element: PastedElement): RunStylePatch {
   const colour = colourFromBrowser(declared.color);
   if (colour !== null) style.colour = colour;
   return style;
-}
-
-function assetMediaType(type: string): AssetMediaType | null {
-  switch (type) {
-    case "image/png":
-    case "image/jpeg":
-    case "image/gif":
-    case "image/webp":
-    case "image/svg+xml":
-      return type;
-    default:
-      return null;
-  }
 }
 
 async function pixelSize(options: Readonly<{ bytes: ArrayBuffer; mediaType: AssetMediaType }>): Promise<Readonly<{ width: number; height: number }> | null> {

@@ -30,6 +30,7 @@ import type { ElementId, SlideId } from "../../contracts/ids.ts";
 import type { Selection, TextTarget } from "../../contracts/selection.ts";
 import { textTargetKey } from "../../contracts/text-delta.ts";
 import { useEditorSelector, useEditorServices, useViewPreferences, shallowEqual } from "../application/editor-services.tsx";
+import { threadIsResolved } from "../chrome/comment-rail.tsx";
 import { PEER_IS_AWAY, shownPeers, usePresenceNow } from "../chrome/presence.ts";
 import type { EditableTextSlot, MeasurementReporter } from "../render/render-context.ts";
 import { SlideRoot, useSlideRenderContext } from "../render/static-slide.tsx";
@@ -332,7 +333,7 @@ function canvasTextTarget(selection: Selection, slideId: SlideId | null): TextTa
 
 function pinsOnSlide(options: Readonly<{ arranged: readonly ArrangedThread[]; slideId: SlideId | null; showResolved: boolean }>): readonly ArrangedThread[] {
   return options.arranged.filter((arranged) => {
-    if (!options.showResolved && threadResolved(arranged)) return false;
+    if (!options.showResolved && threadIsResolved(arranged.thread)) return false;
     const placement = arranged.placement;
     switch (placement.kind) {
       case "onElement":
@@ -345,18 +346,6 @@ function pinsOnSlide(options: Readonly<{ arranged: readonly ArrangedThread[]; sl
         return assertNever(placement);
     }
   });
-}
-
-function threadResolved(arranged: ArrangedThread): boolean {
-  const status = arranged.thread.status;
-  switch (status.kind) {
-    case "open":
-      return false;
-    case "resolved":
-      return true;
-    default:
-      return assertNever(status);
-  }
 }
 
 /** Reports the canvas area's size whenever it changes (the reducer derives the fit scale from it). */

@@ -255,12 +255,11 @@ export type PresentationProperties = Readonly<{
 }>;
 
 /**
- * src/presenter/index.ts exports `BuildPreview`: every build segment of `slideId` played in turn in a
- * box laid over the editor's canvas (the Animate tab's "Preview"), clicks taken as given, then
- * `onEnded`. Same hosts and rules as a show (a scripted step runs only once approved); under reduced
- * motion the builds appear at once. `generation` restarts it.
+ * What `BuildPreview` and `TransitionPreview` (src/presenter/index.ts) both take: a box laid over the
+ * editor's canvas that plays `slideId` once, then calls `onEnded`. Same hosts and rules as a show (a
+ * scripted step runs only once approved); `generation` restarts it.
  */
-export type BuildPreviewProperties = Readonly<{
+export type PreviewProperties = Readonly<{
   dependencies: PresenterDependencies;
   document: DocumentSnapshot;
   slideId: SlideId;
@@ -270,17 +269,8 @@ export type BuildPreviewProperties = Readonly<{
   onEnded: () => void;
 }>;
 
-/**
- * src/presenter/index.ts exports `TransitionPreview`: the transition INTO `slideId` from the slide
- * before it, played once in a box (the properties panel's "Preview", the script dialog's "Run").
- * Same hosts and rules as a show; `generation` restarts it.
- */
-export type TransitionPreviewProperties = Readonly<{
-  dependencies: PresenterDependencies;
-  document: DocumentSnapshot;
-  slideId: SlideId;
-  generation: number;
-  /** Width of the preview box in client pixels; the height follows the page. */
-  width: number;
-  onEnded: () => void;
-}>;
+/** `BuildPreview`: every build segment of `slideId` played in turn (the Animate tab's "Preview"), clicks taken as given. */
+export type BuildPreviewProperties = PreviewProperties;
+
+/** `TransitionPreview`: the transition INTO `slideId` from the slide before it (the properties panel's "Preview", the script dialog's "Run"). */
+export type TransitionPreviewProperties = PreviewProperties;

@@ -167,6 +167,12 @@ export type DocumentCommand =
 
 export type DocumentCommandKind = DocumentCommand["kind"];
 
+/** The commands that change a table's lines or cells; validated and applied by one function each. */
+export type TableCommand = Extract<
+  DocumentCommand,
+  { kind: "insertTableRows" | "insertTableColumns" | "deleteTableRows" | "deleteTableColumns" | "setTableColumnWidths" | "setTableRowHeights" | "updateTableCells" }
+>;
+
 /**
  * How a save sets the script's approval. `"authorDecides"`: approved by the author when a person
  * saves (they wrote or reviewed the text they save), unapproved when an agent does. `"unapproved"`:

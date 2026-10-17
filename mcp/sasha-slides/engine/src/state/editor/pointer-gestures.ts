@@ -33,6 +33,15 @@ import {
   type SlideSnapshot,
   type TableElement,
 } from "../../contracts/index.ts";
+import { editingRefusal } from "../../shared/access-refusals.ts";
+import {
+  DEFAULT_LINE_LENGTH,
+  DEFAULT_SHAPE_SIZE,
+  DEFAULT_TABLE_COLUMN_WIDTH,
+  DEFAULT_TABLE_ROW_HEIGHT,
+  DEFAULT_TEXT_BOX_SIZE,
+  isTextBoxPreset,
+} from "../../shared/element-defaults.ts";
 import {
   boxesIntersect,
   elementBounds,
@@ -43,19 +52,9 @@ import {
   slideBox,
   textShapeOf,
 } from "./document-lookup.ts";
-import { queueEnvelope, refuse } from "./editor-queue.ts";
+import { queueCommands, queueEnvelope, refuse } from "./editor-queue.ts";
 import { isElementSelected, selectedElements, selectElements, textSelectionOf } from "./editor-selection.ts";
-import {
-  createLine,
-  createShape,
-  createTable,
-  DEFAULT_LINE_LENGTH,
-  DEFAULT_SHAPE_SIZE,
-  DEFAULT_TABLE_COLUMN_WIDTH,
-  DEFAULT_TABLE_ROW_HEIGHT,
-  DEFAULT_TEXT_BOX_SIZE,
-  isTextBoxPreset,
-} from "./element-factory.ts";
+import { createLine, createShape, createTable } from "./element-factory.ts";
 import { createIdMinter } from "./id-minter.ts";
 import {
   boundsOfUpdates,
@@ -69,7 +68,6 @@ import {
 } from "./frame-updates.ts";
 import { snapMove } from "./snapping.ts";
 import { applyCapturedFormat } from "./format-painter.ts";
-import { editingRefusal } from "./access.ts";
 import { openComposer, referenceBoxForComposer } from "./comments.ts";
 import { startTextEditing } from "./text-editing.ts";
 
@@ -313,7 +311,7 @@ function editingTextOf(state: EditorState, elementId: ElementId): boolean {
 
 function beginDrag(state: EditorState, pressed: Extract<Gesture, { kind: "pressed" }>, sample: PointerSample, modifiers: Modifiers): EditorState {
   const target = pressed.target;
-  // A drag that would change the document is refused up front for a viewer or commenter (access.ts),
+  // A drag that would change the document is refused up front for a viewer or commenter (access-refusals.ts),
   // so nothing previews a move that could never be saved.
   const refusal = dragEditsDocument({ target, tool: state.tool }) ? editingRefusal(state) : null;
   if (refusal !== null) return refuse({ ...state, gesture: { kind: "idle" } }, refusal);
@@ -356,7 +354,7 @@ function dragEditsDocument(options: Readonly<{ target: Extract<Gesture, { kind: 
   const target = options.target;
   switch (target.kind) {
     case "element":
-      return toolDragsElements(options.tool);
+      return toolIsSelect(options.tool);
     case "resizeHandle":
     case "rotationHandle":
     case "lineEnd":
@@ -372,7 +370,8 @@ function dragEditsDocument(options: Readonly<{ target: Extract<Gesture, { kind: 
   }
 }
 
-function toolDragsElements(tool: EditorState["tool"]): boolean {
+/** Whether the select tool is active: only it moves elements by dragging them. */
+export function toolIsSelect(tool: EditorState["tool"]): boolean {
   switch (tool.kind) {
     case "select":
       return true;
@@ -642,7 +641,7 @@ function clickWithComment(state: EditorState, target: HitTarget): EditorState {
 function commitFrames(state: EditorState, startFrames: readonly FrameUpdate[], preview: readonly FrameUpdate[]): EditorState {
   const slideId = state.currentSlideId;
   if (slideId === null || sameUpdates(startFrames, preview)) return state;
-  return queueEnvelope(state, { commands: [{ kind: "setFrames", slideId, frames: preview }], selectionAfter: state.selection, mergeWithPrevious: false });
+  return queueCommands(state, [{ kind: "setFrames", slideId, frames: preview }]);
 }
 
 function commitLineEnd(state: EditorState, elementId: ElementId, end: "start" | "end", point: Point): EditorState {
@@ -655,11 +654,7 @@ function commitLineEnd(state: EditorState, elementId: ElementId, end: "start" | 
       const start = LINE_END_IS_START[end] ? point : element.start;
       const finish = LINE_END_IS_START[end] ? element.end : point;
       if (start.x === element.start.x && start.y === element.start.y && finish.x === element.end.x && finish.y === element.end.y) return state;
-      return queueEnvelope(state, {
-        commands: [{ kind: "setFrames", slideId, frames: [{ kind: "line", elementId, start, end: finish }] }],
-        selectionAfter: state.selection,
-        mergeWithPrevious: false,
-      });
+      return queueCommands(state, [{ kind: "setFrames", slideId, frames: [{ kind: "line", elementId, start, end: finish }] }]);
     }
     case "shape":
     case "image":
@@ -785,7 +780,7 @@ function queueTableLine(state: EditorState, slideId: NonNullable<EditorState["cu
       const total = table.columns.reduce((sum, candidate) => sum + (widths.find((changed) => changed.columnId === candidate.id)?.width ?? candidate.width), 0);
       const commands: DocumentCommand[] = [{ kind: "setTableColumnWidths", slideId, elementId: table.id, widths }];
       if (Math.abs(total - table.frame.width) > 0.001) commands.push({ kind: "setFrames", slideId, frames: [{ kind: "box", elementId: table.id, frame: { ...table.frame, width: total } }] });
-      return queueEnvelope(state, { commands, selectionAfter: state.selection, mergeWithPrevious: false });
+      return queueCommands(state, commands);
     }
     case "row": {
       const row = table.rows.find((candidate) => candidate.id === line.rowId);
@@ -795,7 +790,7 @@ function queueTableLine(state: EditorState, slideId: NonNullable<EditorState["cu
       const total = table.rows.reduce((sum, candidate) => sum + (candidate.id === row.id ? minimumHeight : candidate.minimumHeight), 0);
       const commands: DocumentCommand[] = [{ kind: "setTableRowHeights", slideId, elementId: table.id, heights: [{ rowId: row.id, minimumHeight }] }];
       if (Math.abs(total - table.frame.height) > 0.001) commands.push({ kind: "setFrames", slideId, frames: [{ kind: "box", elementId: table.id, frame: { ...table.frame, height: total } }] });
-      return queueEnvelope(state, { commands, selectionAfter: state.selection, mergeWithPrevious: false });
+      return queueCommands(state, commands);
     }
     default:
       return assertNever(line);

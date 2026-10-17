@@ -7,7 +7,6 @@ import {
   EMPTY_DISCUSSION,
   LOCAL_COLLABORATION_STATUS,
   EMPTY_TEXT_BODY,
-  lineFrame,
   mintId,
   NEW_TEXT_BOX_STYLE,
   parseAnimationStepId,
@@ -15,7 +14,6 @@ import {
   parsePersonId,
   parseSlideId,
   PLACEHOLDER_ROLES,
-  PLAIN_BOX_STYLE,
   THEME_COLOUR_SLOTS,
   boundsOfBoxes,
   identityFrame,
@@ -45,8 +43,9 @@ import {
   type TextBody,
   type ThemeSnapshot,
 } from "../../contracts/index.ts";
-import { isTextBoxPreset } from "../editor/element-factory.ts";
+import { isTextBoxPreset } from "../../shared/element-defaults.ts";
 import { initialEditorState } from "../editor/initial-editor-state.ts";
+import { lineElement, shapeElement } from "../../contracts/testing/snapshot-builders.ts";
 
 export function elementId(text: string): ElementId {
   const parsed = parseElementId(text);
@@ -97,46 +96,25 @@ export function shape(
     autofit?: "none" | "shrinkText" | "resizeShape";
   }>,
 ): ShapeElement {
-  const id = elementId(options.id);
   const preset = options.preset ?? "rectangle";
-  return {
-    kind: "shape",
-    id,
-    name: "",
-    description: "",
+  return shapeElement({
+    id: elementId(options.id),
     frame: { x: options.x, y: options.y, width: options.width, height: options.height, rotation: options.rotation ?? 0, flipHorizontal: false, flipVertical: false },
-    groupId: null,
-    morphKey: id,
     placeholder: options.placeholder ?? null,
-    unsupportedKeys: [],
     preset,
-    customOutline: null,
-    box: PLAIN_BOX_STYLE,
     textBox: { ...(isTextBoxPreset(preset) ? NEW_TEXT_BOX_STYLE : DEFAULT_TEXT_BOX_STYLE), ...(options.autofit === undefined ? {} : { autofit: options.autofit }) },
     text: options.text ?? EMPTY_TEXT_BODY,
-  };
+  });
 }
 
 export function line(options: Readonly<{ id: string; start: Readonly<{ x: number; y: number }>; end: Readonly<{ x: number; y: number }> }>): LineElement {
-  const id = elementId(options.id);
-  return {
-    kind: "line",
-    id,
-    name: "",
-    description: "",
-    frame: lineFrame({ start: options.start, end: options.end }),
-    groupId: null,
-    morphKey: id,
-    placeholder: null,
-    unsupportedKeys: [],
+  return lineElement({
+    id: elementId(options.id),
     start: options.start,
     end: options.end,
-    routing: "straight",
     stroke: { width: 2, colour: { kind: "theme", slot: "dark1", alpha: 1 }, dash: "solid" },
-    startArrow: "none",
     endArrow: "none",
-    opacity: 1,
-  };
+  });
 }
 
 /** A group whose frame is its children's bounds (rotation 0 unless given, as the model derives it). */

@@ -14,57 +14,25 @@
 //    them in the stylesheet is what keeps the slideshow styled here.
 
 import { DECK_APPLICATION_ASSETS_PREFIX } from "../contracts/deck-api.ts";
+import { editorPageMarkup, type PageConfiguration } from "../view/application/editor-page.ts";
 import { TIDEPOOL_TOKENS } from "../theme/tidepool-theme.ts";
 import { tidepoolStylesheet } from "../theme/tidepool-stylesheet.ts";
 import { viewStylesheet } from "../view/view-stylesheet.ts";
 import { PRESENTER_RULES } from "../presenter/view/presenter-stylesheet.ts";
-import { parseOrNull, parseStructuredText, recordOf, stringAt } from "./parsing/untrusted-values.ts";
 import { webStylesheet } from "./web-stylesheet.ts";
-
-export const WEB_ROOT_ID = "sasha-root";
-export const WEB_CONFIGURATION_ID = "sasha-configuration";
-
-/** What the deck page needs to know that it cannot derive from its own address. */
-export type WebPageConfiguration = Readonly<{
-  /** The scripted-transition runner page (presenter `buildPresenterAssets`, served under /deck-app/runner/). */
-  runnerAddress: string;
-}>;
 
 /** The shared stylesheet of both pages (see the header). */
 export function deckApplicationStylesheet(): string {
   return `${tidepoolStylesheet(TIDEPOOL_TOKENS)}\n${viewStylesheet()}\n${PRESENTER_RULES}\n${webStylesheet()}`;
 }
 
-/** The page shell: the stylesheet, a root element, the configuration block and the bundle. */
-export function webPageMarkup(options: Readonly<{ title: string; stylesheetFile: string; scriptFile: string; configuration: WebPageConfiguration }>): string {
-  const configuration = JSON.stringify(options.configuration).replace(/</g, "\\u003c");
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeText(options.title)}</title>
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="stylesheet" href="${escapeText(`${DECK_APPLICATION_ASSETS_PREFIX}${options.stylesheetFile}`)}">
-</head>
-<body>
-<div id="${WEB_ROOT_ID}"></div>
-<script type="application/json" id="${WEB_CONFIGURATION_ID}">${configuration}</script>
-<script type="module" src="${escapeText(`${DECK_APPLICATION_ASSETS_PREFIX}${options.scriptFile}`)}"></script>
-</body>
-</html>
-`;
-}
-
-/** The page's configuration block, parsed at the boundary; null when it is missing or malformed. */
-export function parseWebPageConfiguration(text: string | null): WebPageConfiguration | null {
-  if (text === null) return null;
-  return parseOrNull(() => {
-    const record = recordOf(parseStructuredText(text), "configuration");
-    return { runnerAddress: stringAt(record, "runnerAddress") };
+/** The page shell: `editorPageMarkup` with the icon and every file under /deck-app/. */
+export function webPageMarkup(options: Readonly<{ title: string; stylesheetFile: string; scriptFile: string; configuration: PageConfiguration }>): string {
+  return editorPageMarkup({
+    title: options.title,
+    stylesheetPath: `${DECK_APPLICATION_ASSETS_PREFIX}${options.stylesheetFile}`,
+    scriptPath: `${DECK_APPLICATION_ASSETS_PREFIX}${options.scriptFile}`,
+    configuration: options.configuration,
+    favicon: "/favicon.ico",
   });
-}
-
-function escapeText(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 }

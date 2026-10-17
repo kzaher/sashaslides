@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import type { BuiltinTransitionEffect, GroupElement } from "../../contracts/document.ts";
 import { ELEMENT_ID_ATTRIBUTE } from "../../contracts/render.ts";
 import type { TransitionContext, TransitionDirection } from "../../contracts/transition-protocol.ts";
-import { stageElementRecordsOf } from "../stage-elements.ts";
+import { stageElementRecordsOf } from "../../shared/stage-elements.ts";
 import { fixtureShape, fixtureSlide, elementIdOf, type FixtureElement } from "../testing/document-fixture.ts";
 import { buildTransitionContext, clampTiming } from "../transition-context.ts";
 import { BUILTIN_TRANSITIONS } from "./builtin-transitions.ts";

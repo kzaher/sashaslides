@@ -14,7 +14,7 @@
 // only ever writes values it understands.
 
 import type { AnimationEffect, AnimationStep, AnimationStepPatch } from "../contracts/animations.ts";
-import type { CommandAuthor, CommandEnvelope, CommandRejection, DocumentCommand, ElementPatch, TextOperation } from "../contracts/commands.ts";
+import type { CommandAuthor, CommandEnvelope, CommandRejection, DocumentCommand, ElementPatch, TableCommand, TextOperation } from "../contracts/commands.ts";
 import type { ElementSnapshot, ScriptPurpose, SlideSnapshot, TextBody, ThemeSnapshot } from "../contracts/document.ts";
 import type { AnimationStepId, AssetId, ElementId, LayoutId, SlideId, TransitionScriptId } from "../contracts/ids.ts";
 import type { TextTarget } from "../contracts/selection.ts";
@@ -41,7 +41,6 @@ import {
   checkSerialisable,
   checkString,
   checkStylePatch,
-  checkTextBoxField,
   checkTextBoxStyle,
   CORNER_RADIUS,
   CUSTOM_OUTLINE,
@@ -62,6 +61,8 @@ import {
   SLIDE_TRANSITION,
   STROKE,
   TEXT,
+  TEXT_BOX_FIELD_CHECKS,
+  TEXT_BOX_STYLE,
   TRANSITION_EASING,
   valueOr,
   type StoredValueCheck,
@@ -69,6 +70,8 @@ import {
 } from "./stored-values.ts";
 import { PLACEHOLDER_ROLES } from "../contracts/document.ts";
 import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
+import { isHexadecimalColour } from "../shared/colour-values.ts";
+import { storedScriptFingerprint } from "./protected-fields.ts";
 
 export type ValidationContext = Readonly<{ roots: DocumentRoots; revision: number }>;
 
@@ -166,17 +169,10 @@ function createProspect(roots: DocumentRoots): Prospect {
       if (scripts.has(scriptId)) return scripts.get(scriptId) ?? null;
       const map = childMap(roots.transitionScripts, scriptId);
       if (map === null) return null;
-      const text = (key: string): string => valueOr(readStored({ map, key, kind: TEXT }), "");
-      const purpose = valueOr(readStored({ map, key: TRANSITION_SCRIPT_KEY.purpose, kind: SCRIPT_PURPOSE }), "transition");
       return {
         updatedAt: valueOr(readStored({ map, key: TRANSITION_SCRIPT_KEY.updatedAt, kind: NUMBER }), 0),
-        fingerprint: scriptFingerprint({
-          script: text(TRANSITION_SCRIPT_KEY.script),
-          stylesheet: text(TRANSITION_SCRIPT_KEY.stylesheet),
-          markup: text(TRANSITION_SCRIPT_KEY.markup),
-          purpose,
-        }),
-        purpose,
+        fingerprint: storedScriptFingerprint(map),
+        purpose: valueOr(readStored({ map, key: TRANSITION_SCRIPT_KEY.purpose, kind: SCRIPT_PURPOSE }), "transition"),
       };
     },
     recordScript: (scriptId, state) => scripts.set(scriptId, state),
@@ -438,7 +434,7 @@ function validateThemePatch(options: Readonly<{ patch: Partial<ThemeSnapshot>; p
     if (!isRecord(colours)) return value({ path: `${path}.colours`, verdict: "wrongType" });
     for (const slot of THEME_COLOUR_SLOTS) {
       const colour = colours[slot];
-      if (typeof colour !== "string" || !HEXADECIMAL_PATTERN.test(colour)) return value({ path: `${path}.colours.${slot}`, verdict: "wrongType" });
+      if (!isHexadecimalColour(colour)) return value({ path: `${path}.colours.${slot}`, verdict: "wrongType" });
     }
   }
   if (patch.placeholderStyles !== undefined) {
@@ -450,7 +446,7 @@ function validateThemePatch(options: Readonly<{ patch: Partial<ThemeSnapshot>; p
       const rejection =
         value({ path: `${path}.placeholderStyles.${role}.run`, verdict: checkStylePatch(style["run"], RUN_ATTRIBUTE_CHECKS) }) ??
         value({ path: `${path}.placeholderStyles.${role}.paragraph`, verdict: checkStylePatch(style["paragraph"], PARAGRAPH_ATTRIBUTE_CHECKS) }) ??
-        value({ path: `${path}.placeholderStyles.${role}.textBox`, verdict: checkTextBoxPatch(style["textBox"]) });
+        value({ path: `${path}.placeholderStyles.${role}.textBox`, verdict: checkStylePatch(style["textBox"], TEXT_BOX_FIELD_CHECKS) });
       if (rejection !== null) return rejection;
     }
   }
@@ -464,17 +460,7 @@ function validateThemePatch(options: Readonly<{ patch: Partial<ThemeSnapshot>; p
   return null;
 }
 
-const HEXADECIMAL_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const AUTOMATIC_TEXT_FIELDS: readonly string[] = ["slideNumber"];
-
-function checkTextBoxPatch(candidate: unknown): Verdict {
-  if (!isRecord(candidate)) return "wrongType";
-  for (const [key, field] of Object.entries(candidate)) {
-    const verdict = checkTextBoxField(key, field);
-    if (verdict !== "valid") return verdict;
-  }
-  return "valid";
-}
 
 function validateScriptUpsert(
   options: Readonly<{ prospect: Prospect; command: Extract<DocumentCommand, { kind: "upsertTransitionScript" }>; path: string; author: CommandAuthor }>,
@@ -769,24 +755,37 @@ function validateFrames(options: Readonly<{ prospect: Prospect; command: Extract
 function validateElementPatch(options: Readonly<{ prospect: Prospect; patch: ElementPatch; path: string }>): CommandRejection | null {
   const { prospect, patch, path } = options;
   if (patch.assetId !== undefined && !prospect.assetExists(patch.assetId)) return { reason: "assetMissing", assetId: patch.assetId };
-  return (
-    (patch.name === undefined ? null : value({ path: `${path}.name`, verdict: checkString(patch.name) })) ??
-    (patch.description === undefined ? null : value({ path: `${path}.description`, verdict: checkString(patch.description) })) ??
-    (patch.morphKey === undefined ? null : value({ path: `${path}.morphKey`, verdict: checkString(patch.morphKey) })) ??
-    optionalChecked({ path: `${path}.fill`, candidate: patch.fill, kind: FILL }) ??
-    optionalChecked({ path: `${path}.border`, candidate: patch.border, kind: BORDER }) ??
-    optionalChecked({ path: `${path}.cornerRadius`, candidate: patch.cornerRadius, kind: CORNER_RADIUS }) ??
-    optionalChecked({ path: `${path}.shadow`, candidate: patch.shadow, kind: SHADOW }) ??
-    optionalChecked({ path: `${path}.opacity`, candidate: patch.opacity, kind: OPACITY }) ??
-    (patch.textBox === undefined ? null : value({ path: `${path}.textBox`, verdict: checkTextBoxStyle(patch.textBox) })) ??
-    optionalChecked({ path: `${path}.preset`, candidate: patch.preset, kind: SHAPE_PRESET }) ??
-    optionalChecked({ path: `${path}.crop`, candidate: patch.crop, kind: IMAGE_CROP }) ??
-    optionalChecked({ path: `${path}.stroke`, candidate: patch.stroke, kind: STROKE }) ??
-    optionalChecked({ path: `${path}.startArrow`, candidate: patch.startArrow, kind: ARROW_HEAD }) ??
-    optionalChecked({ path: `${path}.endArrow`, candidate: patch.endArrow, kind: ARROW_HEAD }) ??
-    optionalChecked({ path: `${path}.routing`, candidate: patch.routing, kind: LINE_ROUTING })
-  );
+  const fields: Readonly<Record<string, unknown>> = patch;
+  for (const [key, kind] of Object.entries(ELEMENT_PATCH_CHECKS)) {
+    const rejection = kind === null ? null : optionalChecked<unknown>({ path: `${path}.${key}`, candidate: fields[key], kind });
+    if (rejection !== null) return rejection;
+  }
+  return null;
 }
+
+/**
+ * How each `ElementPatch` field is checked, total over its keys: a new field does not compile until
+ * it is given a check here. `null` marks a field checked against the prospect instead (the asset
+ * must exist, above).
+ */
+const ELEMENT_PATCH_CHECKS: Readonly<{ [Key in keyof ElementPatch]-?: StoredValueCheck<ElementPatch[Key]> | null }> = {
+  name: TEXT,
+  description: TEXT,
+  morphKey: TEXT,
+  fill: FILL,
+  border: BORDER,
+  cornerRadius: CORNER_RADIUS,
+  shadow: SHADOW,
+  opacity: OPACITY,
+  textBox: TEXT_BOX_STYLE,
+  preset: SHAPE_PRESET,
+  assetId: null,
+  crop: IMAGE_CROP,
+  stroke: STROKE,
+  startArrow: ARROW_HEAD,
+  endArrow: ARROW_HEAD,
+  routing: LINE_ROUTING,
+};
 
 function optionalChecked<TValue>(options: Readonly<{ path: string; candidate: unknown; kind: StoredValueCheck<TValue> }>): CommandRejection | null {
   return options.candidate === undefined ? null : checked(options);
@@ -911,11 +910,6 @@ function lengthChange(operation: TextOperation): number {
       return assertNever(operation);
   }
 }
-
-type TableCommand = Extract<
-  DocumentCommand,
-  { kind: "insertTableRows" | "insertTableColumns" | "deleteTableRows" | "deleteTableColumns" | "setTableColumnWidths" | "setTableRowHeights" | "updateTableCells" }
->;
 
 function validateTableCommand(options: Readonly<{ prospect: Prospect; command: TableCommand; path: string }>): CommandRejection | null {
   const { prospect, command, path } = options;

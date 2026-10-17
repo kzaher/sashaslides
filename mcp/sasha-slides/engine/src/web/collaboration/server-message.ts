@@ -6,15 +6,8 @@
 
 import type { ServerMessage } from "../../contracts/collaboration.ts";
 import { parseDeckId } from "../../contracts/ids.ts";
-import {
-  readCorrection,
-  readDeckMember,
-  readDeckRole,
-  readDiscussionLogEntry,
-  readDiscussionOutcome,
-  readPerson,
-  readResynchroniseReason,
-} from "../parsing/collaboration-values.ts";
+import { readDiscussionLogEntry, readPerson } from "../../shared/discussion-wire-values.ts";
+import { readCorrection, readDeckMember, readDeckRole, readDiscussionOutcome, readResynchroniseReason } from "../parsing/collaboration-values.ts";
 import {
   identifierAt,
   keysOf,
@@ -26,7 +19,7 @@ import {
   parseStructuredText,
   recordOf,
   stringAt,
-} from "../parsing/untrusted-values.ts";
+} from "../../shared/untrusted-values.ts";
 import { assertNever } from "../../contracts/assert-never.ts";
 
 /** A text frame as a `ServerMessage`, or null (see the header). Never throws. */

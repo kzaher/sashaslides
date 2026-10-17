@@ -37,7 +37,8 @@ import type { ThemeSnapshot } from "../../contracts/document.ts";
 import type { Frame } from "../../contracts/geometry.ts";
 import { ELEMENT_ID_ATTRIBUTE, ELEMENT_KIND_ATTRIBUTE, MORPH_KEY_ATTRIBUTE } from "../../contracts/render.ts";
 import type { TextTarget } from "../../contracts/selection.ts";
-import type { Stroke, TextBoxStyle } from "../../contracts/style.ts";
+import type { TextBoxStyle } from "../../contracts/style.ts";
+import { firstDrawnStroke } from "../../shared/element-tree.ts";
 import type { SlideRenderContext } from "./render-context.ts";
 import { customOutlinePath, effectiveCornerRadius, isDrawnAsBox, NO_TEXT_INSET, presetTextInset, shapeOutlinePath, type TextInset } from "./shape-geometry.ts";
 import {
@@ -128,7 +129,8 @@ function ShapeView(properties: Readonly<{ element: ShapeElement; context: SlideR
     );
   }
   const outline = vectorOutline(element);
-  const stroke = vectorStroke(element);
+  // A vector preset has one outline: a uniform border, or the first side of a per-side one.
+  const stroke = firstDrawnStroke(element.box.border);
   return (
     <div style={leaf} {...elementAttributes(element)}>
       <div style={{ position: "absolute", inset: 0, ...(box.shadow === null ? {} : { filter: dropShadowFilterValue(box.shadow, theme) }) }}>
@@ -168,21 +170,6 @@ function vectorOutline(element: ShapeElement): VectorOutline {
   }
   const preset = shapeOutlinePath({ preset: element.preset, width, height }) ?? "";
   return { fill: preset, stroke: preset, fillRule: "" };
-}
-
-/** A vector preset has one outline: a uniform border, or the first side of a per-side one. */
-function vectorStroke(element: ShapeElement): Stroke | null {
-  const border = element.box.border;
-  switch (border.kind) {
-    case "none":
-      return null;
-    case "uniform":
-      return border.stroke;
-    case "perSide":
-      return border.top ?? border.right ?? border.bottom ?? border.left;
-    default:
-      return assertNever(border);
-  }
 }
 
 function ShapeTextLayer(properties: Readonly<{ element: ShapeElement; context: SlideRenderContext; inset: TextInset }>): ReactElement {
@@ -487,7 +474,6 @@ function TableCellView(
   const { cell, context } = properties;
   const theme = context.theme;
   const fill = fillRendering({ fill: cell.fill, theme, assetAddress: context.assetAddress });
-  const borders = cell.borders;
   // The cell IS the text layer: its margins are the cell's own padding and its paragraphs sit
   // directly inside it, so an HTML editor sees a plain cell, not a positioned box inside one.
   const style: CSSProperties = {
@@ -497,10 +483,7 @@ function TableCellView(
     overflowWrap: "break-word",
     ...fill.background,
     ...cellSeamCover({ cell, theme, rowIndex: properties.rowIndex, columnIndex: properties.columnIndex, element: properties.element }),
-    borderTop: borders.top === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.top }, theme).borderTop,
-    borderRight: borders.right === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.right }, theme).borderRight,
-    borderBottom: borders.bottom === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.bottom }, theme).borderBottom,
-    borderLeft: borders.left === null ? "0 none" : borderDeclarations({ kind: "uniform", stroke: borders.left }, theme).borderLeft,
+    ...borderDeclarations({ kind: "perSide", ...cell.borders }, theme),
     // The three vertical alignments are also the stylesheet's names for them.
     verticalAlign: cell.textBox.verticalAlignment,
   };

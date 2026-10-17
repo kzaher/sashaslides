@@ -24,9 +24,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { assertNever } from "../../contracts/assert-never.ts";
 import type { Gesture } from "../../contracts/editor-state.ts";
 import type { SlideId } from "../../contracts/ids.ts";
+import { CLOSED_MESSAGE, closedReasonOf } from "../../shared/access-refusals.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { EditableCanvas } from "../canvas/editable-canvas.tsx";
-import { CLOSED_EXPLANATION, closedReason } from "../chrome/access.ts";
 import { CommentRail } from "../chrome/comment-rail.tsx";
 import { DialogLayer } from "../chrome/dialogs.tsx";
 import { Filmstrip } from "../chrome/filmstrip.tsx";
@@ -73,7 +73,7 @@ function EditorScreen(properties: Readonly<{ gesture: GestureContext; presentati
       side: state.chrome.commentsOpen ? "comments" : state.chrome.propertiesPanelOpen ? "properties" : "none",
       presentation: state.presentation,
       document: state.document,
-      closed: closedReason(state.collaboration),
+      closed: closedReasonOf(state.collaboration),
     }),
     shallowEqual,
   );
@@ -110,7 +110,7 @@ function EditorScreen(properties: Readonly<{ gesture: GestureContext; presentati
       {view.closed === null ? null : (
         <div className={VIEW_CLASS.readOnlyBanner} role="alert">
           <strong>Read-only.</strong>
-          <span>{CLOSED_EXPLANATION[view.closed]}</span>
+          <span>{CLOSED_MESSAGE[view.closed]}</span>
         </div>
       )}
       <Toolbar />

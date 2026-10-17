@@ -9,6 +9,8 @@
 // matrices the Filter Effects specification defines, in sRGB (how browsers apply the shorthand
 // filter functions).
 
+import { parseColourText } from "../../shared/colour-text.ts";
+
 /** An opaque colour as 0..255 channels. */
 export type OpaqueColour = Readonly<{ red: number; green: number; blue: number }>;
 
@@ -16,23 +18,9 @@ export type ParsedColour = Readonly<{ colour: OpaqueColour; alpha: number }>;
 
 /** Parses "#rrggbb" or "rgba(r, g, b, a)"; null for anything else. */
 export function parseColour(text: string): ParsedColour | null {
-  const hexadecimal = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(text.trim());
-  if (hexadecimal !== null) {
-    return {
-      colour: {
-        red: parseInt(hexadecimal[1] ?? "0", 16),
-        green: parseInt(hexadecimal[2] ?? "0", 16),
-        blue: parseInt(hexadecimal[3] ?? "0", 16),
-      },
-      alpha: 1,
-    };
-  }
-  const functional = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(text.trim());
-  if (functional === null) return null;
-  return {
-    colour: { red: Number(functional[1]), green: Number(functional[2]), blue: Number(functional[3]) },
-    alpha: functional[4] === undefined ? 1 : Number(functional[4]),
-  };
+  const parsed = parseColourText(text);
+  if (parsed === null) return null;
+  return { colour: { red: parsed.red, green: parsed.green, blue: parsed.blue }, alpha: parsed.alpha };
 }
 
 /** `over` alpha-composited onto an opaque `under`. */

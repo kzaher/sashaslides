@@ -22,14 +22,12 @@ import {
   assertNever,
   plainText,
   type AnimationEffect,
-  type AssetId,
   type AssetRecord,
   type ClipboardContent,
   type ClipboardPayload,
   type DocumentCommand,
   type EditorState,
   type ElementSnapshot,
-  type Fill,
   type PastedContent,
   type PastedText,
   type TextBody,
@@ -40,7 +38,8 @@ import {
   type TransitionScriptId,
   type TransitionScriptRecord,
 } from "../../contracts/index.ts";
-import { boundsOfElements, findSlide, findSlideIndex, leavesOf, slideBox, subtreeOf } from "./document-lookup.ts";
+import { referencedAssetIdsOf } from "../../shared/asset-references.ts";
+import { boundsOfElements, findSlide, findSlideIndex, leavesOf, slideBox } from "./document-lookup.ts";
 import { queueEnvelope } from "./editor-queue.ts";
 import { selectedElements } from "./editor-selection.ts";
 import { createShape, elementIdsOf, reidentifyElement, reidentifySlide, textBodyFromPlainText, translateElement } from "./element-factory.ts";
@@ -91,27 +90,6 @@ export const clipboardContentFor = (state: EditorState, operation: ClipboardPayl
       return assertNever(selection);
   }
 };
-
-/** The view's cut handler has written the clipboard; remove what was cut. */
-export function cutSelection(state: EditorState): EditorState {
-  const selection = state.selection;
-  switch (selection.kind) {
-    case "elements":
-      return queueEnvelope(state, {
-        commands: [{ kind: "deleteElements", slideId: selection.slideId, elementIds: selection.elementIds }],
-        selectionAfter: { kind: "none" },
-        mergeWithPrevious: false,
-      });
-    case "slides":
-      return queueEnvelope(state, { commands: [{ kind: "deleteSlides", slideIds: selection.slideIds }], selectionAfter: { kind: "none" }, mergeWithPrevious: false });
-    case "none":
-    case "text":
-    case "tableCells":
-      return state;
-    default:
-      return assertNever(selection);
-  }
-}
 
 export function pasteContent(state: EditorState, content: PastedContent, at: Point | null): EditorState {
   switch (content.kind) {
@@ -321,42 +299,8 @@ function registerMissingAssets(state: EditorState, assets: readonly AssetRecord[
 }
 
 function assetsUsedBy(state: EditorState, elements: readonly ElementSnapshot[], slides: readonly SlideSnapshot[] = []): readonly AssetRecord[] {
-  const used = new Set<AssetId>();
-  for (const element of elements.flatMap(subtreeOf)) for (const assetId of assetIdsOfElement(element)) used.add(assetId);
-  for (const slide of slides) for (const assetId of assetIdsOfFill(slide.background)) used.add(assetId);
+  const used = new Set(referencedAssetIdsOf({ backgrounds: slides.map((slide) => slide.background), elements }));
   return state.document.assets.filter((asset) => used.has(asset.id));
-}
-
-function assetIdsOfElement(element: ElementSnapshot): readonly AssetId[] {
-  switch (element.kind) {
-    case "image":
-      return [element.assetId, ...assetIdsOfFill(element.box.fill)];
-    case "shape":
-      return assetIdsOfFill(element.box.fill);
-    case "table":
-      return element.cells.flatMap((cell) => assetIdsOfFill(cell.fill));
-    case "line":
-    case "group":
-    case "unsupported":
-      return [];
-    default:
-      return assertNever(element);
-  }
-}
-
-function assetIdsOfFill(fill: Fill | null): readonly AssetId[] {
-  if (fill === null) return [];
-  switch (fill.kind) {
-    case "image":
-      return [fill.assetId];
-    case "none":
-    case "solid":
-    case "linearGradient":
-    case "radialGradient":
-      return [];
-    default:
-      return assertNever(fill);
-  }
 }
 
 /** The scripts the slides' transitions and build steps name, so a paste into another deck carries them. */

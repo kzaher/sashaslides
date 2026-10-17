@@ -11,7 +11,7 @@ import { assertNever } from "../../contracts/assert-never.ts";
 import { DECK_PAGE_PATH_PREFIX } from "../../contracts/deck-api.ts";
 import { createDeckApiClient, okBodyOf, problemOf, sessionCredentials, signInAddressOf, type ApiResult, type DeckApiClient } from "../api/deck-api-client.ts";
 import { ShareDialogContainer } from "../share/share-dialog.tsx";
-import { WEB_ROOT_ID } from "../web-page.ts";
+import { PAGE_ROOT_ID } from "../../view/application/editor-page.ts";
 import { DeckListPage, type DeckListActions } from "./deck-list-page.tsx";
 import { INITIAL_DECK_LIST_STATE, reduceDeckList, type DeckListEvent } from "./deck-list-state.ts";
 
@@ -127,7 +127,7 @@ function DeckListApplication(properties: Readonly<{ api: DeckApiClient; navigate
   return <DeckListPage state={state} now={now} actions={actions} renderShareDialog={(deckId) => <ShareDialogContainer deck={api.deck(deckId)} onClose={actions.closeDialog} />} />;
 }
 
-const container = document.getElementById(WEB_ROOT_ID);
+const container = document.getElementById(PAGE_ROOT_ID);
 if (container !== null) {
   document.title = "Your decks - Sasha Slides";
   const api = createDeckApiClient({ origin: window.location.origin, fetch: (address, init) => window.fetch(address, init), credentials: sessionCredentials("cookie") });

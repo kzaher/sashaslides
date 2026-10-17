@@ -4,10 +4,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import * as Y from "yjs";
-import type { CommandRejection, CustomOutline, DocumentCommand, DocumentStore, ElementId, ElementSnapshot, PeerPresence, SlideId, TextTarget } from "../contracts/index.ts";
+import type { CommandRejection, CustomOutline, DocumentCommand, DocumentStore, ElementId, ElementPatch, ElementSnapshot, PeerPresence, SlideId, TextTarget } from "../contracts/index.ts";
 import { identityFrame } from "../contracts/index.ts";
 import { childMap, documentRoots, elementMapOf, slideMapOf, textOf } from "./document-paths.ts";
-import { derivedGroupFrame, flattenElements } from "./element-tree.ts";
+import { flattenElements } from "./element-tree.ts";
+import { derivedGroupFrame } from "../shared/element-tree.ts";
 import { createMemoryDiscussionStore, createMemoryPresenceHub, reduceDiscussionLog } from "./index.ts";
 import { compareOrderedSiblings, isCanonicalOrderKey, mintOrderKeys, planGapKeys, planReorderKeys, type OrderedSibling } from "./order-keys.ts";
 import {
@@ -156,6 +157,45 @@ describe("command rejections", () => {
       const outcome = store.apply(envelope({ commands: row.commands(context) }));
       assert.equal(outcome.kind === "rejected" ? outcome.rejection.reason : null, row.reason, JSON.stringify(outcome));
       if (row.reason !== null) assert.deepEqual(Y.encodeStateVector(sharedDocument), before);
+    });
+  }
+});
+
+describe("element patch values", () => {
+  // Total over the patch's fields, so a new field needs a row here as well as a check (command-validation.ts
+  // ELEMENT_PATCH_CHECKS). The asset id is checked against the document instead (row "an image of an unregistered asset").
+  const damaged: Readonly<Record<Exclude<keyof ElementPatch, "assetId">, unknown>> = {
+    name: 5,
+    description: ["text"],
+    morphKey: null,
+    // An inherited Object method's name must read as a newer client's kind, never be called as a check.
+    fill: { kind: "constructor" },
+    border: { kind: "uniform" },
+    cornerRadius: { kind: "uniform", radius: -1 },
+    shadow: "none",
+    opacity: 2,
+    textBox: { verticalAlignment: "top" },
+    preset: 3,
+    crop: { left: 2, top: 0, right: 0, bottom: 0 },
+    stroke: { width: 1, colour: { kind: "literal", hexadecimal: { toString: () => "#112233" }, alpha: 1 }, dash: "solid" },
+    startArrow: true,
+    endArrow: {},
+    routing: 0,
+  };
+  for (const [field, candidate] of Object.entries(damaged)) {
+    test(`a damaged ${field} is refused at its path and writes nothing`, () => {
+      const { store, sharedDocument } = createTestStore({ seed: "blankDeck" });
+      const slideId = store.snapshot().slides[0]?.id ?? mint("slide");
+      const shapeId = mint("element");
+      applyOrThrow(store, envelope({ commands: [{ kind: "insertElements", slideId, placement: { kind: "front" }, elements: [shape({ id: shapeId })] }] }));
+      const before = Y.encodeStateVector(sharedDocument);
+      // Deliberately ill-typed: the patch carries what a damaged or forged client could send.
+      const patch = { [field]: candidate } as ElementPatch;
+      const outcome = store.apply(envelope({ commands: [{ kind: "updateElements", slideId, elementIds: [shapeId], patch }] }));
+      const rejection = outcome.kind === "rejected" ? outcome.rejection : null;
+      assert.equal(rejection?.reason, "invalidValue", JSON.stringify(outcome));
+      assert.ok(rejection?.reason === "invalidValue" && rejection.path.endsWith(`.patch.${field}`), JSON.stringify(rejection));
+      assert.deepEqual(Y.encodeStateVector(sharedDocument), before);
     });
   }
 });

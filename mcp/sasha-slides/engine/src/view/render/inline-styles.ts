@@ -26,6 +26,8 @@ import { assertNever } from "../../contracts/assert-never.ts";
 import type { ThemeSnapshot } from "../../contracts/document.ts";
 import type { Frame } from "../../contracts/geometry.ts";
 import type { AssetAddressResolver } from "../../contracts/render.ts";
+import { parseHexadecimalColour } from "../../shared/colour-text.ts";
+import { roundTo } from "../../shared/numbers.ts";
 import { fontFamilyValue } from "./font-families.ts";
 import type {
   Border,
@@ -370,9 +372,7 @@ export function verticalJustification(alignment: VerticalAlignment): "flex-start
 
 /** Numbers in styles keep at most three decimals, so markup stays stable and readable. */
 export function roundNumber(value: number): number {
-  const rounded = Math.round(value * 1000) / 1000;
-  // `-0` would print as "0" anyway, but keep values canonical for equality in tests.
-  return rounded === 0 ? 0 : rounded;
+  return roundTo(value, 3);
 }
 
 /** The hatched look of a missing image or a value from a newer version (SPEC.md section 8). */
@@ -388,12 +388,9 @@ const MISSING_IMAGE_BACKGROUND: CSSProperties = PLACEHOLDER_HATCHING;
 function hexadecimalWithAlpha(hexadecimal: string, alpha: number): string {
   const normalised = hexadecimal.toLowerCase();
   if (alpha >= 1) return normalised;
-  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/.exec(normalised);
-  if (match === null) return normalised;
-  const red = parseInt(match[1] ?? "0", 16);
-  const green = parseInt(match[2] ?? "0", 16);
-  const blue = parseInt(match[3] ?? "0", 16);
-  return `rgba(${red}, ${green}, ${blue}, ${roundNumber(Math.max(0, alpha))})`;
+  const parsed = parseHexadecimalColour(normalised);
+  if (parsed === null) return normalised;
+  return `rgba(${parsed.red}, ${parsed.green}, ${parsed.blue}, ${roundNumber(Math.max(0, alpha))})`;
 }
 
 function gradientStopsValue(stops: readonly GradientStop[], theme: ThemeSnapshot): string {

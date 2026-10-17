@@ -3,7 +3,7 @@
 // drafts in `pendingDiscussion`, and the discussion feedback encodes text anchors and submits them.
 // The authority's log comes back as `discussionChanged`; each verdict as `discussionSettled`.
 // A viewer (or anyone on a closed connection) is refused at the door, with a notice saying why
-// (access.ts); the authority would refuse them too.
+// (shared/access-refusals.ts); the authority would refuse them too.
 //
 // SENT IS AN EVENT. The discussion feedback reports `discussionRequestSent` as it hands a request to
 // the authority, and `markDiscussionSent` moves it from `pendingDiscussion` to `inFlightDiscussion`.
@@ -27,12 +27,12 @@ import {
   type TextRange,
   type ThreadId,
 } from "../../contracts/index.ts";
-import { commentingRefusal } from "./access.ts";
+import { commentingRefusal } from "../../shared/access-refusals.ts";
+import { textTargetElementId } from "../../shared/element-tree.ts";
 import { findElement, findSlide, slideBox } from "./document-lookup.ts";
 import { optimisticText, raiseNotice, refuse } from "./editor-queue.ts";
-import { elementIdOfTarget } from "./editor-selection.ts";
 import { createIdMinter } from "./id-minter.ts";
-import { plainTextOfFlat } from "./text-model.ts";
+import { plainTextOfRange } from "../../shared/flat-text.ts";
 
 export function openComposer(
   state: EditorState,
@@ -177,10 +177,10 @@ function composerTarget(
   options: Readonly<{ slideId: SlideId; elementId: ElementId | null; textRange: TextRange | null }>,
 ): CommentTargetDraft {
   const range = options.textRange;
-  const rangeElementId = range === null ? null : elementIdOfTarget(range.target);
+  const rangeElementId = range === null ? null : textTargetElementId(range.target);
   if (range !== null && rangeElementId !== null) {
     const items = optimisticText(state, range.target);
-    const quotedText = items === null ? "" : plainTextOfFlat(items, Math.min(range.start, range.end), Math.max(range.start, range.end));
+    const quotedText = items === null ? "" : plainTextOfRange({ items, start: range.start, end: range.end, slideNumber: null });
     return { kind: "text", elementId: rangeElementId, range, quotedText };
   }
   if (options.elementId !== null) return { kind: "element", elementId: options.elementId };

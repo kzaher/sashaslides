@@ -16,6 +16,7 @@ import {
   type ElementId,
   type ElementSnapshot,
   type FontStyleName,
+  type IdSeed,
   type ListGlyph,
   type ListId,
   type ListMembership,
@@ -37,28 +38,22 @@ import { findElementPath, findPlaceholderRole, findSlide, leavesOf, tableOf, tex
 import { createIdMinter } from "./id-minter.ts";
 import { optimisticText, queueEnvelope, queueHistory } from "./editor-queue.ts";
 import { selectedElements, textSelectionOf, type TextSelection } from "./editor-selection.ts";
+import { characterLengthAt, characterLengthBefore, LINE_BREAK_CHARACTER, nextWordBoundary, previousWordBoundary } from "./text-model.ts";
 import {
-  characterLengthAt,
-  characterLengthBefore,
-  LINE_BREAK_CHARACTER,
-  nextWordBoundary,
+  bodyFromFlat,
   paragraphEndAt,
   paragraphMarkIndices,
   paragraphStartAt,
+  paragraphStyleAt,
   paragraphStylesOverlapping,
-  patchRunStyle,
-  previousWordBoundary,
+  patchStyle,
   runStyleAt,
-  bodyFromFlat,
   type FlatText,
-} from "./text-model.ts";
-
-/** List levels run 0..8 (nine levels, as Slides). */
-export const MAXIMUM_LIST_LEVEL = 8;
+} from "../../shared/flat-text.ts";
+import { clampListLevel, LIST_GLYPH, type ListFamily } from "../../shared/list-glyphs.ts";
 
 export function reduceTextInput(state: EditorState, input: TextInput): EditorState {
-  const selection = textSelectionOf(state.selection);
-  if (selection === null) {
+  if (textSelectionOf(state.selection) === null) {
     switch (input.kind) {
       case "history":
         return queueHistory(state, input.direction);
@@ -66,9 +61,9 @@ export function reduceTextInput(state: EditorState, input: TextInput): EditorSta
         return state;
     }
   }
-  const items = optimisticText(state, selection.target);
-  if (items === null) return state;
-  const range = rangeOf(selection);
+  const context = textContextOf(state);
+  if (context === null) return state;
+  const { selection, items, range } = context;
   switch (input.kind) {
     case "insertText":
       return typeText({ state, selection, items, text: input.text, merge: true });
@@ -154,10 +149,9 @@ function enteredGroupFor(options: Readonly<{ state: EditorState; slide: SlideSna
 }
 
 export function changeTextSelection(state: EditorState, anchor: number, focus: number): EditorState {
-  const selection = textSelectionOf(state.selection);
-  if (selection === null) return state;
-  const items = optimisticText(state, selection.target);
-  if (items === null) return state;
+  const context = textContextOf(state);
+  if (context === null) return state;
+  const { selection, items } = context;
   const clampedAnchor = clamp(anchor, items);
   const clampedFocus = clamp(focus, items);
   if (clampedAnchor === selection.anchor && clampedFocus === selection.focus) return state;
@@ -234,7 +228,7 @@ export function applyRunStyle(state: EditorState, patch: RunStylePatch, clear: r
   if (selection !== null) {
     const range = rangeOf(selection);
     if (range.end === range.start) {
-      return { ...state, textEditing: { ...state.textEditing, typingStyle: patchRunStyle(state.textEditing.typingStyle, patch, clear) } };
+      return { ...state, textEditing: { ...state.textEditing, typingStyle: patchStyle(state.textEditing.typingStyle, patch, clear) } };
     }
     return queueTextOperations({
       state,
@@ -244,7 +238,7 @@ export function applyRunStyle(state: EditorState, patch: RunStylePatch, clear: r
       merge: false,
     });
   }
-  return formatWholeBodies(state, (length) => [{ kind: "formatRuns", index: 0, length, patch, clear }]);
+  return formatWholeBodies(state, (items) => [{ kind: "formatRuns", index: 0, length: items.length, patch, clear }]);
 }
 
 /**
@@ -266,21 +260,19 @@ export function applyParagraphStyle(state: EditorState, patch: ParagraphStylePat
       merge: false,
     });
   }
-  return formatWholeBodies(state, (length) => [{ kind: "formatParagraphs", index: 0, length, patch, clear }]);
+  return formatWholeBodies(state, (items) => [{ kind: "formatParagraphs", index: 0, length: items.length, patch, clear }]);
 }
 
 /** Bulleted or numbered: on when any overlapping paragraph is not already that kind of list. */
 export function toggleList(state: EditorState, list: "bulleted" | "numbered"): EditorState {
   const minter = createIdMinter(state.idSeed);
-  const glyph = LIST_GLYPH[list];
-  const selection = textSelectionOf(state.selection);
-  if (selection !== null) {
-    const items = optimisticText(state, selection.target);
-    if (items === null) return state;
-    const range = rangeOf(selection);
+  const glyph = TOGGLED_LIST_GLYPH[list];
+  const context = textContextOf(state);
+  if (context !== null) {
+    const { selection, items, range } = context;
     const styles = paragraphStylesOverlapping({ items, index: range.start, length: range.end - range.start });
     const memberships = styles.map((style) => listMembershipOf(style.list));
-    const allAlready = memberships.every((membership) => membership !== null && LIST_FAMILY[membership.glyph] === list);
+    const allAlready = memberships.every((membership) => membership !== null && LIST_GLYPH[membership.glyph].family === list);
     const existing = memberships.find((membership) => membership !== null) ?? null;
     const value: ListMembership | NoList = allAlready
       ? { kind: "none" }
@@ -293,9 +285,10 @@ export function toggleList(state: EditorState, list: "bulleted" | "numbered"): E
       merge: false,
     });
   }
+  if (textSelectionOf(state.selection) !== null) return state;
   const listId = minter.next("list");
-  return formatWholeBodies({ ...state, idSeed: minter.seed() }, (length) => [
-    { kind: "formatParagraphs", index: 0, length, patch: { list: { kind: "list", listId, glyph, level: 0 } }, clear: [] },
+  return formatWholeBodies({ ...state, idSeed: minter.seed() }, (items) => [
+    { kind: "formatParagraphs", index: 0, length: items.length, patch: { list: { kind: "list", listId, glyph, level: 0 } }, clear: [] },
   ]);
 }
 
@@ -315,7 +308,7 @@ export function chooseListGlyph(state: EditorState, glyph: ListGlyph): EditorSta
   };
   const operationsFor = (items: FlatText, index: number, length: number): readonly TextOperation[] => {
     const marks = [...paragraphMarkIndices({ items, index, length })];
-    const memberships = marks.map((mark) => listMembershipOf(paragraphStylesOverlapping({ items, index: mark, length: 0 })[0]?.list));
+    const memberships = marks.map((mark) => listMembershipOf(paragraphStyleAt(items, mark).list));
     const joined = memberships.some((membership) => membership === null) ? listIdFor(memberships) : null;
     return marks.map((mark, position): TextOperation => {
       const membership = memberships[position] ?? null;
@@ -323,40 +316,27 @@ export function chooseListGlyph(state: EditorState, glyph: ListGlyph): EditorSta
       return { kind: "formatParagraphs", index: mark, length: 1, patch: { list }, clear: [] };
     });
   };
-  const selection = textSelectionOf(state.selection);
-  if (selection !== null) {
-    const items = optimisticText(state, selection.target);
-    if (items === null) return state;
-    const range = rangeOf(selection);
+  const context = textContextOf(state);
+  if (context !== null) {
+    const { selection, items, range } = context;
     const operations = operationsFor(items, range.start, range.end - range.start);
     return queueTextOperations({ state: { ...state, idSeed: minter.seed() }, target: selection.target, operations, caret: { anchor: selection.anchor, focus: selection.focus }, merge: false });
   }
-  const selected = selectedElements(state);
-  if (selected === null) return state;
-  const commands = selected.elements
-    .flatMap((element) => leavesOf(element))
-    .flatMap((element) => textTargetsOf(selected.slide.id, element))
-    .flatMap((target) => {
-      const items = optimisticText(state, target);
-      if (items === null) return [];
-      return [{ kind: "editText" as const, target, basedOnRevision: state.document.revision, operations: operationsFor(items, 0, items.length) }];
-    });
-  return queueEnvelope({ ...state, idSeed: minter.seed() }, { commands, selectionAfter: state.selection, mergeWithPrevious: false });
+  if (textSelectionOf(state.selection) !== null) return state;
+  // The ids are minted while the operations are built, so the seed is read after them.
+  return formatWholeBodies(state, (items) => operationsFor(items, 0, items.length), () => minter.seed());
 }
 
 /** Tab and Shift+Tab in a list: every overlapping list paragraph one level in or out. */
 export function changeListLevel(state: EditorState, delta: 1 | -1): EditorState {
-  const selection = textSelectionOf(state.selection);
-  if (selection === null) return state;
-  const items = optimisticText(state, selection.target);
-  if (items === null) return state;
-  const range = rangeOf(selection);
+  const context = textContextOf(state);
+  if (context === null) return state;
+  const { selection, items, range } = context;
   const operations: TextOperation[] = [];
   for (const markIndex of paragraphMarkIndices({ items, index: range.start, length: range.end - range.start })) {
-    const style = paragraphStylesOverlapping({ items, index: markIndex, length: 0 })[0];
-    const membership = listMembershipOf(style?.list);
+    const membership = listMembershipOf(paragraphStyleAt(items, markIndex).list);
     if (membership === null) continue;
-    const level = Math.max(0, Math.min(MAXIMUM_LIST_LEVEL, membership.level + delta));
+    const level = clampListLevel(membership.level + delta);
     if (level === membership.level) continue;
     operations.push({ kind: "formatParagraphs", index: markIndex, length: 1, patch: { list: { ...membership, level } }, clear: [] });
   }
@@ -365,20 +345,16 @@ export function changeListLevel(state: EditorState, delta: 1 | -1): EditorState 
 
 /** Whether Tab at this text selection changes a list level (true) or types a tab character. */
 export function selectionIsInList(state: EditorState): boolean {
-  const selection = textSelectionOf(state.selection);
-  if (selection === null) return false;
-  const items = optimisticText(state, selection.target);
-  if (items === null) return false;
-  const range = rangeOf(selection);
+  const context = textContextOf(state);
+  if (context === null) return false;
+  const { items, range } = context;
   return paragraphStylesOverlapping({ items, index: range.start, length: range.end - range.start }).some((style) => listMembershipOf(style.list) !== null);
 }
 
 export function insertAutomaticTextAtCaret(state: EditorState): EditorState {
-  const selection = textSelectionOf(state.selection);
-  if (selection === null) return state;
-  const items = optimisticText(state, selection.target);
-  if (items === null) return state;
-  const range = rangeOf(selection);
+  const context = textContextOf(state);
+  if (context === null) return state;
+  const { selection, items, range } = context;
   const style = { ...runStyleAt(items, range.start), ...state.textEditing.typingStyle };
   const operations: TextOperation[] = [];
   if (range.end > range.start) operations.push({ kind: "delete", index: range.start, length: range.end - range.start });
@@ -392,6 +368,14 @@ export function resolvedRunStyle(state: EditorState, target: TextTarget, patch: 
   const role = findPlaceholderRole(state.document, target);
   const placeholder = role === null ? {} : theme.placeholderStyles[role].run;
   return { ...theme.defaultRunStyle, ...placeholder, ...patch };
+}
+
+/** The text selection, its body as it WILL be once the queue applies, and the selected range; null outside text mode. */
+export function textContextOf(state: EditorState): Readonly<{ selection: TextSelection; items: FlatText; range: Readonly<{ start: number; end: number }> }> | null {
+  const selection = textSelectionOf(state.selection);
+  if (selection === null) return null;
+  const items = optimisticText(state, selection.target);
+  return items === null ? null : { selection, items, range: rangeOf(selection) };
 }
 
 export function rangeOf(selection: TextSelection): Readonly<{ start: number; end: number }> {
@@ -429,24 +413,9 @@ export function listMembershipOf(list: ListMembership | NoList | undefined): Lis
   }
 }
 
-const LIST_GLYPH: Readonly<Record<"bulleted" | "numbered", ListGlyph>> = { bulleted: "disc", numbered: "decimal" };
+const TOGGLED_LIST_GLYPH: Readonly<Record<ListFamily, ListGlyph>> = { bulleted: "disc", numbered: "decimal" };
 
 const TOGGLED_FONT_STYLE: Readonly<Record<FontStyleName, FontStyleName>> = { normal: "italic", italic: "normal" };
-
-const LIST_FAMILY: Readonly<Record<ListGlyph, "bulleted" | "numbered">> = {
-  disc: "bulleted",
-  circle: "bulleted",
-  square: "bulleted",
-  arrow: "bulleted",
-  star: "bulleted",
-  checkbox: "bulleted",
-  decimal: "numbered",
-  decimalZeroPadded: "numbered",
-  upperAlphabetic: "numbered",
-  lowerAlphabetic: "numbered",
-  upperRoman: "numbered",
-  lowerRoman: "numbered",
-};
 
 export function toggledPatch(current: RunStyle, format: "bold" | "italic" | "underline" | "strikethrough"): RunStylePatch {
   switch (format) {
@@ -597,15 +566,18 @@ function toggleFormat(
 ): EditorState {
   const range = rangeOf(options.selection);
   const current = resolvedRunStyle(options.state, options.selection.target, {
-    ...(range.end > range.start ? runStyleAt(options.items, range.start + 1) : runStyleAt(options.items, range.start)),
+    ...styleForReplacing(options.items, range.start, range.end),
     ...options.state.textEditing.typingStyle,
   });
   const patch = toggledPatch(current, options.format);
   return applyRunStyle(options.state, patch, []);
 }
 
-/** One envelope formatting every text body of the selected elements (shapes, and table cells). */
-function formatWholeBodies(state: EditorState, operationsFor: (length: number) => readonly TextOperation[]): EditorState {
+/**
+ * One envelope formatting every text body of the selected elements (shapes, and table cells).
+ * `seedAfter` is the id seed once every body's operations are built (they may mint list ids).
+ */
+function formatWholeBodies(state: EditorState, operationsFor: (items: FlatText) => readonly TextOperation[], seedAfter: () => IdSeed = () => state.idSeed): EditorState {
   const selected = selectedElements(state);
   if (selected === null) return state;
   const commands = selected.elements
@@ -614,9 +586,9 @@ function formatWholeBodies(state: EditorState, operationsFor: (length: number) =
     .flatMap((target) => {
       const items = optimisticText(state, target);
       if (items === null) return [];
-      return [{ kind: "editText" as const, target, basedOnRevision: state.document.revision, operations: operationsFor(items.length) }];
+      return [{ kind: "editText" as const, target, basedOnRevision: state.document.revision, operations: operationsFor(items) }];
     });
-  return queueEnvelope(state, { commands, selectionAfter: state.selection, mergeWithPrevious: false });
+  return queueEnvelope({ ...state, idSeed: seedAfter() }, { commands, selectionAfter: state.selection, mergeWithPrevious: false });
 }
 
 function textTargetsOf(slideId: SlideId, element: ElementSnapshot): readonly TextTarget[] {

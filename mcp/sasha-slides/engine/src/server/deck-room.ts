@@ -35,10 +35,10 @@
 
 import type { SchedulerLike } from "rxjs";
 import * as decoding from "lib0/decoding";
-import * as encoding from "lib0/encoding";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 import { assertNever } from "../contracts/assert-never.ts";
+import { awarenessFrame as sharedAwarenessFrame, syncStepOneFrame, syncStepTwoFrame, syncUpdateFrame as sharedSyncUpdateFrame } from "../shared/sync-frames.ts";
 import {
   BINARY_MESSAGE_TYPE,
   COLLABORATION_LIMITS,
@@ -63,6 +63,7 @@ import { readProtectedFields, writeProtectedFields } from "../model/protected-fi
 import { createAwarenessRelay } from "./awareness-relay.ts";
 import { parseClientMessage } from "./client-messages.ts";
 import { decideDiscussionRequest, discussionAuthorityFromLog, type DiscussionAuthorityState } from "./discussion-authority.ts";
+import { mergeDocumentUpdates } from "./document-updates.ts";
 import { correctionsFor } from "./protected-field-guard.ts";
 import { DEFAULT_RATE_LIMIT_POLICY, initialRateLimitState, takeToken, type RateLimitPolicy, type RateLimitState } from "./rate-limit.ts";
 
@@ -319,11 +320,7 @@ export function createDeckRoom(options: CreateDeckRoomOptions): DeckRoom {
           requireResynchronise(record, "updateMalformed");
           return;
         }
-        const encoder = encoding.createEncoder();
-        encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.sync);
-        encoding.writeVarUint(encoder, syncProtocol.messageYjsSyncStep2);
-        encoding.writeVarUint8Array(encoder, missing);
-        record.port.send({ kind: "binary", bytes: encoding.toUint8Array(encoder) });
+        record.port.send({ kind: "binary", bytes: syncStepTwoFrame(missing) });
         return;
       }
       case syncProtocol.messageYjsSyncStep2:
@@ -402,7 +399,7 @@ export function createDeckRoom(options: CreateDeckRoomOptions): DeckRoom {
       requireResynchronise(record, "updateMalformed");
     }
     if (captured.length === 0) return;
-    const merged = captured.length === 1 && captured[0] !== undefined ? captured[0] : Y.mergeUpdates(captured);
+    const merged = mergeDocumentUpdates(captured);
     documentBytes += merged.length;
     broadcast({ frame: syncUpdateFrame(merged), except: record.id, permission: "read" });
     if (correctionCount > 0) {
@@ -527,10 +524,7 @@ export function createDeckRoom(options: CreateDeckRoomOptions): DeckRoom {
         members: membersFor(role),
         discussionSequence: authority.snapshot.sequence,
       });
-      const encoder = encoding.createEncoder();
-      encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.sync);
-      syncProtocol.writeSyncStep1(encoder, sharedDocument);
-      port.send({ kind: "binary", bytes: encoding.toUint8Array(encoder) });
+      port.send({ kind: "binary", bytes: syncStepOneFrame(sharedDocument) });
       const states = awareness.statesFor(id);
       if (states !== null) port.send(awarenessFrame(states));
       sendMessage(record, { kind: "discussionEntries", entries: discussionLog.filter((entry) => entry.sequence > discussionAfter) });
@@ -622,17 +616,11 @@ type ConnectionRecord = {
 };
 
 function syncUpdateFrame(update: Uint8Array): RoomFrame {
-  const encoder = encoding.createEncoder();
-  encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.sync);
-  syncProtocol.writeUpdate(encoder, update);
-  return { kind: "binary", bytes: encoding.toUint8Array(encoder) };
+  return { kind: "binary", bytes: sharedSyncUpdateFrame(update) };
 }
 
 function awarenessFrame(update: Uint8Array): RoomFrame {
-  const encoder = encoding.createEncoder();
-  encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.awareness);
-  encoding.writeVarUint8Array(encoder, update);
-  return { kind: "binary", bytes: encoding.toUint8Array(encoder) };
+  return { kind: "binary", bytes: sharedAwarenessFrame(update) };
 }
 
 /** A binary sync step 2 or update: the frames that change the document. */
@@ -656,7 +644,7 @@ function takePendingStructures(sharedDocument: Y.Doc): Uint8Array {
   if (store.pendingDs !== null) parts.push(Y.convertUpdateFormatV2ToV1(store.pendingDs));
   store.pendingStructs = null;
   store.pendingDs = null;
-  return parts.length === 1 && parts[0] !== undefined ? parts[0] : Y.mergeUpdates(parts);
+  return mergeDocumentUpdates(parts);
 }
 
 function describe(cause: unknown): string {

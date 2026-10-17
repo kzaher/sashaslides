@@ -17,7 +17,7 @@
 //    of every element it removed in the same transaction, so one undo restores both.
 
 import * as Y from "yjs";
-import type { CommandAuthor, DocumentCommand, ElementPatch, TableCellPatch, TransitionScriptSaveApproval, TransitionScriptDraft } from "../contracts/commands.ts";
+import type { CommandAuthor, DocumentCommand, ElementPatch, TableCellPatch, TableCommand, TransitionScriptSaveApproval, TransitionScriptDraft } from "../contracts/commands.ts";
 import type { TransitionApproval } from "../contracts/document.ts";
 import type { AnimationStepPatch } from "../contracts/animations.ts";
 import type { ElementId, RandomSource, SlideId, TableColumnId, TableRowId } from "../contracts/ids.ts";
@@ -79,10 +79,8 @@ export function applyCommand(context: ApplicationContext, command: DocumentComma
       return;
     }
     case "insertSlides": {
-      const siblings = slideSiblings(roots);
-      const gapIndex = command.after === null ? 0 : siblings.findIndex((sibling) => sibling.id === command.after) + 1;
-      const keys = planGapKeys({ siblings, gapIndex, count: command.slides.length, random });
-      writeSlidePositions(roots, keys.rekeyed);
+      const keys = planInsert({ siblings: slideSiblings(roots), after: command.after, count: command.slides.length, random });
+      writePositions(roots.slides, SLIDE_KEY.position, keys.rekeyed);
       command.slides.forEach((slide, index) => writeSlide({ slides: roots.slides, slide, key: keys.inserted[index] ?? fallbackKey(random), random }));
       return;
     }
@@ -90,14 +88,8 @@ export function applyCommand(context: ApplicationContext, command: DocumentComma
       for (const slideId of command.slideIds) roots.slides.delete(slideId);
       return;
     case "moveSlides": {
-      const moving = new Set<string>(command.slideIds);
-      const all = slideSiblings(roots);
-      const moved = all.filter((sibling) => moving.has(sibling.id));
-      const remaining = all.filter((sibling) => !moving.has(sibling.id));
-      const gapIndex = command.after === null ? 0 : remaining.findIndex((sibling) => sibling.id === command.after) + 1;
-      const keys = planGapKeys({ siblings: remaining, gapIndex, count: moved.length, random });
-      writeSlidePositions(roots, keys.rekeyed);
-      writeSlidePositions(roots, new Map(moved.map((sibling, index) => [sibling.id, keys.inserted[index] ?? sibling.key])));
+      const owner = { map: roots.slides, positionKey: SLIDE_KEY.position };
+      moveSiblings({ owner, siblings: slideSiblings(roots), movingIds: command.slideIds, after: command.after, random });
       return;
     }
     case "setSlideProperties": {
@@ -179,9 +171,8 @@ export function applyCommand(context: ApplicationContext, command: DocumentComma
       const animations = animationsMapOf({ roots, slideId: command.slideId });
       if (animations === null) return;
       const siblings = orderedChildren(animations).map(({ id, key }): OrderedSibling => ({ id, key }));
-      const gapIndex = command.after === null ? 0 : siblings.findIndex((sibling) => sibling.id === command.after) + 1;
-      const keys = planGapKeys({ siblings, gapIndex, count: command.steps.length, random });
-      writeStepPositions(animations, keys.rekeyed);
+      const keys = planInsert({ siblings, after: command.after, count: command.steps.length, random });
+      writePositions(animations, ANIMATION_STEP_KEY.position, keys.rekeyed);
       command.steps.forEach((step, index) => writeAnimationStep({ animations, step, key: keys.inserted[index] ?? fallbackKey(random) }));
       return;
     }
@@ -197,14 +188,9 @@ export function applyCommand(context: ApplicationContext, command: DocumentComma
     case "moveAnimationSteps": {
       const animations = animationsMapOf({ roots, slideId: command.slideId });
       if (animations === null) return;
-      const moving = new Set<string>(command.stepIds);
-      const all = orderedChildren(animations).map(({ id, key }): OrderedSibling => ({ id, key }));
-      const moved = all.filter((sibling) => moving.has(sibling.id));
-      const remaining = all.filter((sibling) => !moving.has(sibling.id));
-      const gapIndex = command.after === null ? 0 : remaining.findIndex((sibling) => sibling.id === command.after) + 1;
-      const keys = planGapKeys({ siblings: remaining, gapIndex, count: moved.length, random });
-      writeStepPositions(animations, keys.rekeyed);
-      writeStepPositions(animations, new Map(moved.map((sibling, index) => [sibling.id, keys.inserted[index] ?? sibling.key])));
+      const owner = { map: animations, positionKey: ANIMATION_STEP_KEY.position };
+      const siblings = orderedChildren(animations).map(({ id, key }): OrderedSibling => ({ id, key }));
+      moveSiblings({ owner, siblings, movingIds: command.stepIds, after: command.after, random });
       return;
     }
     case "deleteAnimationSteps": {
@@ -225,11 +211,7 @@ export function applyCommand(context: ApplicationContext, command: DocumentComma
 function animationsMapOf(options: Readonly<{ roots: DocumentRoots; slideId: SlideId }>): Y.Map<unknown> | null {
   const slide = slideMapOf(options.roots, options.slideId);
   if (slide === null) return null;
-  const existing = childMap(slide, SLIDE_KEY.animations);
-  if (existing !== null) return existing;
-  const created = new Y.Map<unknown>();
-  slide.set(SLIDE_KEY.animations, created);
-  return created;
+  return ensureMap(slide, SLIDE_KEY.animations);
 }
 
 function patchAnimationStep(options: Readonly<{ map: Y.Map<unknown>; patch: AnimationStepPatch }>): void {
@@ -240,10 +222,6 @@ function patchAnimationStep(options: Readonly<{ map: Y.Map<unknown>; patch: Anim
   if (patch.durationMilliseconds !== undefined) map.set(ANIMATION_STEP_KEY.durationMilliseconds, patch.durationMilliseconds);
   if (patch.delayMilliseconds !== undefined) map.set(ANIMATION_STEP_KEY.delayMilliseconds, patch.delayMilliseconds);
   if (patch.easing !== undefined) map.set(ANIMATION_STEP_KEY.easing, patch.easing);
-}
-
-function writeStepPositions(animations: Y.Map<unknown>, keys: ReadonlyMap<string, string>): void {
-  for (const [id, key] of keys) childMap(animations, id)?.set(ANIMATION_STEP_KEY.position, key);
 }
 
 /** Delete every build step whose element is no longer on the slide (see the header). */
@@ -271,7 +249,7 @@ export function dissolveGroup(options: Readonly<{ elementsMap: Y.Map<unknown>; g
   const gapIndex = Math.max(0, siblings.findIndex((sibling) => sibling.id === groupId));
   const others = siblings.filter((sibling) => sibling.id !== groupId);
   const keys = planGapKeys({ siblings: others, gapIndex, count: children.length, random });
-  writeElementPositions(elementsMap, keys.rekeyed);
+  writePositions(elementsMap, ELEMENT_KEY.position, keys.rekeyed);
   children.forEach((child, index) => {
     child.map.set(ELEMENT_KEY.groupId, parent);
     child.map.set(ELEMENT_KEY.position, keys.inserted[index] ?? child.key);
@@ -291,7 +269,7 @@ export function normalisedSiblings(
   const displaced = new Set<string>(parent === null ? [...structure.displaced] : []);
   if (displaced.size === 0 || isAscending(siblings)) return siblings;
   const changes = planReorderKeys({ order: siblings, moved: displaced, random: options.random });
-  writeElementPositions(options.elementsMap, changes);
+  writePositions(options.elementsMap, ELEMENT_KEY.position, changes);
   return siblings.map((sibling) => ({ id: sibling.id, key: changes.get(sibling.id) ?? sibling.key }));
 }
 
@@ -365,12 +343,35 @@ function slideSiblings(roots: DocumentRoots): readonly OrderedSibling[] {
   return orderedChildren(roots.slides).map(({ id, key }) => ({ id, key }));
 }
 
-function writeSlidePositions(roots: DocumentRoots, keys: ReadonlyMap<string, string>): void {
-  for (const [id, key] of keys) childMap(roots.slides, id)?.set(SLIDE_KEY.position, key);
+/** Store each id's order key under `positionKey` of its child map in `parent`; ids that are gone are skipped. */
+function writePositions(parent: Y.Map<unknown>, positionKey: string, keys: ReadonlyMap<string, string>): void {
+  for (const [id, key] of keys) childMap(parent, id)?.set(positionKey, key);
 }
 
-function writeElementPositions(elementsMap: Y.Map<unknown>, keys: ReadonlyMap<string, string>): void {
-  for (const [id, key] of keys) childMap(elementsMap, id)?.set(ELEMENT_KEY.position, key);
+/** The keys for `count` new items inserted after the sibling `after` (the front when null). */
+function planInsert(options: Readonly<{ siblings: readonly OrderedSibling[]; after: string | null; count: number; random: RandomSource }>): ReturnType<typeof planGapKeys> {
+  const { siblings, after, count, random } = options;
+  const gapIndex = after === null ? 0 : siblings.findIndex((sibling) => sibling.id === after) + 1;
+  return planGapKeys({ siblings, gapIndex, count, random });
+}
+
+/** Move the siblings `movingIds` (keeping their relative order) to just after `after`, rewriting only the keys that change. */
+function moveSiblings(
+  options: Readonly<{
+    owner: Readonly<{ map: Y.Map<unknown>; positionKey: string }>;
+    siblings: readonly OrderedSibling[];
+    movingIds: readonly string[];
+    after: string | null;
+    random: RandomSource;
+  }>,
+): void {
+  const { owner, movingIds, after, random } = options;
+  const moving = new Set<string>(movingIds);
+  const moved = options.siblings.filter((sibling) => moving.has(sibling.id));
+  const remaining = options.siblings.filter((sibling) => !moving.has(sibling.id));
+  const keys = planInsert({ siblings: remaining, after, count: moved.length, random });
+  writePositions(owner.map, owner.positionKey, keys.rekeyed);
+  writePositions(owner.map, owner.positionKey, new Map(moved.map((sibling, index) => [sibling.id, keys.inserted[index] ?? sibling.key])));
 }
 
 function fallbackKey(random: RandomSource): string {
@@ -407,7 +408,7 @@ function insertElements(options: Readonly<{ context: ApplicationContext; command
   const siblings = normalisedSiblings({ elementsMap, structure, parent, random: context.random });
   const gapIndex = gapIndexFor({ placement: placement.kind, siblings, anchor });
   const keys = planGapKeys({ siblings, gapIndex, count: command.elements.length, random: context.random });
-  writeElementPositions(elementsMap, keys.rekeyed);
+  writePositions(elementsMap, ELEMENT_KEY.position, keys.rekeyed);
   writeElementTrees({ elementsMap, elements: command.elements, groupId: parent, keys: keys.inserted, random: context.random });
 }
 
@@ -472,7 +473,7 @@ function reorderElements(options: Readonly<{ context: ApplicationContext; comman
     const siblings = normalisedSiblings({ elementsMap, structure, parent, random: context.random });
     const order = reordered({ siblings, selected, placement: command.placement });
     if (order.every((sibling, index) => sibling === siblings[index])) continue;
-    writeElementPositions(elementsMap, planReorderKeys({ order, moved: new Set(siblings.filter((sibling) => selected.has(sibling.id)).map((sibling) => sibling.id)), random: context.random }));
+    writePositions(elementsMap, ELEMENT_KEY.position, planReorderKeys({ order, moved: new Set(siblings.filter((sibling) => selected.has(sibling.id)).map((sibling) => sibling.id)), random: context.random }));
   }
 }
 
@@ -565,17 +566,8 @@ function tableCells(roots: DocumentRoots, slideId: SlideId, elementId: ElementId
   const elements = elementsMapOf(roots, slideId);
   const table = elements === null ? null : childMap(elements, elementId);
   if (table === null) return null;
-  const cells = childMap(table, ELEMENT_KEY.cells);
-  if (cells !== null) return cells;
-  const created = new Y.Map<unknown>();
-  table.set(ELEMENT_KEY.cells, created);
-  return created;
+  return ensureMap(table, ELEMENT_KEY.cells);
 }
-
-type TableCommand = Extract<
-  DocumentCommand,
-  { kind: "insertTableRows" | "insertTableColumns" | "deleteTableRows" | "deleteTableColumns" | "setTableColumnWidths" | "setTableRowHeights" | "updateTableCells" }
->;
 
 function applyTableCommand(options: Readonly<{ roots: DocumentRoots; command: TableCommand }>): void {
   const { roots, command } = options;

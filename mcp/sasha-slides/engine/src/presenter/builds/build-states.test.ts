@@ -9,7 +9,8 @@ import type { AnimationEffect, AnimationStep } from "../../contracts/animations.
 import type { ElementSnapshot, LineElement, ShapeElement, SlideSnapshot } from "../../contracts/document.ts";
 import { literalColour } from "../../contracts/style.ts";
 import { animationStep, fixtureGroup, fixtureLine, fixtureShape, fixtureSlide, scriptIdOf, type FixtureElement } from "../testing/document-fixture.ts";
-import { buildSegmentTimeline, finalBuildOf, findElement, slideAtBuild, slideBuildSegments } from "./build-states.ts";
+import { derivedGroupFrame, elementOfKind, findInTree } from "../../shared/element-tree.ts";
+import { buildSegmentTimeline, finalBuildOf, slideAtBuild, slideBuildSegments } from "./build-states.ts";
 
 const BOX: FixtureElement = { id: "box_a", frame: { x: 100, y: 100, width: 200, height: 100 }, fill: "#112233", text: "Hello" };
 const OTHER: FixtureElement = { id: "box_b", frame: { x: 600, y: 300, width: 100, height: 100 } };
@@ -120,7 +121,7 @@ describe("slideAtBuild: geometry and colour", () => {
     // Group bounds (100, 100)-(400, 400), centre (250, 250).
     assert.deepEqual(roundBox(shapeOf(built, "box_a").frame), { x: -50, y: -50, width: 400, height: 200 });
     assert.deepEqual(roundBox(shapeOf(built, "box_c").frame), { x: 350, y: 350, width: 200, height: 200 });
-    assert.deepEqual(roundBox(findElement({ elements: built.elements, elementId: "group_a" })?.frame ?? ZERO), { x: -50, y: -50, width: 600, height: 600 });
+    assert.deepEqual(roundBox(findInTree(built.elements, "group_a")?.frame ?? ZERO), { x: -50, y: -50, width: 600, height: 600 });
   });
 
   it("a group spins about its own centre: leaves orbit and turn by the degrees", () => {
@@ -129,7 +130,18 @@ describe("slideAtBuild: geometry and colour", () => {
     // box_c's centre (350, 350) turns 90 degrees clockwise about (250, 250) to (150, 350).
     assert.deepEqual(roundBox(corner.frame), { x: 100, y: 300, width: 100, height: 100 });
     assert.equal(corner.frame.rotation, 90);
-    assert.equal(findElement({ elements: built.elements, elementId: "group_a" })?.frame.rotation, 90);
+    assert.equal(findInTree(built.elements, "group_a")?.frame.rotation, 90);
+  });
+
+  it("a rotated group holding a diagonal line keeps the model's frame when a leaf moves", () => {
+    const children = [fixtureLine({ id: "line_a", start: { x: 0, y: 0 }, end: { x: 200, y: 200 } }), fixtureShape({ id: "box_a", frame: { x: 300, y: 0, width: 100, height: 100 } })];
+    const rotated = { ...fixtureGroup({ id: "group_a", children }), frame: derivedGroupFrame({ rotation: 30, children }) };
+    const slide = fixtureSlide({ id: "slide_g", extraElements: [rotated], animations: [step("step_a", "box_a", { kind: "motionPath", offsetX: 50, offsetY: 0 })] });
+    const built = elementOfKind(findInTree(slideAtBuild({ slide, completed: 1 }).elements, "group_a"), "group");
+    assert.ok(built !== null);
+    assert.deepEqual(built.frame, derivedGroupFrame({ rotation: 30, children: built.children }));
+    // The line's end points bound the group, not its box's corners (that rule made it 398.205 tall).
+    assert.deepEqual(pick(built.frame, ["x", "y", "width", "height", "rotation"]), { x: 8.494, y: -104.904, width: 439.711, height: 298.205, rotation: 30 });
   });
 
   const colourRows = [
@@ -177,7 +189,7 @@ describe("buildSegmentTimeline", () => {
     assert.deepEqual(topLevelIds(timeline.before), []);
     assert.deepEqual(topLevelIds(timeline.after), ["box_a"]);
     assert.deepEqual(
-      timeline.trees.map((tree) => findElement({ elements: tree, elementId: "box_a" })?.frame.x),
+      timeline.trees.map((tree) => findInTree(tree, "box_a")?.frame.x),
       [100, 100, 200],
     );
   });
@@ -200,13 +212,13 @@ function topLevelIds(slide: SlideSnapshot): readonly string[] {
 }
 
 function shapeOf(slide: SlideSnapshot, elementId: string): ShapeElement {
-  const element = findElement({ elements: slide.elements, elementId });
+  const element = findInTree(slide.elements, elementId);
   assert.ok(element !== null && element.kind === "shape", `${elementId} is a shape on the slide`);
   return element;
 }
 
 function lineOf(slide: SlideSnapshot, elementId: string): LineElement {
-  const element: ElementSnapshot | null = findElement({ elements: slide.elements, elementId });
+  const element: ElementSnapshot | null = findInTree(slide.elements, elementId);
   assert.ok(element !== null && element.kind === "line", `${elementId} is a line on the slide`);
   return element;
 }

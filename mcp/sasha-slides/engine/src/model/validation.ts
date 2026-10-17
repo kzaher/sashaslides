@@ -25,7 +25,7 @@ import type { ElementId, RandomSource, SlideId } from "../contracts/ids.ts";
 import type { ElementKey } from "../contracts/yjs-schema.ts";
 import { assertNever } from "../contracts/assert-never.ts";
 import { DOCUMENT_SCHEMA_VERSION, PLACEHOLDER_ROLES } from "../contracts/document.ts";
-import { THEME_COLOUR_SLOTS } from "../contracts/style.ts";
+import { DEFAULT_TEXT_BOX_STYLE, THEME_COLOUR_SLOTS } from "../contracts/style.ts";
 import { ANIMATION_STEP_KEY, ELEMENT_KEYS_BY_KIND, ELEMENT_KEY, LAYOUT_KEY, META_KEY, RUN_ATTRIBUTE_NAMES, SLIDE_KEY, TABLE_CELL_KEY, THEME_KEY, TRANSITION_SCRIPT_KEY } from "../contracts/yjs-schema.ts";
 import { DEFAULT_THEME } from "./blank-deck.ts";
 import { dissolveGroup } from "./command-application.ts";
@@ -40,7 +40,6 @@ import {
   ASSET_RECORD,
   BOOLEAN,
   BORDER,
-  checkTextBoxStyle,
   CORNER_RADIUS,
   CUSTOM_OUTLINE,
   FILL,
@@ -63,11 +62,13 @@ import {
   SLIDE_TRANSITION,
   STROKE,
   TEXT,
+  TEXT_BOX_STYLE,
   TRANSITION_APPROVAL,
   TRANSITION_AUTHOR,
   TRANSITION_EASING,
   type StoredValueCheck,
 } from "./stored-values.ts";
+import { isHexadecimalColour } from "../shared/colour-values.ts";
 import { endsWithParagraphMark, PARAGRAPH_MARK, paragraphMarkAttributes } from "./text-body.ts";
 
 /** What a validation pass covers: every slide, or the slides a transaction touched, plus the deck level. */
@@ -232,7 +233,7 @@ const ELEMENT_KEY_SPECS: Readonly<Record<ElementKey, KeySpec>> = {
   opacity: { kind: "value", check: OPACITY, fallback: () => 1 },
   preset: { kind: "value", check: SHAPE_PRESET, fallback: () => "rectangle" },
   customOutline: { kind: "optionalValue", check: CUSTOM_OUTLINE, fallback: () => null },
-  textBox: { kind: "value", check: { check: checkTextBoxStyle, describe: "a text box style" }, fallback: () => DEFAULT_TEXT_BOX },
+  textBox: { kind: "value", check: TEXT_BOX_STYLE, fallback: () => DEFAULT_TEXT_BOX_STYLE },
   text: { kind: "text" },
   assetId: { kind: "value", check: TEXT, fallback: () => "" },
   crop: { kind: "value", check: IMAGE_CROP, fallback: () => ({ left: 0, top: 0, right: 0, bottom: 0 }) },
@@ -246,16 +247,6 @@ const ELEMENT_KEY_SPECS: Readonly<Record<ElementKey, KeySpec>> = {
   rowHeights: { kind: "map" },
   columnWidths: { kind: "map" },
   cells: { kind: "map" },
-};
-
-const DEFAULT_TEXT_BOX = {
-  verticalAlignment: "top",
-  paddingTop: 12,
-  paddingRight: 12,
-  paddingBottom: 12,
-  paddingLeft: 12,
-  autofit: "none",
-  wrap: true,
 };
 
 const SLIDE_KEY_SPECS: Readonly<Record<string, KeySpec>> = {
@@ -346,7 +337,7 @@ function findThemeIssues(roots: DocumentRoots, findings: Finding[]): void {
     map: theme,
     key: THEME_KEY.colours,
     entries: THEME_COLOUR_SLOTS,
-    isEntryValid: (entry) => typeof entry === "string" && /^#[0-9a-fA-F]{6}$/.test(entry),
+    isEntryValid: isHexadecimalColour,
     fallback: DEFAULT_THEME.colours,
     findings,
   });

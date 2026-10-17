@@ -9,12 +9,12 @@ import type { ClipboardContent, EditorEmbedding, EditorState } from "../../contr
 import type { EditorEvent } from "../../contracts/editor-events.ts";
 import { ENGINE_CLIPBOARD_MEDIA_TYPE, type BrowserCapabilities } from "../../contracts/editor-system.ts";
 import { ASSET_ADDRESS_SCHEME, SLIDE_ROOT_CLASS } from "../../contracts/render.ts";
-import { IdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, imageElement, plainBody, shapeElement, slideSnapshot } from "../sample/snapshot-builders.ts";
+import { createPrefixedIdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, imageElement, plainBody, shapeElement, slideSnapshot } from "../../contracts/testing/snapshot-builders.ts";
 import { createRecordingSystem, fixtureEditorState } from "../testing/editor-fixtures.ts";
 import { handleShellKey } from "./editor-shell.tsx";
 import { handleClipboardWrite, handlePaste, handlePresent, type ClipboardTransferEvent, type GestureContext } from "./gesture-handlers.ts";
 
-const ids = new IdMinter("Gesture1");
+const ids = createPrefixedIdMinter("Gesture1");
 const element = shapeElement({ id: ids.next("element"), text: plainBody("Copied words") });
 const slide = slideSnapshot({ ids, elements: [element] });
 const document = documentSnapshot({ deckId: fixtureDeckId("deck_gesture"), title: "Gestures", slides: [slide] });

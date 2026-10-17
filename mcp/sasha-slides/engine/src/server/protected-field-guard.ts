@@ -25,6 +25,7 @@ import { roleAllows, type DeckRole } from "../contracts/deck-access.ts";
 import type { Person } from "../contracts/discussion.ts";
 import type { TransitionApproval, TransitionAuthor } from "../contracts/document.ts";
 import { PROTECTED_META_KEYS, type ProtectedFields, type ProtectedFieldWrite, type ProtectedScriptFields } from "../model/protected-fields.ts";
+import { parseValue, TRANSITION_APPROVAL } from "../model/stored-values.ts";
 
 /** Who sent the update, as the room's connection knows them (never what the update claims). */
 export type GuardSender = Readonly<{ person: Person; role: DeckRole }>;
@@ -103,20 +104,24 @@ function approvalRevocation(
 }
 
 type ParsedApproval =
-  | Readonly<{ kind: "unapproved" }>
-  | Readonly<{ kind: "approved"; approvedBy: string; fingerprint: string }>
+  | TransitionApproval
   /** Anything a forged client could store that is neither: treated as an approval nobody may grant. */
   | Readonly<{ kind: "malformed" }>;
 
+/** The stored approval through the model's own check (stored-values.ts); an absent one is unapproved. */
 function parseApproval(stored: unknown): ParsedApproval {
-  if (typeof stored !== "object" || stored === null) return stored === undefined ? { kind: "unapproved" } : { kind: "malformed" };
-  const record: Readonly<Record<string, unknown>> = Object.fromEntries(Object.entries(stored));
-  if (record["kind"] === "unapproved") return { kind: "unapproved" };
-  if (record["kind"] !== "approved") return { kind: "malformed" };
-  const approvedBy = record["approvedBy"];
-  const fingerprint = record["fingerprint"];
-  if (typeof approvedBy !== "string" || typeof fingerprint !== "string") return { kind: "malformed" };
-  return { kind: "approved", approvedBy, fingerprint };
+  if (stored === undefined) return UNAPPROVED;
+  const parsed = parseValue({ candidate: stored, kind: TRANSITION_APPROVAL });
+  switch (parsed.kind) {
+    case "valid":
+      return parsed.value;
+    case "unsupported":
+    case "wrongType":
+    case "missing":
+      return { kind: "malformed" };
+    default:
+      return assertNever(parsed);
+  }
 }
 
 function authorOf(person: Person): TransitionAuthor {

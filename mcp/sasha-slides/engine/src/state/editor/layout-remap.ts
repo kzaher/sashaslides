@@ -21,7 +21,7 @@ import {
   type SlideSnapshot,
 } from "../../contracts/index.ts";
 import { findSlide } from "./document-lookup.ts";
-import { queueEnvelope } from "./editor-queue.ts";
+import { queueCommands } from "./editor-queue.ts";
 import { reidentifyElement } from "./element-factory.ts";
 import { createIdMinter, type IdMinter } from "./id-minter.ts";
 
@@ -32,7 +32,7 @@ export function reduceSlideLayoutChosen(state: EditorState, layoutId: LayoutId):
   if (slide === null || layout === undefined) return state;
   const minter = createIdMinter(state.idSeed);
   const commands = remapSlideToLayout({ slide, layout, minter });
-  return queueEnvelope({ ...state, idSeed: minter.seed() }, { commands, selectionAfter: state.selection, mergeWithPrevious: false });
+  return queueCommands({ ...state, idSeed: minter.seed() }, commands);
 }
 
 /** The commands that move `slide` onto `layout` (see the header). Pure; ids come from `minter`. */

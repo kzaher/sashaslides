@@ -10,7 +10,7 @@
 import { RECENT_COLOUR_LIMIT } from "../../contracts/editor-state.ts";
 import { THEME_COLOUR_SLOTS, type Colour } from "../../contracts/style.ts";
 import { assertNever } from "../../contracts/assert-never.ts";
-import { arrayOf, keysOf, MalformedValue, memberAt, numberAt, parseOrNull, parseStructuredText, recordOf, stringAt } from "../parsing/untrusted-values.ts";
+import { arrayOf, keysOf, MalformedValue, memberAt, numberAt, parseOrNull, parseStructuredText, recordOf, stringAt } from "../../shared/untrusted-values.ts";
 
 export const RECENT_COLOURS_STORAGE_KEY = "sasha.recentColours.v1";
 

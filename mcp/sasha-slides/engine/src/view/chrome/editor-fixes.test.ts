@@ -1,28 +1,24 @@
 // The milestone 1 review fixes as the person meets them (SPEC.md 21.9): the list style picker
 // (acceptance 2), the gradient editor (3), the Recent colours row (4), Scripted with no scripts
-// (5), arrow keys in pill groups (6), and the words a disabled control gives, which must be the
-// reducer's own words. Each table's rows run the same steps and differ only in the input under
-// test, with control rows where the cause is absent.
+// (5) and arrow keys in pill groups (6). Each table's rows run the same steps and differ only in
+// the input under test, with control rows where the cause is absent.
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CLOSED_MESSAGE, NEWER_SCHEMA_MESSAGE, ROLE_EDIT_REFUSAL, VIEWER_COMMENT_REFUSAL, commentingRefusal, editingRefusal } from "../../state/editor/access.ts";
 import { reduceEditor } from "../../state/editor/reduce-editor.ts";
 import { editorStateFor, shape, slide, slideId, testDocument } from "../../state/testing/document-fixtures.ts";
-import { LOCAL_COLLABORATION_STATUS, type ClosedReason, type CollaborationStatus } from "../../contracts/collaboration.ts";
-import { DECK_ROLES } from "../../contracts/deck-access.ts";
 import type { DocumentCommand, EditorEvent, EditorState, Fill, ListGlyph, TextOperation } from "../../contracts/index.ts";
 import type { Colour } from "../../contracts/style.ts";
 import { EditorGestureContext, EditorServicesContext } from "../application/editor-services.tsx";
 import { handleShellKey, type ShellKeyEvent } from "../application/editor-shell.tsx";
-import { documentSnapshot, fixtureDeckId, IdMinter, plainBody, sampleTheme, shapeElement, slideSnapshot } from "../sample/snapshot-builders.ts";
+import { documentSnapshot, fixtureDeckId, createPrefixedIdMinter, plainBody, sampleTheme, shapeElement, slideSnapshot } from "../../contracts/testing/snapshot-builders.ts";
 import { createRecordingSystem, fixtureEditorState, fixtureServices, recordingCapabilities } from "../testing/editor-fixtures.ts";
-import { CLOSED_EXPLANATION, NEWER_SCHEMA_EXPLANATION, ROLE_EDIT_EXPLANATION, VIEWER_COMMENT_EXPLANATION, commentingDisabledReason, editingDisabledReason } from "./access.ts";
 import { ColourPalette } from "./fields.tsx";
 import { MAXIMUM_GRADIENT_STOPS, withAddedStop, withRadialCentre, withStopOffset, withoutStop, type GradientFill } from "./gradient-stops.ts";
 import { LIST_GLYPH_PRESETS } from "./list-glyphs.ts";
+import { listMarkerText } from "../../shared/list-glyphs.ts";
 import { pillGroupKeyTarget } from "./pill-group.ts";
 import { ListGlyphPicker, NO_SCRIPTS_EXPLANATION, TransitionTab, listGlyphEvent } from "./properties-panel.tsx";
 
@@ -35,6 +31,11 @@ describe("the list style picker (acceptance 2)", () => {
     assert.deepEqual([...shown].sort(), [...ALL_GLYPHS].sort());
     assert.equal(LIST_GLYPH_PRESETS.length, 12);
     assert.match(markup, /role="radio"[^>]*aria-checked="true"[^>]*aria-label="Round bullets"/);
+  });
+
+  it("shows each preset with the marker the slide draws, the arrow being Google Slides' U+27A2", () => {
+    for (const preset of LIST_GLYPH_PRESETS) assert.equal(preset.sample, listMarkerText({ glyph: preset.glyph, number: 1 }), preset.glyph);
+    assert.equal(listMarkerText({ glyph: "arrow", number: 1 }), "\u27A2");
   });
 
   // "One\n" holds 0..3, "Two\n" 4..7, "Three\n" 8..13: a selection from 5 to 9 overlaps the second and third.
@@ -106,7 +107,7 @@ describe("the Recent colours row (acceptance 4)", () => {
 });
 
 describe("Scripted with no scripts explains itself (acceptance 5)", () => {
-  const ids = new IdMinter("Scripts1");
+  const ids = createPrefixedIdMinter("Scripts1");
   const scriptId = ids.next("transitionScript");
   const scriptedSlide = slideSnapshot({ ids, elements: [shapeElement({ id: ids.next("element"), text: plainBody("Hello") })], transition: { kind: "scripted", scriptId, durationMilliseconds: 800, parameters: {} } });
   const rows: readonly Readonly<{ name: string; scripts: EditorState["document"]["transitionScripts"]; explains: boolean }>[] = [
@@ -158,29 +159,6 @@ describe("arrow keys in pill groups (acceptance 6)", () => {
       assert.equal(system.dispatched.some((dispatched: EditorEvent) => dispatched.kind === "keyPressed"), row.dispatched);
     });
   }
-});
-
-describe("a disabled control gives the reducer's own reason", () => {
-  const document = testDocument({ slides: [slide({ id: "slide_one", elements: [] })] });
-  const statuses: readonly Readonly<{ label: string; status: CollaborationStatus }>[] = [
-    ...DECK_ROLES.map((role) => ({ label: `role ${role}`, status: { ...LOCAL_COLLABORATION_STATUS, role } })),
-    // Object.keys widens to string[]; CLOSED_MESSAGE is a total record over ClosedReason.
-    ...(Object.keys(CLOSED_MESSAGE) as ClosedReason[]).map((reason) => ({ label: `closed ${reason}`, status: { ...LOCAL_COLLABORATION_STATUS, connection: { kind: "closed" as const, reason } } })),
-  ];
-  for (const row of statuses) {
-    it(`${row.label}: the view and the reducer say the same`, () => {
-      const state: EditorState = { ...editorStateFor(document), collaboration: row.status };
-      assert.equal(editingDisabledReason(state), editingRefusal(state));
-      assert.equal(commentingDisabledReason(state), commentingRefusal(state));
-    });
-  }
-
-  it("the word tables are equal", () => {
-    assert.deepEqual(CLOSED_EXPLANATION, CLOSED_MESSAGE);
-    assert.deepEqual(ROLE_EDIT_EXPLANATION, ROLE_EDIT_REFUSAL);
-    assert.equal(NEWER_SCHEMA_EXPLANATION, NEWER_SCHEMA_MESSAGE);
-    assert.equal(VIEWER_COMMENT_EXPLANATION, VIEWER_COMMENT_REFUSAL);
-  });
 });
 
 function withServices(state: EditorState, child: ReactElement): string {

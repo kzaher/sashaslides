@@ -9,7 +9,6 @@
 // comparisons by necessity (typescript skill, "Exhaustiveness": the one legitimate exception); every
 // new message kind in transition-protocol.ts must be added here by hand.
 
-import type { AssetMediaType } from "../../contracts/document.ts";
 import { parseAssetId, parseElementId, type AssetId, type ElementId } from "../../contracts/ids.ts";
 import type { FontFaceRequest, SlideMarkup, StageElementRecord } from "../../contracts/render.ts";
 import type { SerialisableObject, SerialisableValue } from "../../contracts/serialisable.ts";
@@ -24,6 +23,7 @@ import {
   type TransitionCancelReason,
   type TransitionDirection,
 } from "../../contracts/transition-protocol.ts";
+import { parseAssetMediaType } from "../../shared/media-types.ts";
 
 export type Parsed<TMessage> = Readonly<{ kind: "valid"; message: TMessage }> | Readonly<{ kind: "invalid"; problem: string }>;
 
@@ -173,14 +173,12 @@ function parseStageElementRecord(candidate: unknown): StageElementRecord | null 
   };
 }
 
-const MEDIA_TYPES: readonly AssetMediaType[] = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
-
 function parseTransferredAsset(candidate: unknown): TransferredAsset | null {
   if (!isObject(candidate)) return null;
   const assetId = parseAssetIdField(Reflect.get(candidate, "assetId"));
-  const mediaType = MEDIA_TYPES.find((type) => type === Reflect.get(candidate, "mediaType"));
+  const mediaType = parseAssetMediaType(Reflect.get(candidate, "mediaType"));
   const bytes = Reflect.get(candidate, "bytes");
-  if (assetId === null || mediaType === undefined || !(bytes instanceof ArrayBuffer)) return null;
+  if (assetId === null || mediaType === null || !(bytes instanceof ArrayBuffer)) return null;
   return { assetId, mediaType, bytes };
 }
 

@@ -38,18 +38,21 @@ import {
   type ServerMessage,
 } from "../../contracts/collaboration.ts";
 import { assertNever } from "../../contracts/assert-never.ts";
+import { syncStepOneFrame, syncUpdateFrame } from "../../shared/sync-frames.ts";
 import type { DeckRole } from "../../contracts/deck-access.ts";
 import type { DiscussionStore, ReduceDiscussionLog } from "../../contracts/discussion.ts";
 import type { DeckId, RandomSource } from "../../contracts/ids.ts";
 import type { PresenceChannel } from "../../contracts/presence.ts";
 import type { Feedback, RunningSystem } from "../../contracts/rxfeedback.ts";
 import { REMOTE_SYNC_ORIGIN } from "../../contracts/yjs-schema.ts";
+import { closedReasonOf } from "../../shared/access-refusals.ts";
 import { createSystem, react } from "../../state/index.ts";
 import { createAwarenessPresence, type AwarenessParticipant } from "./awareness-presence.ts";
 import {
   collaborationStatusOf,
   initialConnectionState,
   reduceConnection,
+  refreshGenerationOf,
   socketGenerationOf,
   type DeckConnectionEvent,
   type DeckConnectionState,
@@ -125,7 +128,7 @@ export function createDeckCollaboration(dependencies: DeckCollaborationDependenc
   // A connection closed for good refuses the discussion requests still waiting (DiscussionStore
   // "never throws: transport failures resolve as rejected").
   const stopWatch = connection.state$.subscribe((state) => {
-    const closedReason = closedReasonOf(state);
+    const closedReason = closedReasonOf(collaborationStatusOf(state));
     if (closedReason !== null) discussion.participant.stopped(`The connection to this deck closed (${closedReason}).`);
   });
 
@@ -182,22 +185,6 @@ type SocketParticipants = Readonly<{
   notices: Subject<CollaborationNotice>;
   resynchronise: Subject<ResynchroniseReason>;
 }>;
-
-function closedReasonOf(state: DeckConnectionState): string | null {
-  const connection = collaborationStatusOf(state).connection;
-  switch (connection.kind) {
-    case "closed":
-      return connection.reason;
-    case "local":
-    case "connecting":
-    case "synchronising":
-    case "online":
-    case "offline":
-      return null;
-    default:
-      return assertNever(connection);
-  }
-}
 
 function connectionKey(connection: ConnectionState): string {
   switch (connection.kind) {
@@ -282,10 +269,7 @@ function liveSocket(options: Readonly<{ dependencies: DeckCollaborationDependenc
 
     const onLocalUpdate = (update: Uint8Array, origin: unknown): void => {
       if (origin === REMOTE_SYNC_ORIGIN || closed) return;
-      const encoder = encoding.createEncoder();
-      encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.sync);
-      syncProtocol.writeUpdate(encoder, update);
-      send(encoding.toUint8Array(encoder));
+      send(syncUpdateFrame(update));
       if (socket.bufferedAmount() > 0) emit({ kind: "outboundBacklogged", generation });
       scheduleDrainCheck();
     };
@@ -294,10 +278,7 @@ function liveSocket(options: Readonly<{ dependencies: DeckCollaborationDependenc
       if (welcomed) return;
       welcomed = true;
       emit({ kind: "welcomeReceived", generation, me: message.me, role: message.role, members: message.members });
-      const encoder = encoding.createEncoder();
-      encoding.writeVarUint(encoder, BINARY_MESSAGE_TYPE.sync);
-      syncProtocol.writeSyncStep1(encoder, document);
-      send(encoding.toUint8Array(encoder));
+      send(syncStepOneFrame(document));
       document.on("update", onLocalUpdate);
       participants.awareness.connected(send);
       participants.discussion.connected(send);
@@ -427,7 +408,7 @@ function retryRequestOf(state: DeckConnectionState): Readonly<{ generation: numb
 /** After a 4001: ask for a fresh session, then reconnect (reconnect-policy.ts `CLOSE_HANDLING`). */
 function sessionRefreshFeedback(dependencies: DeckCollaborationDependencies): Feedback<DeckConnectionState, DeckConnectionEvent> {
   return react<DeckConnectionState, number, DeckConnectionEvent>({
-    query: (state) => refreshGenerationOf(state),
+    query: (state) => refreshGenerationOf(state.phase),
     areEqual: (previous, next) => previous === next,
     effects: (generation) =>
       from(
@@ -437,23 +418,6 @@ function sessionRefreshFeedback(dependencies: DeckCollaborationDependencies): Fe
         ),
       ),
   });
-}
-
-function refreshGenerationOf(state: DeckConnectionState): number | null {
-  const phase = state.phase;
-  switch (phase.kind) {
-    case "refreshingSession":
-      return phase.generation;
-    case "connecting":
-    case "synchronising":
-    case "online":
-    case "waiting":
-    case "networkLost":
-    case "closed":
-      return null;
-    default:
-      return assertNever(phase);
-  }
 }
 
 function refreshEvent(options: Readonly<{ generation: number; outcome: SessionRefreshOutcome; jitter: number }>): DeckConnectionEvent {

@@ -11,7 +11,7 @@ import type { DocumentSnapshot, ElementSnapshot } from "../contracts/document.ts
 import type { AssetId } from "../contracts/ids.ts";
 import { literalColour } from "../contracts/style.ts";
 import { sampleSlides } from "../view/sample/sample-deck.ts";
-import { IdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, groupElement, plainBody, shapeElement, slideSnapshot } from "../view/sample/snapshot-builders.ts";
+import { createPrefixedIdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, groupElement, plainBody, shapeElement, slideSnapshot } from "../contracts/testing/snapshot-builders.ts";
 import { EXPORT_PAGE_SIZE, EXPORT_READY_ATTRIBUTE, fontStylesheetAddresses, pagePlacement, renderSlideHtml, shrinkTargetsOf, unsubsetCharacters } from "./slide-html.ts";
 
 const PHOTO = fixtureAssetId("export-photo");
@@ -40,7 +40,7 @@ describe("every slide of the sample deck as a page", () => {
   });
 
   it("a slide the deck does not have is an error, not an empty page", () => {
-    assert.throws(() => renderSlideHtml({ snapshot: deck, slideId: new IdMinter("Missing").next("slide"), assetAddress }), /has no slide/);
+    assert.throws(() => renderSlideHtml({ snapshot: deck, slideId: createPrefixedIdMinter("Missing").next("slide"), assetAddress }), /has no slide/);
   });
 });
 
@@ -74,7 +74,7 @@ describe("each style feature reaches the page", () => {
 });
 
 describe("a rotated group", () => {
-  const ids = new IdMinter("ExportGroup");
+  const ids = createPrefixedIdMinter("ExportGroup");
   const tilted = shapeElement({ id: ids.next("element"), frame: { x: 100, y: 100, width: 200, height: 100, rotation: 30, flipHorizontal: false, flipVertical: false }, style: { fill: { kind: "solid", colour: literalColour({ hexadecimal: "#ff0000", alpha: 1 }) } } });
   const plain = shapeElement({ id: ids.next("element"), box: { x: 400, y: 100, width: 200, height: 100 } });
   const slide = slideSnapshot({ ids, elements: [groupElement({ id: ids.next("element"), rotation: 45, children: [tilted, plain] })] });
@@ -163,7 +163,7 @@ describe("fonts", () => {
   });
 
   it("a Georgia title draws Georgia, then Gelasio, then serif, and the page loads and waits for Gelasio", () => {
-    const ids = new IdMinter("ExportGeorgia");
+    const ids = createPrefixedIdMinter("ExportGeorgia");
     const title = shapeElement({ id: ids.next("element"), preset: "textBox", text: plainBody("Part 2: Savings", { fontFamily: "Georgia", fontSize: 60 }) });
     const slide = slideSnapshot({ ids, elements: [title] });
     const page = renderSlideHtml({ snapshot: documentSnapshot({ deckId: fixtureDeckId("georgia"), title: "Georgia", slides: [slide] }), slideId: slide.id, assetAddress });
@@ -176,7 +176,7 @@ describe("fonts", () => {
 });
 
 describe("the inline layout pass", () => {
-  const ids = new IdMinter("ExportShrink");
+  const ids = createPrefixedIdMinter("ExportShrink");
   const shrinking = shapeElement({ id: ids.next("element"), preset: "textBox", textBox: { autofit: "shrinkText", paddingTop: 5, paddingBottom: 7 }, text: plainBody("Too much text") });
   const growing = shapeElement({ id: ids.next("element"), preset: "textBox", textBox: { autofit: "resizeShape" }, text: plainBody("Grows") });
 

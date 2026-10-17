@@ -11,7 +11,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { DEFAULT_PARAGRAPH_STYLE, type RunStyle } from "../../contracts/style.ts";
-import { sampleTheme } from "../sample/snapshot-builders.ts";
+import { sampleTheme } from "../../contracts/testing/snapshot-builders.ts";
 import { paragraphDeclarations, paragraphRunsDeclarations, runDeclarations, runFitsParagraphSpan } from "./inline-styles.ts";
 import { resolveRunStyle } from "./text-layout.ts";
 import { FONT_VERTICAL_METRICS, paragraphLineDropEm, SLIDES_BASELINE_PER_FONT_SIZE, strutLineHeight, stylesheetBaselineInLineBox } from "./text-vertical-metrics.ts";

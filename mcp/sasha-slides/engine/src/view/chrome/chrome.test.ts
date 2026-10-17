@@ -14,14 +14,14 @@ import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { TIDEPOOL_TOKENS, tidepoolCustomProperties } from "../../theme/tidepool-theme.ts";
 import { EditorGestureContext, EditorServicesContext } from "../application/editor-services.tsx";
 import { EditorShell } from "../application/editor-shell.tsx";
-import { IdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, imageElement, paragraph, plainBody, run, shapeElement, slideSnapshot, textBody } from "../sample/snapshot-builders.ts";
+import { createPrefixedIdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, imageElement, paragraph, plainBody, run, shapeElement, slideSnapshot, textBody } from "../../contracts/testing/snapshot-builders.ts";
 import { createRecordingSystem, fixtureEditorState, fixtureServices, recordingCapabilities } from "../testing/editor-fixtures.ts";
 import { VIEW_CLASS, viewStylesheet } from "../view-stylesheet.ts";
 import { Filmstrip, VIRTUALISE_BEYOND_SLIDES, thumbnailItemHeight, visibleThumbnailRange } from "./filmstrip.tsx";
 import { PropertiesPanel } from "./properties-panel.tsx";
 import { MIXED_PLACEHOLDER, fontSizeEvent, lockedExplanation, textValues } from "./properties-values.ts";
 
-const ids = new IdMinter("Chrome01");
+const ids = createPrefixedIdMinter("Chrome01");
 
 describe("Tidepool chrome", () => {
   const document = documentSnapshot({ deckId: fixtureDeckId("deck_chrome"), title: "Chrome", slides: [slideSnapshot({ ids, elements: [shapeElement({ id: ids.next("element"), text: plainBody("Hello") })] })] });

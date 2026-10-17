@@ -12,7 +12,7 @@ import type { TextTarget } from "../../contracts/selection.ts";
 import { EditorServicesContext } from "../application/editor-services.tsx";
 import { textStyleContextOf } from "../render/text-layout.ts";
 import { paragraphKey } from "../render/text-paragraphs.tsx";
-import { IdMinter, documentSnapshot, fixtureDeckId, paragraph, plainBody, run, shapeElement, slideSnapshot, textBody } from "../sample/snapshot-builders.ts";
+import { createPrefixedIdMinter, documentSnapshot, fixtureDeckId, paragraph, plainBody, run, shapeElement, slideSnapshot, textBody } from "../../contracts/testing/snapshot-builders.ts";
 import { createRecordingSystem, fixtureEditorState, fixtureServices } from "../testing/editor-fixtures.ts";
 import { InlineTextEditor, bodyToRender } from "./inline-text-editor.tsx";
 import { parseBeforeInput, type BeforeInputLike, type DataTransferLike, type StaticRangeLike } from "./input-parser.ts";
@@ -131,7 +131,7 @@ describe("composition", () => {
     });
   }
 
-  const ids = new IdMinter("Composer");
+  const ids = createPrefixedIdMinter("Composer");
   const element = shapeElement({ id: ids.next("element"), text: plainBody("remote edit arrived") });
   const slide = slideSnapshot({ ids, elements: [element] });
   const document = documentSnapshot({ deckId: fixtureDeckId("deck_composer"), title: "Composition", slides: [slide] });

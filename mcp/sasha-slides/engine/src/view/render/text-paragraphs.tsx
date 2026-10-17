@@ -42,10 +42,11 @@
 
 import { memo, type CSSProperties, type ReactElement } from "react";
 import { assertNever } from "../../contracts/assert-never.ts";
-import type { Paragraph, TextBody, TextRun } from "../../contracts/document.ts";
+import { plainRunText, type Paragraph, type TextBody, type TextRun } from "../../contracts/document.ts";
 import type { SlideId } from "../../contracts/ids.ts";
 import { listMarkerColour, type ListMembership, type ParagraphStyle, type RunLink, type RunStyle } from "../../contracts/style.ts";
 import { SLIDE_LINK_ATTRIBUTE } from "../../contracts/render.ts";
+import { clampListLevel } from "../../shared/list-glyphs.ts";
 import { colourValue, markerRunDeclarations, paragraphDeclarations, paragraphRunsDeclarations, roundNumber, runDeclarations } from "./inline-styles.ts";
 import {
   LIST_INDENT_PER_LEVEL,
@@ -54,7 +55,6 @@ import {
   paragraphStarts,
   resolveParagraphStyle,
   resolveRunStyle,
-  runDisplayText,
   runStarts,
   type TextStyleContext,
 } from "./text-layout.ts";
@@ -145,7 +145,7 @@ function RunView(options: Readonly<{ run: TextRun; base: RunStyle; lineSpacing: 
   const declarations = runDeclarations({ style, base: options.base, lineSpacing: options.lineSpacing, theme: properties.styleContext.theme, fontScale: properties.fontScale });
   // The ink colour is on the paragraph's span already; a run's own colour would override it.
   if (properties.inkColour !== undefined) delete declarations.color;
-  const text = runDisplayText({ run, slideNumber: properties.slideNumber }).replace(SOFT_LINE_BREAKS, "\n");
+  const text = plainRunText({ run, slideNumber: properties.slideNumber }).replace(SOFT_LINE_BREAKS, "\n");
   const content = runContent({ run, text, start: options.start, declarations });
   return linkWrapped({ link: style.link, content, slideNumberOf: properties.slideNumberOf });
 }
@@ -206,7 +206,7 @@ function listOf(list: ParagraphStyle["list"]): ListMembership | null {
     case "none":
       return null;
     case "list":
-      return { ...list, level: Math.max(0, Math.min(8, list.level)) };
+      return { ...list, level: clampListLevel(list.level) };
     default:
       return assertNever(list);
   }

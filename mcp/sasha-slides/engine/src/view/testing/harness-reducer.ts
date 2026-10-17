@@ -10,7 +10,7 @@ import type { ElementSnapshot, SlideSnapshot } from "../../contracts/document.ts
 import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { EditorState, Gesture } from "../../contracts/editor-state.ts";
 import type { ElementId } from "../../contracts/ids.ts";
-import { findElement } from "../canvas/canvas-geometry.ts";
+import { findInTree } from "../../shared/element-tree.ts";
 
 /** Client pixels a press must travel before it is a drag (SPEC.md section 7). */
 const DRAG_THRESHOLD = 3;
@@ -107,7 +107,7 @@ function pointerDown(state: EditorState, event: Extract<EditorEvent, { kind: "ca
     case "element": {
       const elementId = event.target.elementPath[0];
       if (elementId === undefined) return state;
-      const element = findElement(slide.elements, elementId);
+      const element = findInTree(slide.elements, elementId);
       if (event.clickCount >= 2 && element !== null && element.kind === "shape") {
         return { ...state, gesture: { kind: "idle" }, selection: { kind: "text", target: { kind: "element", slideId: slide.id, elementId }, anchor: 0, focus: 0 } };
       }
@@ -138,7 +138,7 @@ function pointerMove(state: EditorState, event: Extract<EditorEvent, { kind: "ca
     case "pressed": {
       const travelled = Math.hypot(event.sample.clientPoint.x - gesture.origin.clientPoint.x, event.sample.clientPoint.y - gesture.origin.clientPoint.y);
       if (travelled < DRAG_THRESHOLD || gesture.target.kind !== "element" || state.selection.kind !== "elements") return state;
-      const startFrames = state.selection.elementIds.flatMap((id) => boxUpdates(findElement(slide.elements, id)));
+      const startFrames = state.selection.elementIds.flatMap((id) => boxUpdates(findInTree(slide.elements, id)));
       return { ...state, gesture: { kind: "moving", origin: gesture.origin, current: event.sample, startFrames, preview: translated(startFrames, gesture.origin, event.sample), guides: [] } };
     }
     case "moving":

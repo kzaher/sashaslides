@@ -14,7 +14,7 @@
 //    card closes, like a reply box anywhere else. The thread being composed is editor state
 //    (`chrome.composer`), because the canvas draws its region and markings.
 //  * A VIEWER READS ONLY: the composer, replies, resolve and delete are disabled with the reason
-//    (access.ts); the reducer refuses them too.
+//    (shared/access-refusals.ts); the reducer refuses them too.
 //  * THE FILTER IS A TABLIST with a roving tab index (pill-group.ts). "Resolved" also shows resolved
 //    pins on the canvas (`chrome.showResolvedThreads`).
 
@@ -25,11 +25,11 @@ import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { PendingDiscussionRequest } from "../../contracts/editor-state.ts";
 import type { ArrangedThread } from "../../contracts/editor-system.ts";
 import type { PersonId, SlideId, ThreadId } from "../../contracts/ids.ts";
+import { commentingRefusal } from "../../shared/access-refusals.ts";
 import { TIDEPOOL_CLASS } from "../../theme/tidepool-stylesheet.ts";
 import { shallowEqual, useEditorSelector, useEditorServices } from "../application/editor-services.tsx";
 import { peerColour } from "../canvas/canvas-overlay.tsx";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
-import { commentingDisabledReason } from "./access.ts";
 import { Icon } from "./icons.tsx";
 import { insertMention, matchingMembers, mentionQueryAt, mentionsStillIn, messageSegments, type MentionQuery } from "./mentions.ts";
 import { handlePillGroupKey, rovingTabIndex } from "./pill-group.ts";
@@ -59,7 +59,7 @@ export const CommentRail = memo(function CommentRail(): ReactElement {
       pending: state.pendingDiscussion,
       me: state.me,
       members: state.collaboration.members,
-      refusal: commentingDisabledReason(state),
+      refusal: commentingRefusal(state),
     }),
     shallowEqual,
   );
@@ -517,7 +517,7 @@ function knownPeople(options: Readonly<{ members: readonly Person[]; threads: re
   return [...people.values()];
 }
 
-function threadIsResolved(thread: CommentThread): boolean {
+export function threadIsResolved(thread: CommentThread): boolean {
   switch (thread.status.kind) {
     case "open":
       return false;

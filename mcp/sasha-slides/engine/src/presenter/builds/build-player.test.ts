@@ -11,11 +11,12 @@ import { assertNever } from "../../contracts/assert-never.ts";
 import type { ElementSnapshot, SlideSnapshot } from "../../contracts/document.ts";
 import { ELEMENT_ID_ATTRIBUTE, SLIDE_ROOT_CLASS } from "../../contracts/render.ts";
 import { literalColour } from "../../contracts/style.ts";
-import { stageElementRecordsOf } from "../stage-elements.ts";
+import { stageElementRecordsOf } from "../../shared/stage-elements.ts";
 import { animationStep, fixtureGroup, fixtureShape, fixtureSlide, type FixtureElement } from "../testing/document-fixture.ts";
 import { buildTransitionContext } from "../transition-context.ts";
 import { createBuildPlayer } from "./build-player.ts";
-import { buildSegmentTimeline, leavesOf, slideBuildSegments } from "./build-states.ts";
+import { leavesOf } from "../../shared/element-tree.ts";
+import { buildSegmentTimeline, slideBuildSegments } from "./build-states.ts";
 
 const BOX: FixtureElement = { id: "box_a", frame: { x: 100, y: 100, width: 200, height: 100 } };
 const STILL: FixtureElement = { id: "box_b", frame: { x: 800, y: 400, width: 100, height: 100 } };

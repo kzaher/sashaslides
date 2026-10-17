@@ -4,10 +4,10 @@
 // tedious for a test that is about one border; these builders fill the rest with the documented
 // defaults (contracts/style.ts) so a test names only the feature it is about.
 //
-// Ids come from `IdMinter`, a deterministic wrapper over `mintId` (ids.ts), so builders never
+// Ids come from `IdMinter` (shared/id-minter.ts), a deterministic wrapper over `mintId` (ids.ts), so builders never
 // brand a string by hand.
 
-import type { AnimationEffect, AnimationStep, AnimationTrigger } from "../../contracts/animations.ts";
+import type { AnimationEffect, AnimationStep, AnimationTrigger } from "../animations.ts";
 import type {
   CustomOutline,
   DocumentSnapshot,
@@ -29,10 +29,11 @@ import type {
   TextRun,
   ThemeSnapshot,
   UnsupportedElement,
-} from "../../contracts/document.ts";
-import { DOCUMENT_SCHEMA_VERSION, EMPTY_TEXT_BODY } from "../../contracts/document.ts";
-import { identityFrame, lineFrame, type Box, type Frame, type Point } from "../../contracts/geometry.ts";
-import { mintId, type AssetId, type DeckId, type ElementId, type IdSeed, type MintedIdByKind, type ObjectIdKind, type SlideId } from "../../contracts/ids.ts";
+} from "../document.ts";
+import { DOCUMENT_SCHEMA_VERSION, EMPTY_TEXT_BODY } from "../document.ts";
+import { identityFrame, lineFrame, type Box, type Frame, type Point } from "../geometry.ts";
+import type { AssetId, DeckId, ElementId, SlideId } from "../ids.ts";
+import { createPrefixedIdMinter, type IdMinter } from "../../shared/id-minter.ts";
 import {
   DEFAULT_TEXT_BOX_STYLE,
   PLAIN_BOX_STYLE,
@@ -45,22 +46,7 @@ import {
   type RunStylePatch,
   type Stroke,
   type TextBoxStyle,
-} from "../../contracts/style.ts";
-
-/** Mints ids in order from a fixed seed, so a fixture's ids are the same on every run. */
-export class IdMinter {
-  private seed: IdSeed;
-
-  constructor(sessionPrefix: string) {
-    this.seed = { sessionPrefix, counter: 0 };
-  }
-
-  next<TKind extends ObjectIdKind>(kind: TKind): MintedIdByKind[TKind] {
-    const minted = mintId({ seed: this.seed, kind });
-    this.seed = minted.seed;
-    return minted.id;
-  }
-}
+} from "../style.ts";
 
 /** A deck id for fixtures and the demo. */
 export function fixtureDeckId(text: string): DeckId {
@@ -333,3 +319,5 @@ export function documentSnapshot(options: Readonly<{ deckId: DeckId; title: stri
     transitionScripts: [],
   };
 }
+
+export { createPrefixedIdMinter, type IdMinter };

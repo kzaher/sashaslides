@@ -13,7 +13,7 @@
 //    keyboard shortcut; in the add-on dialog copy and cut say the same (SPEC.md section 14).
 //  * SHORTCUTS ARE SPELLED OUT ("Control+Z"), or with the macOS symbols, never abbreviated.
 //  * A ROLE THAT CANNOT EDIT SEES WHY. For a viewer or commenter (or a closed connection) every entry
-//    that would change the document is disabled with the reason as its hint (access.ts), and
+//    that would change the document is disabled with the reason as its hint (shared/access-refusals.ts), and
 //    Comment with the commenting reason; copying, presenting and the View toggles stay.
 //  * THE HOST'S ITEMS END THE FILE MENU (contracts/editor-system.ts `EditorHost.fileMenuItems`),
 //    in the host's order, run inside the click because one may open a window; a disabled one shows
@@ -25,8 +25,8 @@ import type { EditorEvent } from "../../contracts/editor-events.ts";
 import type { ContextMenu, EditorState, MenuName } from "../../contracts/editor-state.ts";
 import type { HostMenuItem } from "../../contracts/editor-system.ts";
 import type { ElementId } from "../../contracts/ids.ts";
-import { findElement } from "../canvas/canvas-geometry.ts";
-import { commentingDisabledReason, editingDisabledReason } from "./access.ts";
+import { commentingRefusal, editingRefusal } from "../../shared/access-refusals.ts";
+import { elementOfKind, findInTree } from "../../shared/element-tree.ts";
 
 export type MenuAction =
   | Readonly<{ kind: "dispatch"; event: EditorEvent }>
@@ -63,8 +63,8 @@ export function menuEntries(options: Readonly<{ menu: MenuName; state: EditorSta
   const elementsSelected = selectedElementIds(state).length > 0;
   const groupSelected = selectionHoldsGroup(state);
   const addon = inAddonDialog(state);
-  const editing = editingDisabledReason(state);
-  const commenting = commentingDisabledReason(state);
+  const editing = editingRefusal(state);
+  const commenting = commentingRefusal(state);
   switch (options.menu) {
     case "file":
       return [
@@ -159,8 +159,8 @@ export function contextMenuEntries(options: Readonly<{ menu: ContextMenu; state:
   const { state } = options;
   const key = shortcutWriter(options.shortcuts);
   const addon = inAddonDialog(state);
-  const editing = editingDisabledReason(state);
-  const commenting = commentingDisabledReason(state);
+  const editing = editingRefusal(state);
+  const commenting = commentingRefusal(state);
   const paste: MenuEntry = { kind: "item", label: "Paste", shortcut: key({ primary: true, key: "V" }), action: { kind: "dispatch", event: { kind: "contextMenuClosed" } }, disabled: true, hint: `Use ${key({ primary: true, key: "V" })} to paste`, checked: null };
   switch (options.menu.scope) {
     case "element":
@@ -244,7 +244,7 @@ export function selectionHoldsGroup(state: EditorState): boolean {
   if (selection.kind !== "elements") return false;
   const slide = state.document.slides.find((candidate) => candidate.id === selection.slideId);
   if (slide === undefined) return false;
-  return selection.elementIds.some((id) => findElement(slide.elements, id)?.kind === "group");
+  return selection.elementIds.some((id) => elementOfKind(findInTree(slide.elements, id), "group") !== null);
 }
 
 /** Why Ungroup is unavailable, as its hint. */

@@ -21,15 +21,17 @@
 
 import * as Y from "yjs";
 import type { CellBorders, ElementCommon, ElementSnapshot, ImageCrop, TableCell, TableColumn, TableElement, TableRow } from "../contracts/document.ts";
-import type { Frame, Point } from "../contracts/geometry.ts";
+import type { Frame } from "../contracts/geometry.ts";
 import type { AssetId, ElementId, TableColumnId, TableRowId } from "../contracts/ids.ts";
-import type { BoxStyle, Fill, Stroke } from "../contracts/style.ts";
+import type { BoxStyle, Fill } from "../contracts/style.ts";
 import type { StoredElementKind } from "../contracts/yjs-schema.ts";
 import { assertNever } from "../contracts/assert-never.ts";
 import { EMPTY_TEXT_BODY } from "../contracts/document.ts";
-import { boundsOfPoints, frameCentre, frameCorners, identityFrame, lineFrame, normaliseRotation, rotatePoint } from "../contracts/geometry.ts";
+import { identityFrame, lineFrame } from "../contracts/geometry.ts";
 import { DEFAULT_TEXT_BOX_STYLE } from "../contracts/style.ts";
 import { ELEMENT_KEY, TABLE_CELL_KEY, tableCellKey } from "../contracts/yjs-schema.ts";
+import { DEFAULT_STROKE } from "../shared/element-defaults.ts";
+import { derivedGroupFrame } from "../shared/element-tree.ts";
 import { childArray, childMap, childText } from "./document-paths.ts";
 import { compareOrderedSiblings } from "./order-keys.ts";
 import {
@@ -189,40 +191,6 @@ export function projectElementTree(
   return structure.childrenOf(null).map(build).filter(isElement);
 }
 
-/** All the points a node covers, in slide space: a line's ends, a box's corners, a group's leaves'. */
-export function coveredPoints(element: ElementSnapshot): readonly Point[] {
-  switch (element.kind) {
-    case "group":
-      return element.children.flatMap(coveredPoints);
-    case "line":
-      return [element.start, element.end];
-    case "shape":
-    case "image":
-    case "table":
-    case "unsupported":
-      return frameCorners(element.frame);
-    default:
-      return assertNever(element);
-  }
-}
-
-/** A group's frame: its leaves' bounds measured in the group's own rotated axes (document.ts). */
-export function derivedGroupFrame(options: Readonly<{ rotation: number; children: readonly ElementSnapshot[] }>): Frame {
-  const rotation = normaliseRotation(options.rotation);
-  const local = options.children.flatMap(coveredPoints).map((point) => rotatePoint({ point, centre: ORIGIN, degrees: -rotation }));
-  const box = boundsOfPoints(local) ?? { x: 0, y: 0, width: 0, height: 0 };
-  const centre = rotatePoint({ point: frameCentre(box), centre: ORIGIN, degrees: rotation });
-  return {
-    x: centre.x - box.width / 2,
-    y: centre.y - box.height / 2,
-    width: box.width,
-    height: box.height,
-    rotation,
-    flipHorizontal: false,
-    flipVertical: false,
-  };
-}
-
 /** The empty cell shown where a row and a column inserted concurrently meet (yjs-schema.ts). */
 export function defaultTableCell(options: Readonly<{ rowId: TableRowId; columnId: TableColumnId }>): TableCell {
   return {
@@ -250,7 +218,6 @@ export function tableLineIds(array: Y.Array<unknown> | null): readonly string[] 
   return ids;
 }
 
-const ORIGIN: Point = { x: 0, y: 0 };
 const DEFAULT_FRAME: Frame = identityFrame({ x: 0, y: 0, width: 100, height: 100 });
 const PLAIN_FILL: Fill = { kind: "none" };
 
@@ -370,7 +337,6 @@ function projectLeaf(options: Readonly<{ record: ElementRecord; groupId: Element
 
 const NO_CROP: ImageCrop = { left: 0, top: 0, right: 0, bottom: 0 };
 const DEFAULT_LINE: LineGeometry = { start: { x: 0, y: 0 }, end: { x: 100, y: 0 } };
-const DEFAULT_STROKE: Stroke = { width: 2, colour: { kind: "theme", slot: "dark1", alpha: 1 }, dash: "solid" };
 
 function storedElementKind(kind: string | null): StoredElementKind | null {
   return STORED_ELEMENT_KINDS.find((candidate) => candidate === kind) ?? null;

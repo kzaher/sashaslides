@@ -8,14 +8,13 @@ import type { DocumentSnapshot } from "../../src/contracts/document.ts";
 import type { AssetId } from "../../src/contracts/ids.ts";
 import { literalColour, themeColour } from "../../src/contracts/style.ts";
 import { sampleSlides } from "../../src/view/sample/sample-deck.ts";
-import { IdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, paragraph, plainBody, run, shapeElement, slideSnapshot, tableElement, textBody } from "../../src/view/sample/snapshot-builders.ts";
+import { SAMPLE_PHOTOGRAPH_ADDRESS } from "../../src/view/sample/sample-photograph.ts";
+import { createPrefixedIdMinter, documentSnapshot, fixtureAssetId, fixtureDeckId, paragraph, plainBody, run, shapeElement, slideSnapshot, tableElement, textBody } from "../../src/contracts/testing/snapshot-builders.ts";
 
 export const COMPARISON_PHOTO_ASSET: AssetId = fixtureAssetId("comparison-photo");
 
 /** The sample photograph as a `data:` address, so neither page loads anything but fonts. */
-export const COMPARISON_PHOTO_ADDRESS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="440" height="360" viewBox="0 0 440 360"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7dd3fc"/><stop offset="1" stop-color="#fde68a"/></linearGradient></defs><rect width="440" height="360" fill="url(#sky)"/><circle cx="330" cy="110" r="46" fill="#fb923c"/><path d="M0 260 L120 150 L230 250 L320 180 L440 270 L440 360 L0 360 Z" fill="#0e7490"/><path d="M0 300 L160 230 L300 300 L440 250 L440 360 L0 360 Z" fill="#047857"/></svg>`,
-)}`;
+export const COMPARISON_PHOTO_ADDRESS = SAMPLE_PHOTOGRAPH_ADDRESS;
 
 /** Every asset of the deck resolves; anything else would be a bug in the deck. */
 export function comparisonAssetAddress(assetId: AssetId): string {
@@ -24,7 +23,7 @@ export function comparisonAssetAddress(assetId: AssetId): string {
 }
 
 export function comparisonDeck(): DocumentSnapshot {
-  const ids = new IdMinter("Compare01");
+  const ids = createPrefixedIdMinter("Compare01");
   const ink = themeColour({ slot: "dark1", alpha: 1 });
   const listId = ids.next("list");
   const layout = slideSnapshot({

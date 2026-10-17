@@ -8,11 +8,12 @@
 // drawn from the store's injected random source, so a seeded test is fully deterministic.
 
 import type { LayoutSnapshot, PlaceholderReference, PlaceholderRole, PlaceholderStyle, ShapeElement, SlideSnapshot, ThemeSnapshot } from "../contracts/document.ts";
-import type { DeckId, ElementId, IdSeed, LayoutId, RandomSource } from "../contracts/ids.ts";
+import type { DeckId, ElementId, RandomSource } from "../contracts/ids.ts";
 import type { RunStyle, ThemeColourSlot } from "../contracts/style.ts";
 import { EMPTY_TEXT_BODY } from "../contracts/document.ts";
 import { identityFrame } from "../contracts/geometry.ts";
-import { mintId, newSessionPrefix } from "../contracts/ids.ts";
+import { newSessionPrefix } from "../contracts/ids.ts";
+import { createPrefixedIdMinter } from "../shared/id-minter.ts";
 import { DEFAULT_TEXT_BOX_STYLE, PLAIN_BOX_STYLE, themeColour } from "../contracts/style.ts";
 
 /** What seeding writes, as plain values (document-writer.ts stores them). */
@@ -95,27 +96,15 @@ export const DEFAULT_THEME: ThemeSnapshot = {
 };
 
 export function blankDeck(options: Readonly<{ deckId: string; random: RandomSource }>): BlankDeck {
-  let seed: IdSeed = { sessionPrefix: newSessionPrefix(options.random), counter: 0 };
-  const nextElementId = (): ElementId => {
-    const minted = mintId({ seed, kind: "element" });
-    seed = minted.seed;
-    return minted.id;
-  };
-  const nextLayoutId = (): LayoutId => {
-    const minted = mintId({ seed, kind: "layout" });
-    seed = minted.seed;
-    return minted.id;
-  };
+  const ids = createPrefixedIdMinter(newSessionPrefix(options.random));
   const layouts = LAYOUT_PLANS.map((plan): LayoutSnapshot => ({
-    id: nextLayoutId(),
+    id: ids.next("layout"),
     name: plan.name,
     background: null,
-    elements: plan.placeholders.map((placeholder) => placeholderShape({ id: nextElementId(), placeholder })),
+    elements: plan.placeholders.map((placeholder) => placeholderShape({ id: ids.next("element"), placeholder })),
   }));
   const titleLayout = layouts[0];
-  const mintedSlide = mintId({ seed, kind: "slide" });
-  seed = mintedSlide.seed;
-  const slideId = mintedSlide.id;
+  const slideId = ids.next("slide");
   const titleSlide: SlideSnapshot = {
     id: slideId,
     layoutId: titleLayout?.id ?? null,
@@ -125,7 +114,7 @@ export function blankDeck(options: Readonly<{ deckId: string; random: RandomSour
     transition: null,
     animations: [],
     elements: (titleLayout?.elements ?? []).map((element) => {
-      const id = nextElementId();
+      const id = ids.next("element");
       return { ...element, id, morphKey: id };
     }),
   };

@@ -29,6 +29,7 @@ import type { ElementMeasurement } from "../../contracts/editor-state.ts";
 import type { PeerPresence } from "../../contracts/presence.ts";
 import type { Size } from "../../contracts/geometry.ts";
 import type { Selection } from "../../contracts/selection.ts";
+import { elementOfKind, findInTree, tableOf } from "../../shared/element-tree.ts";
 import { TIDEPOOL_TOKENS } from "../../theme/tidepool-theme.ts";
 import { VIEW_CLASS } from "../view-stylesheet.ts";
 import {
@@ -40,7 +41,6 @@ import {
   ROTATION_HANDLE_ATTRIBUTE,
   TABLE_COLUMN_BOUNDARY_ATTRIBUTE,
   TABLE_ROW_BOUNDARY_ATTRIBUTE,
-  findElement,
   handleFraction,
   selectionOutline,
   tableBoundaries,
@@ -89,7 +89,7 @@ function SelectionLayer(properties: Readonly<{ outline: ReturnType<typeof select
     case "none":
       return null;
     case "single":
-      return lineOf(outline.element) === null ? (
+      return elementOfKind(outline.element, "line") === null ? (
         <FrameBox frame={outline.frame} scale={properties.scale} handles={outline.showHandles} element={outline.element} measured={properties.measured} />
       ) : (
         <LineHandles element={outline.element} scale={properties.scale} showHandles={outline.showHandles} />
@@ -142,7 +142,7 @@ function TableBoundaryStrips(properties: Readonly<{ table: Extract<ElementSnapsh
 }
 
 function LineHandles(properties: Readonly<{ element: ElementSnapshot; scale: number; showHandles: boolean }>): ReactElement | null {
-  const line = lineOf(properties.element);
+  const line = elementOfKind(properties.element, "line");
   if (line === null) return null;
   const scale = properties.scale;
   const ends: readonly Readonly<{ end: "start" | "end"; point: Point }>[] = [
@@ -169,7 +169,7 @@ function GestureLayer(properties: Readonly<{ gesture: Gesture; scale: number; sl
     case "resizing":
       return <Guides guides={gesture.guides} scale={scale} />;
     case "movingLineEnd": {
-      const line = lineOf(findElement(properties.slide.elements, gesture.elementId));
+      const line = elementOfKind(findInTree(properties.slide.elements, gesture.elementId), "line");
       const fixed = line === null ? null : gesture.end === "start" ? line.end : line.start;
       return (
         <>
@@ -227,7 +227,7 @@ function PeerSelections(properties: Readonly<{ slide: SlideSnapshot; scale: numb
         const selection = peer.selection;
         const elementIds = peerElementIds(selection, properties.slide.id);
         return elementIds.flatMap((elementId) => {
-          const element = findElement(properties.slide.elements, elementId);
+          const element = findInTree(properties.slide.elements, elementId);
           if (element === null) return [];
           return [<div key={`${peer.clientId}:${elementId}`} className={VIEW_CLASS.peerSelection} style={{ ...frameBoxDeclarations(element.frame, properties.scale), color: peerColour(peer.person.colourIndex) }} title={`${peer.person.displayName} has this selected`} />];
         });
@@ -352,7 +352,7 @@ export function markingReferenceBox(options: Readonly<{ arranged: ArrangedThread
   const placement = options.arranged.placement;
   switch (placement.kind) {
     case "onElement": {
-      const element = findElement(options.slide.elements, placement.elementId);
+      const element = findInTree(options.slide.elements, placement.elementId);
       return element === null ? null : { x: element.frame.x, y: element.frame.y, width: element.frame.width, height: element.frame.height };
     }
     case "elementRemoved":
@@ -395,37 +395,6 @@ function boxDeclarations(box: Box, scale: number): CSSProperties {
   return { left: box.x * scale, top: box.y * scale, width: box.width * scale, height: box.height * scale };
 }
 
-function lineOf(element: ElementSnapshot | null): Extract<ElementSnapshot, { kind: "line" }> | null {
-  if (element === null) return null;
-  switch (element.kind) {
-    case "line":
-      return element;
-    case "shape":
-    case "image":
-    case "table":
-    case "group":
-    case "unsupported":
-      return null;
-    default:
-      return assertNever(element);
-  }
-}
-
-function tableOf(element: ElementSnapshot): Extract<ElementSnapshot, { kind: "table" }> | null {
-  switch (element.kind) {
-    case "table":
-      return element;
-    case "shape":
-    case "image":
-    case "line":
-    case "group":
-    case "unsupported":
-      return null;
-    default:
-      return assertNever(element);
-  }
-}
-
 function peerElementIds(selection: Selection, slideId: SlideSnapshot["id"]): readonly ElementId[] {
   switch (selection.kind) {
     case "elements":
@@ -464,5 +433,5 @@ function draftElementId(target: Extract<CommentComposer, { kind: "composing" }>[
 
 function referenceBox(options: Readonly<{ slide: SlideSnapshot; elementId: ElementId | null; fallback: Box }>): Box {
   if (options.elementId === null) return options.fallback;
-  return findElement(options.slide.elements, options.elementId)?.frame ?? options.fallback;
+  return findInTree(options.slide.elements, options.elementId)?.frame ?? options.fallback;
 }
