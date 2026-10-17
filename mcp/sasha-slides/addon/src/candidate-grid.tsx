@@ -44,8 +44,8 @@ export function CandidateGrid({
   onZoom: (index: number) => void;
   /** Put THIS candidate in the deck, before or after the selected slide -- see `CandidateCell`. */
   onInsert: (spec: Readonly<{ index: number; position: InsertPosition }>) => void;
-  /** Report a defect in THIS candidate, same reason. */
-  onReport: (spec: Readonly<{ index: number }>) => void;
+  /** Report a defect in THIS candidate, same reason. Null hides the button (report-flag.ts). */
+  onReport: ((spec: Readonly<{ index: number }>) => void) | null;
   /** Whether inserting is possible at all (a tab that is not an editable presentation). */
   insertable: boolean;
   /** The report window is already being opened; a second press would open a second one. */
@@ -109,7 +109,7 @@ function CandidateCell({
   onInsert: (spec: Readonly<{ index: number; position: InsertPosition }>) => void;
   /** A merge redesigns its own slide, so it has nothing to place before or after. */
   merging: boolean;
-  onReport: (spec: Readonly<{ index: number }>) => void;
+  onReport: ((spec: Readonly<{ index: number }>) => void) | null;
   insertable: boolean;
   reportOpening: boolean;
   onDraw: (spec: Readonly<{ index: number; region: Region }>) => void;
@@ -155,15 +155,17 @@ function CandidateCell({
           reported "it ignored my selected slide" when it could only append -- or say it is
           broken. A merge keeps its one button: it redesigns a slide that is already placed. */}
       <footer className="sasha-cell-foot">
-        <button
-          type="button"
-          className="sasha-secondary sasha-small"
-          disabled={disabled || reportOpening}
-          title={REPORT_EXPLANATION}
-          onClick={() => onReport({ index: frame.index })}
-        >
-          Report defect
-        </button>
+        {onReport === null ? null : (
+          <button
+            type="button"
+            className="sasha-secondary sasha-small"
+            disabled={disabled || reportOpening}
+            title={REPORT_EXPLANATION}
+            onClick={() => onReport({ index: frame.index })}
+          >
+            Report defect
+          </button>
+        )}
         {merging ? (
           <button
             type="button"

@@ -73,6 +73,7 @@ import type { CommentBot } from "./comment-bot/comment-bot";
 import { loadCommentBot } from "./comment-bot/comment-bot-stack";
 import { openCommentTasks, registerCommentTools, type CommentTaskPayload } from "./comment-bot/comment-tools";
 import { loadAccountPortal } from "./http/account-portal-stack";
+import { loadReportStack } from "./reports/report-stack";
 import { parseSessionSecret, type SessionSecretParse } from "./http/account-portal";
 import { withDeckErasure } from "./http/account-eraser";
 import { storeAccountDirectory } from "./http/account-directory";
@@ -1670,6 +1671,8 @@ export type ServerMode =
       deckDataDirectory: string | null;
       /** The built web application (`engine/dist/web`); null is the one beside this server. */
       webBuildDirectory: string | null;
+      /** Where defect reports are stored (`--reports`); null leaves `/v1/reports` and `/account/reports` off. */
+      reportsDirectory: string | null;
     }>
   | Readonly<{ kind: "usage"; reason: string | null }>;
 
@@ -1741,12 +1744,13 @@ export function parseServerMode(args: readonly string[]): ServerMode {
     instructionsBudget,
     deckDataDirectory: values.get("--deck-data") ?? null,
     webBuildDirectory: values.get("--web-build") ?? null,
+    reportsDirectory: values.get("--reports") ?? null,
   };
 }
 
 export const USAGE = `sasha-slides MCP server
 
-  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--mail-sender <path> [--trusted-proxy <subnets>]] [--google-client <path>] [--deck-data <directory>] [--web-build <directory>]
+  npx tsx mcp/sasha-slides/server.ts --http --public-url <url> [--port ${String(DEFAULT_HTTP_PORT)}] [--host ${DEFAULT_HTTP_HOST}] [--store <path> --key-store <path>] [--identity-providers <path>] [--mail-sender <path> [--trusted-proxy <subnets>]] [--google-client <path>] [--deck-data <directory>] [--web-build <directory>] [--reports <directory>]
   npx tsx mcp/sasha-slides/server.ts --stdio
 
   --http         Remote Streamable HTTP server with per-user brokered Google OAuth.
@@ -1798,6 +1802,10 @@ export const USAGE = `sasha-slides MCP server
                  owner's account key) and deck-profiles/. Defaults to the directory of --store
                  (/data in production); without --store, decks live in memory. Decks need the
                  account portal (SASHA_SESSION_SECRET), where people sign in to them.
+  --reports      Directory for the add-on's defect reports. Turns on POST <public-url>/v1/reports
+                 (report-service/'s intake, configured by its REPORT_* variables) and the admin
+                 pages at <public-url>/account/reports, readable only by the verified addresses in
+                 SASHA_ADMIN_EMAILS (comma-separated). The pages need the account portal.
   --web-build    The built deck web application (manifest.json and its files). Defaults to
                  engine/dist/web next to this server; without a build, /decks answers 503.
   --google-callback-url  TESTING. Where Google returns the user, instead of
@@ -2107,6 +2115,7 @@ const VALUE_FLAGS: readonly string[] = [
   "--frame-log",
   "--deck-data",
   "--web-build",
+  "--reports",
 ];
 const BARE_FLAGS: readonly string[] = ["--http", "--stdio", "--help", "-h"];
 
@@ -2187,7 +2196,7 @@ function instrumentedTransport(options: Readonly<{ inner: Transport; frameLogPat
   });
 }
 
-function serveHttp(
+async function serveHttp(
   mode: Extract<ServerMode, Readonly<{ kind: "http" }>>,
 ): Promise<void> {
   const warn = serverWarn;
@@ -2207,6 +2216,15 @@ function serveHttp(
   const decks = loadDeckServer({ mode, stack, sessionSecret, warn });
   if (decks.kind === "failed") return failStartup(decks.message);
   const deckServer = decks.kind === "ok" ? decks.server : null;
+  const reports = await loadReportStack({
+    directory: mode.reportsDirectory,
+    env: process.env,
+    sessionSecret: sessionSecret !== null && sessionSecret.kind === "ok" ? sessionSecret.secret : null,
+    now: () => new Date(),
+    warn,
+  });
+  if (reports.kind === "failed") return failStartup(reports.message);
+  const reportStack = reports.kind === "ok" ? reports.stack : null;
   const portal = loadAccountPortal({
     publicUrl: mode.publicUrl,
     identityProvidersPath: mode.identityProvidersPath,
@@ -2218,6 +2236,7 @@ function serveHttp(
     vault: stack.vault,
     eraser: deckServer === null ? stack.eraser : withDeckErasure({ eraser: stack.eraser, eraseDecks: deckServer.eraseAccount }),
     deckSessionStart: deckServer === null ? null : deckServer.deckSessionStart,
+    reportPages: reportStack === null ? null : reportStack.pages,
     warn,
   });
   if (portal.kind === "failed") return failStartup(portal.message);
@@ -2261,6 +2280,7 @@ function serveHttp(
     driveHook: driveHookFor(bot),
     commentAccess: commentBot.accessPage,
     ...(deckServer === null ? {} : { decks: deckServer }),
+    ...(reportStack === null ? {} : { reportIntake: reportStack.intake }),
   });
   if (deckServer !== null) shutDownOnTerminate({ deckServer, httpServer, warn });
   return new Promise<void>((resolve) => {
@@ -2276,6 +2296,8 @@ function serveHttp(
         ...portal.banner,
         ...commentBot.banner,
         ...decks.banner,
+        ...(reports.kind === "ok" ? reports.stack.banner : reports.banner),
+        ...(reportStack !== null && portal.kind !== "ok" ? ["defect reports: the account portal is off, so /account/reports is unavailable"] : []),
       ];
       for (const line of banner) serverWarn(line);
       void bot.start().catch((cause: unknown) => warn(`comment bot: start failed: ${String(cause)}`));

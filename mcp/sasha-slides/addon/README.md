@@ -13,6 +13,12 @@ one thing. Everything else is opened *by* the conversation.
 | **the slides** | a button in Ask Sasha, and **automatically when slides arrive** | `Dialog.html` ← `src/dialog.tsx` | **the editor.** Two independent axes: a **view** (*all candidates* in a two-column grid, or *one slide* large) and a **tool** (*edit*, the default, or *annotate*). All four combinations are legal — annotate from the grid, edit one slide large — because a view is a zoom level and a tool is a choice, and neither is a screen. Each cell carries its **unresolved comment count**; a note sent from the annotate tool becomes a Drive comment on that candidate. |
 | **the defect report** | a button in either of the others | `Report.html` ← `src/report.tsx` | **the same editor, showing two slides**: the candidate as it is and as it will be sent, both rendered, with the anonymiser's verdicts as numbered annotations pinned to the slide they are about. Edit the title, edit either slide, send. **Its own document, for the size** — see Known limits. |
 
+**"Report defect" is behind a flag and OFF by default**: `DEFECT_REPORTS_ENABLED` in
+`src/report-flag.ts` hides the button under each candidate until the report service is deployed
+(it is mounted in the connector at `https://sashaslides.com/v1/reports`; `deploy/DEPLOY.md`,
+"Defect reports"). Set it to `true`, rebuild and deploy to offer it. The report window, `Report.html`
+and its Code.gs functions ship either way.
+
 MODELESS, not modal: a modal dialog freezes the deck behind it, and the whole point is comparing a
 candidate against the deck it is going into. It also leaves the sidebar usable while it is open.
 

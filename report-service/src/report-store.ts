@@ -20,10 +20,11 @@
 // process dies in that window, and is handled by `sweep`, which reports such files as orphans.
 //
 // WHAT THE INDEX DOES NOT CONTAIN: any part of the submission. Only sizes, hashes, timestamps and
-// version strings. This is deliberate and load-bearing for the HTTP layer: `find` returns an index
-// entry, there is no function here that returns the submitted HTML, and so there is no code path
-// by which a request handler could echo it even by mistake. Reading a report's content is an
-// operator action done with `cat`, off the disk, outside this process.
+// version strings. This is deliberate and load-bearing for the PUBLIC HTTP layer: it is handed a
+// `ReportIntake` (submit, find, remove), whose `find` returns an index entry, so there is no code
+// path by which the public intake could echo a submission even by mistake. Reading content is the
+// `ReportArchive` half (`list`, `read`, `purge`), which only the signed-in admin pages receive
+// (`mcp/sasha-slides/reports/`).
 //
 // SINGLE PROCESS BY DESIGN. The write mutex is an in-process promise chain. Two instances of this
 // service pointed at the same directory would interleave index appends; `O_APPEND` keeps lines
@@ -35,7 +36,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { assertNever } from "./assert-never.ts";
-import { reportSizes, type DefectReport, type ReportVersions } from "./defect-report.ts";
+import { parseDefectReport, reportSizes, type DefectReport, type ReportVersions } from "./defect-report.ts";
 import {
   newDeletionToken,
   newReportId,
@@ -99,13 +100,39 @@ export type StoreLimits = Readonly<{
   retentionDays: number;
 }>;
 
+/** A stored report read back whole: its index entry and the validated submission. */
+export type StoredReport = Readonly<{ entry: ReportIndexEntry; report: DefectReport }>;
+
+export type ReadOutcome =
+  | Readonly<{ kind: "found"; stored: StoredReport }>
+  | Readonly<{ kind: "not-found" }>
+  /** The file is missing or no longer parses as a report. Never guessed at. */
+  | Readonly<{ kind: "unreadable"; detail: string }>;
+
+export type PurgeOutcome =
+  | Readonly<{ kind: "removed" }>
+  | Readonly<{ kind: "not-found" }>
+  | Readonly<{ kind: "remove-failed"; detail: string }>;
+
 export type ReportStore = Readonly<{
   submit: (options: Readonly<{ report: DefectReport; receivedAt: Date }>) => Promise<SubmitOutcome>;
   find: (id: ReportId) => ReportIndexEntry | null;
   remove: (options: Readonly<{ id: ReportId; deletionToken: DeletionToken }>) => Promise<RemoveOutcome>;
+  /** Every report held, newest first. Index entries only: no content. */
+  list: () => readonly ReportIndexEntry[];
+  /** The whole submission. Only the admin pages are handed this (see `ReportArchive`). */
+  read: (id: ReportId) => Promise<ReadOutcome>;
+  /** Deletion by the operator: no token, because the caller has already been authorised. */
+  purge: (id: ReportId) => Promise<PurgeOutcome>;
   sweep: (options: Readonly<{ now: Date }>) => Promise<SweepOutcome>;
   stats: () => StoreStats;
 }>;
+
+/** What the PUBLIC endpoint gets: nothing in it returns a submission. */
+export type ReportIntake = Pick<ReportStore, "submit" | "find" | "remove">;
+
+/** What the signed-in admin pages get. */
+export type ReportArchive = Pick<ReportStore, "list" | "find" | "read" | "purge">;
 
 /**
  * Creates the directory layout if it is absent and replays the index. Every dependency the store
@@ -221,6 +248,36 @@ export async function openReportStore(options: {
       return { kind: "removed" };
     });
 
+  const list = (): readonly ReportIndexEntry[] =>
+    [...entries.values()].sort((left, right) => right.receivedAt.localeCompare(left.receivedAt));
+
+  const read = async (id: ReportId): Promise<ReadOutcome> => {
+    const entry = entries.get(id);
+    if (entry === undefined) return { kind: "not-found" };
+    const raw = await readFileOrNull(reportPathFor({ paths, id }));
+    if (raw === null) return { kind: "unreadable", detail: "the report file is missing" };
+    // The file is this service's own, but it is re-validated through the same parser the intake
+    // uses rather than cast: a file somebody edited on the disk is still untrusted input.
+    const record = parseJsonObject(raw);
+    const submitted = record === null ? undefined : record["report"];
+    if (submitted === undefined) return { kind: "unreadable", detail: "the report file is not a stored report" };
+    const parsed = parseDefectReport({ body: JSON.stringify(submitted) });
+    if (parsed.kind === "rejected") return { kind: "unreadable", detail: parsed.rejection.detail };
+    return { kind: "found", stored: { entry, report: parsed.report } };
+  };
+
+  const purge = async (id: ReportId) =>
+    serialise(async (): Promise<PurgeOutcome> => {
+      const entry = entries.get(id);
+      if (entry === undefined) return { kind: "not-found" };
+      const forgotten = await forget({ paths, entry, at: new Date() });
+      if (forgotten.kind === "failed") return { kind: "remove-failed", detail: forgotten.detail };
+      entries.delete(id);
+      byContentHash.delete(entry.contentHash);
+      totalBytes -= entry.storedBytes;
+      return { kind: "removed" };
+    });
+
   const sweep = async ({ now }: Readonly<{ now: Date }>) =>
     serialise(async (): Promise<SweepOutcome> => {
       const cutoff = now.getTime() - options.limits.retentionDays * 24 * 60 * 60 * 1000;
@@ -240,7 +297,7 @@ export async function openReportStore(options: {
       return { expired, orphanFiles, compacted };
     });
 
-  return Object.freeze({ submit, find, remove, sweep, stats });
+  return Object.freeze({ submit, find, remove, list, read, purge, sweep, stats });
 }
 
 type StorePaths = Readonly<{
@@ -493,18 +550,25 @@ async function readFileOrNull(path: string): Promise<string | null> {
  * including the timestamp would defeat the duplicate suppression that bounds a retry loop's cost.
  */
 function contentHashOf(report: DefectReport): string {
-  return sha256Hex(
-    JSON.stringify([
-      report.schemaVersion,
-      report.note,
-      report.document.html,
-      report.converterOutput.format,
-      report.converterOutput.text,
-      report.versions.addon,
-      report.versions.converter,
-      report.versions.protocol,
-    ]),
-  );
+  const common = [
+    report.schemaVersion,
+    report.note,
+    report.document.html,
+    report.converterOutput.format,
+    report.converterOutput.text,
+    report.versions.addon,
+    report.versions.converter,
+    report.versions.protocol,
+  ];
+  switch (report.schemaVersion) {
+    case 1:
+      // Unchanged from before version 2 existed, so hashes already in an index stay valid.
+      return sha256Hex(JSON.stringify(common));
+    case 2:
+      return sha256Hex(JSON.stringify([...common, report.context, report.attachments]));
+    default:
+      return assertNever(report.schemaVersion);
+  }
 }
 
 function sha256Hex(value: string): string {

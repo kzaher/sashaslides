@@ -233,6 +233,14 @@ else
   echo "SASHA_SESSION_SECRET=$(openssl rand -hex 32)" >> "$env_file"
   echo "  -> generated SASHA_SESSION_SECRET (losing it only signs everyone out of /account)"
 fi
+# Defect reports (--reports /data/reports): stored by the connector, readable at /account/reports only
+# by the verified addresses in SASHA_ADMIN_EMAILS, which is set by hand and never generated.
+install -d -m 0700 -o "$uid" -g "$uid" "$home/data/reports"
+if grep -q '^SASHA_ADMIN_EMAILS=.' "$env_file"; then
+  echo "  -> SASHA_ADMIN_EMAILS present (defect reports readable at /account/reports)"
+else
+  echo "  -> SASHA_ADMIN_EMAILS not set: defect reports are stored but nobody can read them; add SASHA_ADMIN_EMAILS=<address> to $env_file"
+fi
 REMOTE
 
   step "connector: OAuth client and identity providers"
@@ -365,6 +373,9 @@ verify() {
   if [ "$target" != site ]; then
     check "/connector/healthz" 200 '"status"' || failures=$((failures + 1))
     check "/account" 200 "" || failures=$((failures + 1))
+    # Defect reports: signed out, the admin pages send the browser to sign in; an unknown id reaches the intake.
+    check "/account/reports" 303 "" || failures=$((failures + 1))
+    check "/v1/reports/rep_00000000000000000000000000" 404 '"not-found"' || failures=$((failures + 1))
     check "/.well-known/oauth-protected-resource/mcp" 200 '"resource"' || failures=$((failures + 1))
   fi
   [ "$failures" = 0 ] || die "$failures check(s) failed"

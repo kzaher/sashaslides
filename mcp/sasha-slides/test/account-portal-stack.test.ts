@@ -35,6 +35,7 @@ function load(mailSenderText: string, besideMailSender: Readonly<Record<string, 
     vault,
     eraser: createAccountEraser({ store, vault, revokeGoogleToken: () => Promise.resolve(false) }),
     deckSessionStart: null,
+    reportPages: null,
     warn: () => undefined,
   });
 }

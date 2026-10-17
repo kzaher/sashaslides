@@ -40,6 +40,10 @@ import {
   tagsWithClass,
 } from "./test-support.ts";
 import { describeEdit, type SlideEdit } from "./editor/index.ts";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { CandidateGrid } from "./candidate-grid.tsx";
+import { DEFECT_REPORTS_ENABLED } from "./report-flag.ts";
 
 const proposal: Proposal = {
   merge: null,
@@ -186,7 +190,8 @@ test("the grid draws one cell per candidate, numbered 1..N", () => {
   assert.doesNotMatch(markup, /to mark it up/, "clicking a cell no longer enters a mark-up screen");
   // What a cell can receive: Report defect, and Insert before / after the selected slide, the
   // usual direction (after) last and accented.
-  assert.equal(countOf(markup, />Report defect</g), 4, "one per candidate");
+  // Report defect is behind its flag (report-flag.ts) until the report service is deployed.
+  assert.equal(countOf(markup, />Report defect</g), DEFECT_REPORTS_ENABLED ? 4 : 0, "one per candidate when enabled");
   assert.equal(countOf(markup, /class="sasha-secondary sasha-small"[^>]*>Insert before</g), 4, "one per candidate");
   assert.equal(countOf(markup, /class="sasha-primary sasha-small"[^>]*>Insert after</g), 4, "one per candidate");
 });
@@ -568,4 +573,25 @@ test("and the SELECT tool does not open one -- it inspects instead", () => {
     ]),
   );
   assert.doesNotMatch(selected, /class="sasha-spot"/, "select edits; annotate comments");
+});
+
+test("Report defect is off by default, and the grid draws it under every candidate once it is wired", () => {
+  assert.equal(DEFECT_REPORTS_ENABLED, false, "off until the report service is deployed (report-flag.ts)");
+  const state = play([{ kind: "proposal-offered", proposal, presentationId: "deck_1" }]);
+  const offer = offerOf(state) ?? neverOffer();
+  const grid = (onReport: ((spec: Readonly<{ index: number }>) => void) | null): string =>
+    renderToStaticMarkup(
+      createElement(CandidateGrid, {
+        offer,
+        disabled: false,
+        onZoom: () => undefined,
+        onInsert: () => undefined,
+        onReport,
+        insertable: true,
+        reportOpening: false,
+        onDraw: () => undefined,
+      }),
+    );
+  assert.equal(countOf(grid(() => undefined), />Report defect</g), 4);
+  assert.equal(countOf(grid(null), />Report defect</g), 0);
 });

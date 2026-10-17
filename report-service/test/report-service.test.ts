@@ -184,7 +184,7 @@ test("malformed JSON, wrong types and a wrong schema version are each refused di
   assert.equal(missing.status, 422);
   assert.equal(errorCodeOf(missing.body), "missing-field");
 
-  const futureSchema = await submitJson({ service, payload: { ...validReport({}), schemaVersion: 2 } });
+  const futureSchema = await submitJson({ service, payload: { ...validReport({}), schemaVersion: 3 } });
   assert.equal(futureSchema.status, 422);
   assert.equal(errorCodeOf(futureSchema.body), "unsupported-schema-version");
 

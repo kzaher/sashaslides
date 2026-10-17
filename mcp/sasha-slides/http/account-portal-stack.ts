@@ -27,6 +27,7 @@ import {
   type AccountPortal,
   type DeckSessionStart,
   type SessionSecretParse,
+  type SignedInPages,
 } from "./account-portal";
 import type { AccountEraser, AccountVault } from "./account-vault";
 import { randomAccountId } from "./accounts";
@@ -70,6 +71,8 @@ export function loadAccountPortal(
     eraser: AccountEraser;
     /** The deck web application's session start (decks/deck-stack.ts), or null without decks. */
     deckSessionStart: DeckSessionStart | null;
+    /** The defect-report admin pages (reports/report-stack.ts), or null without `--reports`. */
+    reportPages: SignedInPages | null;
     warn: (message: string) => void;
   }>,
 ): AccountPortalLoad {
@@ -109,6 +112,7 @@ export function loadAccountPortal(
     warn: options.warn,
     passwordSignIn: password.passwordSignIn,
     deckSessionStart: options.deckSessionStart,
+    reportPages: options.reportPages,
   });
   return {
     kind: "ok",

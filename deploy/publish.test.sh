@@ -40,6 +40,12 @@ for target in site connector all; do
     expect "$target: checks the protected-resource document" 'oauth-protected-resource/mcp' "$output"
     # Secrets are read at startup: an unchanged image must still restart on new secrets (2026-10-13).
     expect "$target: connector restarts even when its image is unchanged" 'docker compose -p sasha-connector up -d --force-recreate' "$output"
+    # Defect reports: a storage directory owned by the container user, the admin allow-list checked
+    # (never generated), and both routes verified.
+    expect "$target: reports directory for the container user" 'install -d -m 0700 -o "\$uid" -g "\$uid" "\$home/data/reports"' "$output"
+    expect "$target: admin allow-list only reported, never generated" "grep -q '\^SASHA_ADMIN_EMAILS=\.' " "$output"
+    expect "$target: checks the report admin pages" 'check GET https://[^ ]+/account/reports → 303' "$output"
+    expect "$target: checks the report intake" 'check GET https://[^ ]+/v1/reports/rep_0+ → 404' "$output"
   fi
   # First deploy obtains the certificate before the site file that names it is installed.
   expect "$target: certbot only when the certificate is missing" 'if \[ ! -d "/etc/letsencrypt/live/\$domain" \]; then' "$output"

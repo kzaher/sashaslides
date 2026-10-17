@@ -54,6 +54,12 @@ export type AccountDirectory = Readonly<{
   ): Promise<AccountId>;
   /** Null when the account no longer exists (erased since the session was issued). */
   describe(options: Readonly<{ accountId: AccountId }>): Promise<AccountDescription | null>;
+  /**
+   * The account's addresses in full, lower-cased, from every linked sign-in that has one. Only a
+   * provider-verified address is ever stored (account-portal.ts), so these are verified. For an
+   * allow-list check on the server (reports/admin-allow-list.ts); never rendered on a page.
+   */
+  verifiedEmails(options: Readonly<{ accountId: AccountId }>): Promise<readonly string[]>;
   /** Opens a new account whose only sign-in is this passkey. */
   createAccountWithPasskey(options: Readonly<{ passkey: NewPasskey }>): Promise<PasskeyLinkOutcome>;
   /** Adds a passkey to an account that already exists. */
@@ -252,6 +258,18 @@ export function storeAccountDirectory(
         links.push({ linkId: linkIdOf(linkKey), provider: link.provider, emailHint: email === null ? null : emailHint(email), linkedAtMs: link.linkedAtMs });
       }
       return { links };
+    },
+    verifiedEmails: async ({ accountId }) => {
+      const account = await store.accounts.get({ key: accountId });
+      if (account === null) return [];
+      const emails = new Set<string>();
+      for (const linkKey of account.linkKeys) {
+        const link = await store.accountLinks.get({ key: linkKey });
+        if (link === null || link.sealedEmail === null) continue;
+        const email = await vault.open({ accountId, sealed: link.sealedEmail });
+        if (email !== null) emails.add(email.trim().toLowerCase());
+      }
+      return [...emails];
     },
     linkIdentity: async ({ accountId, provider, subject, email }) => {
       const account = await store.accounts.get({ key: accountId });

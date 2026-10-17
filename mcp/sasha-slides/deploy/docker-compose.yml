@@ -6,8 +6,8 @@
 #
 #   /root/sasha-connector/
 #     src/       build context, replaced on every deploy by deploy/publish.sh
-#     data/      oauth-store.json + account-keys.json   (owned by uid 10100, the container user)
-#     secrets/   0700: connector.env (SASHA_MASTER_KEY, SASHA_SESSION_SECRET, SASHA_PICKER_API_KEY),
+#     data/      oauth-store.json + account-keys.json + reports/ (defect reports)   (owned by uid 10100, the container user)
+#     secrets/   0700: connector.env (SASHA_MASTER_KEY, SASHA_SESSION_SECRET, SASHA_PICKER_API_KEY, SASHA_ADMIN_EMAILS),
 #                google_oauth_web.json, identity-providers.json, apple-signin.p8, mail-sender.json, gmail-service-account.json (0600, owned by uid 10100)
 #
 # SASHA_MASTER_KEY wraps every account key in data/account-keys.json: losing it, or
@@ -33,6 +33,10 @@ services:
       - no-new-privileges:true
     env_file:
       - ${SASHA_CONNECTOR_HOME:-/root/sasha-connector}/secrets/connector.env
+    environment:
+      # nginx is the one proxy in front (Docker's port proxy adds no X-Forwarded-For), so the
+      # defect-report rate limiter keys on the address nginx appended (report-service/README.md).
+      REPORT_TRUSTED_PROXY_HOPS: "1"
     ports:
       - "127.0.0.1:${SASHA_CONNECTOR_PORT:-6100}:8787"
     volumes:

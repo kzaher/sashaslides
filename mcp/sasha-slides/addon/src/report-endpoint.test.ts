@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import type { DefectReport } from "./anonymise/index.ts";
 import {
   CONVERTER_OUTPUT_FORMAT,
+  DEFAULT_REPORT_ENDPOINT,
+  REPORT_BODY_LIMIT_BYTES,
   REPORT_SCHEMA_VERSION,
   browserHttpPost,
   endpointProblem,
@@ -35,12 +37,14 @@ const REPORT: DefectReport = {
   },
 };
 
-test("the body is exactly the service's six fields, and the HTML is the preview's byte for byte", () => {
+test("the body is exactly the service's eight fields, and the HTML is the preview's byte for byte", () => {
   const body = reportRequestBodyOf({ report: REPORT, clientReportedAt: AT });
   assert.equal(body.kind, "ok");
   if (body.kind !== "ok") return;
   assert.deepEqual(Object.keys(body.value).sort(), [
+    "attachments",
     "clientReportedAt",
+    "context",
     "converterOutput",
     "document",
     "note",
@@ -103,7 +107,7 @@ test("nothing answering is `unreachable` with the endpoint and what to do about 
   assert.equal(submission.kind, "unreachable");
   if (submission.kind !== "unreachable") return;
   assert.match(submission.message, /127\.0\.0\.1:8787/);
-  assert.match(submission.message, /not running by default/);
+  assert.match(submission.message, /npm start/);
 });
 
 test("a body over the service's cap is refused locally rather than sent to be refused", async () => {
@@ -116,7 +120,7 @@ test("a body over the service's cap is refused locally rather than sent to be re
   });
   const submission = await submitter.submit({
     endpoint: "http://127.0.0.1:8787/v1/reports",
-    body: "x".repeat(3 * 1024 * 1024),
+    body: "x".repeat(REPORT_BODY_LIMIT_BYTES + 1),
   });
   assert.equal(posted, false);
   assert.equal(submission.kind, "refused");
@@ -170,4 +174,36 @@ test("a thrown fetch becomes `no-answer` rather than escaping the submitter", as
 test("the byte count is bytes of UTF-8, so an emoji cannot buy four times the budget", () => {
   assert.equal(utf8Length("abc"), 3);
   assert.equal(utf8Length("\u{1f600}"), 4);
+});
+
+test("version 2 sends the label and the risk and note annotations, never a leak or a forbidden identifier", () => {
+  const body = reportRequestBodyOf({
+    report: REPORT,
+    clientReportedAt: AT,
+    slideLabel: "Quarterly results",
+    mustNotContain: ["deck_secret_id"],
+    annotations: [
+      { annotationId: "leak_reintroduced", tone: "leak", heading: "Acme is back", detail: "Acme", side: "as-sent" },
+      { annotationId: "residual_0", tone: "risk", heading: "Numbers kept", detail: "Digits stay.", side: "as-sent" },
+      { annotationId: "note one", tone: "note", heading: "Tally", detail: "3 redacted", side: "as-is" },
+      { annotationId: "residual_1", tone: "risk", heading: "id", detail: "mentions deck_secret_id", side: "as-sent" },
+    ],
+  });
+  assert.equal(body.kind, "ok");
+  if (body.kind !== "ok") return;
+  assert.equal(body.value.schemaVersion, 2);
+  assert.equal(body.value.context.slideLabel, "Quarterly results");
+  assert.deepEqual(
+    body.value.attachments.annotations.map((annotation) => `${annotation.id}:${annotation.tone}`),
+    ["residual_0:risk", "note_one:note"],
+  );
+  assert.deepEqual(body.value.attachments.screenshots, []);
+  const leaky = reportRequestBodyOf({ report: REPORT, clientReportedAt: AT, slideLabel: "for deck_secret_id", mustNotContain: ["deck_secret_id"] });
+  assert.equal(leaky.kind === "ok" ? leaky.value.context.slideLabel : "?", "");
+});
+
+test("the default endpoint is the deployed connector's, and its body cap matches the service's", () => {
+  assert.equal(DEFAULT_REPORT_ENDPOINT, "https://sashaslides.com/v1/reports");
+  assert.equal(endpointProblem(DEFAULT_REPORT_ENDPOINT), null);
+  assert.equal(REPORT_BODY_LIMIT_BYTES, 8 * 1024 * 1024);
 });

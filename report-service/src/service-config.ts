@@ -8,6 +8,8 @@
 // parsed as NaN and then compared with `>` would disable the disk cap, which is the kind of
 // mis-set variable that is only discovered when the volume is full.
 
+import { REPORT_LIMITS } from "./defect-report.ts";
+
 /** Resolved, validated, immutable. Nothing below the composition root reads `process.env`. */
 export type ServiceConfig = Readonly<{
   host: string;
@@ -58,7 +60,7 @@ export function parseServiceConfig(options: {
     host: options.env["REPORT_HOST"] ?? "127.0.0.1",
     port: read({ name: "REPORT_PORT", fallback: 8787, min: 0, max: 65535 }),
     dataDir: options.env["REPORT_DATA_DIR"] ?? "./data",
-    maxBodyBytes: read({ name: "REPORT_MAX_BODY_BYTES", fallback: 2 * 1024 * 1024, min: 1024, max: 64 * 1024 * 1024 }),
+    maxBodyBytes: read({ name: "REPORT_MAX_BODY_BYTES", fallback: REPORT_LIMITS.bodyBytes, min: 1024, max: 64 * 1024 * 1024 }),
     rateLimit: {
       burstCapacity: read({ name: "REPORT_RATE_BURST", fallback: 10, min: 1, max: 10_000 }),
       burstRefillPerSecond: read({ name: "REPORT_RATE_BURST_REFILL_PER_SECOND", fallback: 1, min: 0.001, max: 1000 }),

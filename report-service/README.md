@@ -217,12 +217,12 @@ then gets stored.
 A service that accepts arbitrary HTML from strangers and can be persuaded to serve it back is an open
 XSS and phishing host: submit a page, get a URL on a plausible-looking origin, send it to someone.
 
-So there is **no HTML view anywhere in this service, and no route that returns a submission at all**.
-The defence is structural rather than a sanitiser:
+So the **public routes** have no HTML view and no route that returns a submission at all. The
+defence is structural rather than a sanitiser:
 
-* The store exposes no function that returns submitted text. `find` returns an index entry holding
-  sizes, hashes, timestamps and versions. A request handler therefore *cannot* read the HTML, even
-  by mistake, because nothing hands it to one.
+* The public handler is given a `ReportIntake` (`submit`, `find`, `remove`), which has no function
+  that returns submitted text. `find` returns an index entry holding sizes, hashes, timestamps and
+  versions. A request handler therefore *cannot* read the HTML, even by mistake.
 * Every response is `application/json; charset=utf-8` with `X-Content-Type-Options: nosniff`, so a
   browser will not sniff one into markup.
 * Every response — including errors — carries
@@ -231,7 +231,42 @@ The defence is structural rather than a sanitiser:
   future route did serve the wrong thing, it would still have no scripting and no origin.
 * Unmatched request paths are not reflected into the response or the log.
 
-An operator who needs to read a report opens the file on disk. That is deliberately out of band.
+The operator reads reports through the **admin pages**, which are not part of this package: the
+Sasha Slides connector mounts this service and serves `/account/reports` behind its account sign-in
+and an allow-list (`SASHA_ADMIN_EMAILS`), handing those pages the `ReportArchive` half of the store
+(`list`, `read`, `purge`). There the slide is served from its own route under
+`Content-Security-Policy: sandbox` (no scripts, an opaque origin, `data:` images only) and embedded
+with an empty `sandbox` attribute. See `mcp/sasha-slides/reports/report-admin.ts`.
+
+---
+
+## Schema version 2, triage and the zip
+
+Version 2 adds two required fields; version 1 bodies are still accepted (stored with an empty
+context and no attachments):
+
+```json
+"context": { "slideLabel": "Quarterly results" },
+"attachments": {
+  "annotations": [{ "id": "residual_0", "tone": "risk", "heading": "Numbers kept", "detail": "…", "side": "as-sent" }],
+  "screenshots": [{ "name": "as-sent.png", "mediaType": "image/png", "base64": "iVBORw0…" }]
+}
+```
+
+`tone` is `leak`, `risk` or `note`; `side` is `as-is` or `as-sent`. At most 64 annotations and 4
+screenshots, each a real PNG (magic number checked) of at most 1 MiB; the body cap is 8 MiB.
+
+The owner's processing never rewrites a report: `triage.jsonl` (`src/report-triage.ts`) is an
+append-only log of status changes (`new`, `triaged`, `fixed`, `wontfix`) and notes, compacted with the
+retention sweep. `src/report-zip.ts` packs one report as `<id>.zip`: `README.txt`, `report.json`
+(metadata, comment, triage), `note.txt`, `slide.html`, `converter-output.json`, `annotations.json`
+and `screenshots/`. `src/report-overview.ts` is the overview's data layer (rows, filters, counts).
+
+## Deployment
+
+In production this package runs inside the connector (`server.ts --reports <directory>`, see
+`mcp/sasha-slides/reports/report-stack.ts` and `deploy/DEPLOY.md`), not as its own process, so one
+process owns the store. `npm start` here remains the way to run it alone for development.
 
 ---
 

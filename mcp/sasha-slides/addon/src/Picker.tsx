@@ -16,6 +16,7 @@
 // answer it, resolve it and revise the slide. The old post-insert "review this deck" mode is gone
 // (see picker-state.ts), and so is the defect-report mode: that is a third document now.
 
+import { DEFECT_REPORTS_ENABLED } from "./report-flag.ts";
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { DIALOG_STYLESHEETS } from "./surface-stylesheets.ts";
 import { SlideEditorWindow } from "./slide-editor-window.tsx";
@@ -344,7 +345,7 @@ function CandidateGridBody({
       disabled={busy}
       onZoom={actions.openEditor}
       onInsert={actions.insertPicked}
-      onReport={actions.openReport}
+      onReport={DEFECT_REPORTS_ENABLED ? actions.openReport : null}
       insertable={offer.presentationId !== null}
       reportOpening={offer.report.kind === "opening"}
       onDraw={actions.drawAnomaly}

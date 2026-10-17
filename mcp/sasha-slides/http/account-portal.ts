@@ -26,6 +26,9 @@
  *   GET  /account/link-complete       the second half of a link (see "Linking" below)
  *   POST /account/unlink              session + CSRF token + `link` id → remove one sign-in
  *   GET  /account/passkey.js          the passkey script (`passkey-browser/passkey.ts`)
+ *   ANY  /account/reports[/...]        handed to `reportPages` (reports/report-admin.ts) with the
+ *                                     signed-in viewer, or null; absent → 404. Under `/account` so
+ *                                     the session cookie (`Path=/account`) reaches it unchanged.
  *   POST /account/passkey/<ceremony>/options   a fresh challenge, bound to this browser
  *   POST /account/passkey/<ceremony>/verify    check the authenticator's answer (`webauthn.ts`)
  *                                     and set the session; <ceremony> is `create` (a new
@@ -193,7 +196,22 @@ export type DeckSessionStart = Readonly<{
   clearCookie(): string;
 }>;
 
+/**
+ * Who is looking at a page under `/account` that another module renders: the session's account,
+ * its CSRF token for the page's forms, and the account's verified addresses for an allow-list.
+ */
+export type SignedInViewer = Readonly<{ accountId: AccountId; csrf: string; verifiedEmails: readonly string[] }>;
+
+/** Pages mounted under `/account/<section>` that need the portal's session but are not the portal. */
+export type SignedInPages = Readonly<{
+  /** Answers every request under its section. `viewer` is null when nobody is signed in. */
+  handleRequest(
+    options: Readonly<{ request: IncomingMessage; response: ServerResponse; url: URL; viewer: SignedInViewer | null }>,
+  ): Promise<void>;
+}>;
+
 export const ACCOUNT_PATH = "/account";
+export const REPORTS_PATH = `${ACCOUNT_PATH}/reports`;
 export const DECK_SESSION_PATH = `${ACCOUNT_PATH}/deck-session`;
 /** Where `/account` sends the browser after a sign-in that started at `/account/deck-session`. */
 export const RETURN_COOKIE_NAME = "sasha_return";
@@ -263,11 +281,14 @@ export function createAccountPortal(
     passwordSignIn?: Readonly<{ service: PasswordSignIn; trustedProxies: TrustedProxies }> | null;
     /** The deck web application's session start; absent or null answers `/account/deck-session` with 404. */
     deckSessionStart?: DeckSessionStart | null;
+    /** The defect-report admin pages at `/account/reports`; absent or null answers them with 404. */
+    reportPages?: SignedInPages | null;
   }>,
 ): AccountPortal {
   const { publicUrl, sessionSecret, directory, eraser, now, randomToken, warn } = options;
   const passwordSignIn = options.passwordSignIn ?? null;
   const deckSessionStart = options.deckSessionStart ?? null;
+  const reportPages = options.reportPages ?? null;
   const providers = new Map(options.providers.map((provider) => [provider.name, provider]));
   const clock = (): number => now().getTime();
   const pendingSignIns = createExpiringTable<PendingProviderFlow>({ now: clock, capacity: MAX_PENDING_SIGNINS });
@@ -282,7 +303,7 @@ export function createAccountPortal(
   const forms = formCodec({ secret: sessionSecret, randomToken });
   let warnedAboutUntrustedProxy = false;
 
-  async function route(request: IncomingMessage, response: ServerResponse, path: string): Promise<void> {
+  async function route(request: IncomingMessage, response: ServerResponse, path: string, url: URL): Promise<void> {
     const method = request.method ?? "GET";
     const [, section, providerName, extra, rest] = path.slice(1).split("/");
     const target = parseRoute({ section, providerName, extra, rest, emailEnabled: passwordSignIn !== null });
@@ -335,6 +356,9 @@ export function createAccountPortal(
         if (deckSessionStart === null) break;
         if (method !== "GET") return sendMethodNotAllowed({ response, allow: "GET" });
         return deckSession(request, response, deckSessionStart);
+      case "reports":
+        if (reportPages === null) break;
+        return reportPages.handleRequest({ request, response, url, viewer: await viewerOf(request) });
       case "not-found":
         return sendPage({ response, status: 404, html: messagePage({ title: "Not found", message: "There is no such page." }) });
       default:
@@ -386,6 +410,15 @@ export function createAccountPortal(
       }),
       headers: passkeyHeaders,
     });
+  }
+
+  /** The signed-in viewer for a mounted page, or null; an erased account reads as signed out. */
+  async function viewerOf(request: IncomingMessage): Promise<SignedInViewer | null> {
+    const session = sessions.read({ request, nowMs: now().getTime() });
+    if (session === null) return null;
+    const description = await directory.describe({ accountId: session.accountId });
+    if (description === null) return null;
+    return { accountId: session.accountId, csrf: session.csrf, verifiedEmails: await directory.verifiedEmails({ accountId: session.accountId }) };
   }
 
   /** Whether the session's sign-in is recent enough to add or remove a sign-in method. */
@@ -1322,7 +1355,7 @@ export function createAccountPortal(
     handleRequest: async ({ request, response, url }) => {
       const path = url.pathname.replace(/\/+$/, "");
       if (path !== ACCOUNT_PATH && !path.startsWith(`${ACCOUNT_PATH}/`)) return false;
-      await route(request, response, path);
+      await route(request, response, path, url);
       return true;
     },
   };
@@ -1378,6 +1411,7 @@ type PortalRoute =
   | Readonly<{ kind: "passkey-options"; ceremony: PasskeyCeremony }>
   | Readonly<{ kind: "passkey-verify"; ceremony: PasskeyCeremony }>
   | Readonly<{ kind: "deck-session" }>
+  | Readonly<{ kind: "reports" }>
   | Readonly<{ kind: "not-found" }>;
 
 const MAX_PENDING_SIGNINS = 10_000;
@@ -1402,6 +1436,8 @@ function parseRoute(
 ): PortalRoute {
   const { section, providerName, extra, rest } = options;
   if (section === undefined) return { kind: "home" };
+  // Every depth below `reports` belongs to the mounted pages, which route it themselves.
+  if (section === "reports") return { kind: "reports" };
   if (section === "passkey.js" && providerName === undefined) return { kind: "passkey-script" };
   if (section === "passkey") return parsePasskeyRoute({ ceremony: providerName, step: extra, rest });
   if (extra !== undefined) return { kind: "not-found" };

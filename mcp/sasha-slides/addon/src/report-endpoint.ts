@@ -21,6 +21,15 @@
 // parses it and refuses rather than coercing: `Number("1.x")` is `NaN` and `NaN` would serialise as
 // `null`, which the service reads as a missing field and reports as a confusing 422.
 //
+// SCHEMA VERSION 2 adds `context.slideLabel` (the candidate's label, never an id) and
+// `attachments`: the review notes the user saw beside the slide, minus every `leak` (a leak blocks
+// the send, and its text can quote the very word it caught) and minus any note that contains one of
+// this window's identifiers; and screenshots, which this build does not capture yet (always []).
+//
+// WHERE IT GOES. The service is mounted in the connector at https://sashaslides.com/v1/reports
+// (mcp/sasha-slides/reports/report-stack.ts). The entry that opens this window is hidden until that
+// is deployed: `DEFECT_REPORTS_ENABLED` in report-flag.ts.
+//
 // A FAILED SEND IS A VERDICT, NEVER A SPINNER. `ReportSubmission` has three arms and the review
 // surface renders all three. "The service is not running" is the expected case -- it binds to
 // loopback by default and is not started with the add-on -- so `unreachable` is a first-class
@@ -28,23 +37,32 @@
 
 import { assertNever, type Parsed } from "./protocol.ts";
 import type { DefectReport } from "./anonymise/index.ts";
+import type { ReportAnnotation } from "./defect-state.ts";
 import { asRecord, nonEmptyStringAt } from "./json-fields.ts";
 
 /** Must equal the service's `DEFECT_REPORT_SCHEMA_VERSION`. */
-export const REPORT_SCHEMA_VERSION = 1;
+export const REPORT_SCHEMA_VERSION = 2;
 
 /** The only value the service accepts for `converterOutput.format`. */
 export const CONVERTER_OUTPUT_FORMAT = "slides-api-requests-json";
 
 /**
- * Where reports go, by default. Loopback and the service's own default port, because the service is
- * not running by default and a wrong guess that happens to resolve is worse than one that does not.
- * The review surface shows this and lets the user replace it, so a deployment needs no rebuild.
+ * Where reports go, by default: the connector's mount of the report service. The review surface
+ * shows this and lets the user replace it (a local `npm start` in report-service/ answers at
+ * http://127.0.0.1:8787/v1/reports), so another deployment needs no rebuild.
  */
-export const DEFAULT_REPORT_ENDPOINT = "http://127.0.0.1:8787/v1/reports";
+export const DEFAULT_REPORT_ENDPOINT = "https://sashaslides.com/v1/reports";
 
 /** Bytes. The service refuses a larger body before reading it, so the surface refuses it first. */
-export const REPORT_BODY_LIMIT_BYTES = 2 * 1024 * 1024;
+export const REPORT_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
+
+/** The service's caps on the version 2 fields (report-service/src/defect-report.ts `REPORT_LIMITS`). */
+export const REPORT_ATTACHMENT_LIMITS = {
+  slideLabelBytes: 512,
+  annotationCount: 64,
+  annotationHeadingBytes: 512,
+  annotationDetailBytes: 4 * 1024,
+} as const;
 
 /** The body of `POST /v1/reports`, transcribed from report-service/README.md. */
 export type ReportRequestBody = Readonly<{
@@ -54,7 +72,19 @@ export type ReportRequestBody = Readonly<{
   converterOutput: Readonly<{ format: typeof CONVERTER_OUTPUT_FORMAT; text: string }>;
   versions: Readonly<{ addon: string; converter: string; protocol: number }>;
   clientReportedAt: string;
+  context: Readonly<{ slideLabel: string }>;
+  attachments: Readonly<{ annotations: readonly WireAnnotation[]; screenshots: readonly WireScreenshot[] }>;
 }>;
+
+export type WireAnnotation = Readonly<{
+  id: string;
+  tone: "risk" | "note";
+  heading: string;
+  detail: string;
+  side: ReportAnnotation["side"];
+}>;
+
+export type WireScreenshot = Readonly<{ name: string; mediaType: "image/png"; base64: string }>;
 
 /** What the service answered. Three arms, and the surface renders each one. */
 export type ReportSubmission =
@@ -83,9 +113,18 @@ export type ReportSubmitter = Readonly<{
 export function reportRequestBodyOf({
   report,
   clientReportedAt,
+  slideLabel = "",
+  annotations = [],
+  mustNotContain = [],
 }: {
   report: DefectReport;
   clientReportedAt: string;
+  /** The candidate's label as the panel shows it. Dropped when it holds a forbidden string. */
+  slideLabel?: string;
+  /** What the panel pinned beside the two slides (`annotationsOf`). Leaks are never sent. */
+  annotations?: readonly ReportAnnotation[];
+  /** This window's identifiers: nothing carrying one is sent (report.tsx `forbiddenStringsFor`). */
+  mustNotContain?: readonly string[];
 }): Parsed<ReportRequestBody> {
   const protocol = Number(report.versions.protocol);
   if (!Number.isInteger(protocol) || protocol < 0 || protocol > 1_000_000) {
@@ -116,8 +155,72 @@ export function reportRequestBodyOf({
       },
       versions: { addon: report.versions.addon, converter: report.versions.converter, protocol },
       clientReportedAt,
+      context: {
+        slideLabel: carriesAny({ text: slideLabel, needles: mustNotContain })
+          ? ""
+          : truncateUtf8({ text: slideLabel, maxBytes: REPORT_ATTACHMENT_LIMITS.slideLabelBytes }),
+      },
+      attachments: { annotations: wireAnnotationsOf({ annotations, mustNotContain }), screenshots: [] },
     },
   };
+}
+
+/**
+ * The annotations that may leave the browser: never a `leak` (it blocks the send, and its text can
+ * quote what it caught), never one carrying a forbidden identifier, each cut to the service's caps.
+ */
+export function wireAnnotationsOf({
+  annotations,
+  mustNotContain,
+}: {
+  annotations: readonly ReportAnnotation[];
+  mustNotContain: readonly string[];
+}): readonly WireAnnotation[] {
+  const sent: WireAnnotation[] = [];
+  for (const annotation of annotations) {
+    if (sent.length >= REPORT_ATTACHMENT_LIMITS.annotationCount) break;
+    const tone = sendableTone(annotation.tone);
+    if (tone === null) continue;
+    if (carriesAny({ text: `${annotation.heading}\n${annotation.detail}`, needles: mustNotContain })) continue;
+    sent.push({
+      id: annotation.annotationId.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 64) || `annotation_${String(sent.length)}`,
+      tone,
+      heading: truncateUtf8({ text: annotation.heading, maxBytes: REPORT_ATTACHMENT_LIMITS.annotationHeadingBytes }),
+      detail: truncateUtf8({ text: annotation.detail, maxBytes: REPORT_ATTACHMENT_LIMITS.annotationDetailBytes }),
+      side: annotation.side,
+    });
+  }
+  return sent;
+}
+
+function sendableTone(tone: ReportAnnotation["tone"]): WireAnnotation["tone"] | null {
+  switch (tone) {
+    case "leak":
+      return null;
+    case "risk":
+    case "note":
+      return tone;
+    default:
+      return assertNever(tone);
+  }
+}
+
+function carriesAny({ text, needles }: { text: string; needles: readonly string[] }): boolean {
+  return needles.some((needle) => needle !== "" && text.includes(needle));
+}
+
+/** At most `maxBytes` of UTF-8, cut on a code point boundary. */
+function truncateUtf8({ text, maxBytes }: { text: string; maxBytes: number }): string {
+  if (utf8Length(text) <= maxBytes) return text;
+  let kept = "";
+  let bytes = 0;
+  for (const character of text) {
+    const size = utf8Length(character);
+    if (bytes + size > maxBytes) break;
+    kept += character;
+    bytes += size;
+  }
+  return kept;
 }
 
 /** The bytes to POST. One shape, so the service's duplicate digest is stable across retries. */
@@ -175,8 +278,8 @@ export function fetchReportSubmitter({ fetchJson }: { fetchJson: HttpPost }): Re
           return {
             kind: "unreachable",
             message:
-              `nothing answered at ${endpoint} (${answered.message}). The report service is not running by ` +
-              "default: start it with `npm start` in report-service/, or point this at a deployment.",
+              `nothing answered at ${endpoint} (${answered.message}). Check the address, or for a local ` +
+              "service start it with `npm start` in report-service/ and point this at http://127.0.0.1:8787/v1/reports.",
           };
         case "answered":
           return submissionOf({ status: answered.status, text: answered.text });

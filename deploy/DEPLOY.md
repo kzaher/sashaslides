@@ -105,17 +105,38 @@ bash deploy/publish.sh rollback connector
 A connector rollback keeps `data/` and `secrets/`. Only one level is kept; deploying again
 replaces it. The previous nginx file is at `/root/sashaslides/nginx-sashaslides.conf.previous`.
 
+## Defect reports
+
+The add-on's "Report defect" sends to `https://<domain>/v1/reports`, which the connector serves from
+`report-service/` (`--reports /data/reports` in its Dockerfile). The owner reads, triages, downloads
+(one zip per report) and deletes them at `https://<domain>/account/reports`, signed in through
+`/account` with an address listed in `SASHA_ADMIN_EMAILS`:
+
+```bash
+ssh root@78.46.91.218 'echo "SASHA_ADMIN_EMAILS=you@example.com" >> /root/sasha-connector/secrets/connector.env'
+bash deploy/publish.sh connector     # recreates the container, so it reads the new variable
+```
+
+The address must be a verified one on that `/account` (Google, or a confirmed email sign-in).
+Without the variable reports are still stored, and every signed-in visitor is refused. The intake's
+limits are report-service's `REPORT_*` variables (its README); compose sets
+`REPORT_TRUSTED_PROXY_HOPS=1` for nginx. Reports expire after 30 days (`REPORT_RETENTION_DAYS`).
+
+Once that is live, turn the button on in the add-on: `DEFECT_REPORTS_ENABLED = true` in
+`mcp/sasha-slides/addon/src/report-flag.ts`, rebuild and deploy the add-on.
+
 ## Where secrets and state live
 
 | Path on the server | What | If lost |
 |---|---|---|
-| `/root/sasha-connector/secrets/connector.env` | `SASHA_MASTER_KEY`, `SASHA_SESSION_SECRET` | master key: **every user's stored grant becomes unreadable**; session secret: people sign in to `/account` again |
+| `/root/sasha-connector/secrets/connector.env` | `SASHA_MASTER_KEY`, `SASHA_SESSION_SECRET`, `SASHA_ADMIN_EMAILS` (set by hand) | master key: **every user's stored grant becomes unreadable**; session secret: people sign in to `/account` again |
 | `/root/sasha-connector/secrets/google_oauth_web.json` | Google Web OAuth client | re-copy from `.auth/` |
 | `/root/sasha-connector/secrets/identity-providers.json` | `/account` sign-in providers | re-copy from `.auth/` |
 | `/root/sasha-connector/secrets/apple-signin.p8` | Sign in with Apple key, named by `privateKeyPath` in the providers file; empty until provided | re-copy from `.auth/`, or make a new key at Apple |
 | `/root/sasha-connector/secrets/mail-sender.json` | Gmail sender for email sign-in (`mcp/sasha-slides/e2e/gmail-sender-token.ts`); empty leaves email sign-in off | re-mint; while the OAuth client is in Testing mode its refresh token expires after 7 days |
 | `/root/sasha-connector/data/oauth-store.json` | client registrations, sealed per-user Google grants | users reconnect |
 | `/root/sasha-connector/data/account-keys.json` | per-account data keys, wrapped under the master key | users reconnect |
+| `/root/sasha-connector/data/reports/` | defect reports (`index.jsonl`, `reports/`, `triage.jsonl`) | the reports and their triage |
 
 Keep the master key out of the backups that hold `data/`: a backup holding both can read
 everything, and erasing an account works by destroying its key.

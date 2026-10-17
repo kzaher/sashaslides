@@ -45,6 +45,11 @@ const CONNECTOR_PATHS: readonly string[] = [
   // The sidebar's access check (comment-bot/comment-access-check.ts). Live 2026-10-16 it was missing
   // here, so Code.gs got the website's 404 and the Allow card never appeared.
   "/comments/access",
+  // The add-on's defect reports (mcp/sasha-slides/reports): the intake, a receipt, and the admin pages.
+  "/v1/reports",
+  "/v1/reports/rep_7w9b3rqhq8vd8ebsh6f5k1jqp4",
+  "/account/reports",
+  "/account/reports/rep_7w9b3rqhq8vd8ebsh6f5k1jqp4/download",
 ];
 
 /** The deck server inside the connector (mcp/sasha-slides/decks): pages, built files, the API and its socket. */
@@ -84,6 +89,10 @@ const SITE_PATHS: readonly string[] = [
   "/decks.css",
   "/decksx",
   "/deck",
+  // Near-misses of the report intake.
+  "/v1",
+  "/v1/reportsx",
+  "/v1/reports/a/b",
 ];
 
 type Modifier = "exact" | "prefix" | "prefix-no-regex" | "regex";

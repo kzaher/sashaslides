@@ -9,8 +9,9 @@
 // WHY THERE IS NO HTML VIEW AND NO ENDPOINT THAT RETURNS A SUBMISSION. A service that accepts
 // arbitrary HTML from strangers and can be made to serve it back is an open XSS and phishing host:
 // an attacker submits a page, gets a URL on this origin, and sends it to someone. The defence is
-// structural rather than a sanitiser. The store exposes no function that returns the submitted
-// text (see `report-store.ts`), so a handler here physically cannot read it; every response is
+// structural rather than a sanitiser. This layer is handed a `ReportIntake`, which has no function
+// that returns the submitted text (see `report-store.ts`), so a handler here physically cannot
+// read it; every response is
 // `application/json` with `X-Content-Type-Options: nosniff` so a browser will not sniff it into
 // markup; and every response carries `Content-Security-Policy: default-src 'none'; sandbox`, which
 // neutralises scripting even if some future route did serve the wrong thing. An operator who needs
@@ -38,13 +39,14 @@ import {
   type ReportRejectionCode,
 } from "./defect-report.ts";
 import { parseDeletionToken, parseReportId, type ReportId } from "./report-id.ts";
-import type { CapacityLimit, ReportIndexEntry, ReportStore } from "./report-store.ts";
+import type { CapacityLimit, ReportIndexEntry, ReportIntake } from "./report-store.ts";
 import type { RateLimiter } from "./rate-limiter.ts";
 import type { RequestLog, RequestOutcome } from "./request-log.ts";
 
 /** Everything the HTTP layer needs, all injected: no module-level state, no clock of its own. */
 export type ReportServiceDependencies = Readonly<{
-  store: ReportStore;
+  /** The public half of the store: submit, receipt, self-service delete. Nothing that reads content. */
+  store: ReportIntake;
   /** Small and fast-refilling: absorbs a legitimate flurry, stops a hammering loop. */
   burstLimiter: RateLimiter;
   /** Large and slow-refilling: stops a patient client from submitting all day. */
@@ -65,9 +67,21 @@ export type HttpLimits = Readonly<{
   maxConnections: number;
 }>;
 
+/**
+ * The four routes as one request handler, for a host that already owns an HTTP server: the Sasha
+ * Slides connector mounts it at `/v1/reports` (`mcp/sasha-slides/reports/report-stack.ts`). The
+ * handler never rejects; every failure is answered, logged and resolved.
+ */
+export function createReportRequestHandler(
+  dependencies: ReportServiceDependencies,
+): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
+  return (request, response) => handle({ request, response, dependencies });
+}
+
 export function createReportServer(dependencies: ReportServiceDependencies): Server {
+  const handler = createReportRequestHandler(dependencies);
   const server = createServer((request, response) => {
-    void handle({ request, response, dependencies });
+    void handler(request, response);
   });
 
   // Slow-loris budget. A request that has not finished its headers in `headersTimeoutMs`, or its

@@ -63,6 +63,16 @@ type HttpServerOptions = Readonly<{
   commentAccess?: CommentAccessPage;
   /** Absent: no decks. Present: the deck pages, `/deck-api/*` and the deck WebSocket upgrade. */
   decks?: DeckEntryPoints;
+  /**
+   * Absent: no `/v1/reports`. Present: the add-on's defect-report intake (reports/report-stack.ts),
+   * which answers its own CORS preflight for the Apps Script sandbox origin.
+   */
+  reportIntake?: ReportIntakeRoutes;
+}>;
+
+/** The public defect-report endpoint: resolves true for the paths it answered, false otherwise. */
+export type ReportIntakeRoutes = Readonly<{
+  handleRequest(options: Readonly<{ request: IncomingMessage; response: ServerResponse; url: URL }>): Promise<boolean>;
 }>;
 
 export function createSashaSlidesHttpServer(options: HttpServerOptions): Server {
@@ -94,7 +104,7 @@ export type DeckEntryPoints = Readonly<{
 }>;
 
 function sashaSlidesRequestListener(options: HttpServerOptions): RequestListener {
-  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal, driveHook, commentAccess, decks } = options;
+  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal, driveHook, commentAccess, decks, reportIntake } = options;
   const { endpoints } = authorizationServer;
 
   async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -107,6 +117,10 @@ function sashaSlidesRequestListener(options: HttpServerOptions): RequestListener
     // The account portal (`account-portal.ts`) goes first: its HTML pages are for a browser
     // on this origin only, so they get no CORS headers, and it claims only `/account/...`.
     if (accountPortal !== undefined && (await accountPortal.handleRequest({ request, response, url }))) return;
+
+    // The add-on's defect reports (report-service/), before the generic OPTIONS answer below: the
+    // intake has its own CORS policy (the Apps Script sandbox origin only) and its own preflight.
+    if (reportIntake !== undefined && (await reportIntake.handleRequest({ request, response, url }))) return;
 
     // The deck server (decks/deck-router.ts): its pages and `/deck-api/*` for a browser on this
     // origin (no CORS), and the shared Google callback offered to the Google Slides module first,

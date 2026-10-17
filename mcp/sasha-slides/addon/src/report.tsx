@@ -44,6 +44,7 @@ import {
   type DefectReport,
 } from "./anonymise/index.ts";
 import {
+  annotationsOf,
   defectOnSlide,
   defectWithoutSlide,
   needsPass,
@@ -325,6 +326,27 @@ async function prepareReport(): Promise<void> {
   }
 }
 
+/**
+ * The candidate's own label, without the sentence `main` appends about how it was chosen
+ * (`<label> -- <describeChosenTarget>`).
+ */
+function slideLabelOf(defect: Defect): string {
+  switch (defect.slide.kind) {
+    case "unrequested":
+    case "loading":
+    case "loaded":
+    case "failed": {
+      const label = defect.slide.label;
+      const cut = label.lastIndexOf(" -- ");
+      return cut < 0 ? label : label.slice(0, cut);
+    }
+    case "absent":
+      return "";
+    default:
+      return assertNever(defect.slide);
+  }
+}
+
 /** The identifiers this window holds and that must never appear in a payload. */
 function forbiddenStringsFor(running: Services): readonly string[] {
   return [running.presentationId, running.proposalId].flatMap((identifier) =>
@@ -351,7 +373,15 @@ async function sendReport(): Promise<void> {
     return;
   }
   const report: DefectReport = defectReportFrom(preview);
-  const body = reportRequestBodyOf({ report, clientReportedAt: new Date().toISOString() });
+  // Version 2's extras: the candidate's label and the review notes the panel shows beside the two
+  // slides. `reportRequestBodyOf` drops leaks and anything carrying this window's identifiers.
+  const body = reportRequestBodyOf({
+    report,
+    clientReportedAt: new Date().toISOString(),
+    slideLabel: slideLabelOf(defect),
+    annotations: annotationsOf(defect),
+    mustNotContain: forbiddenStringsFor(running),
+  });
   switch (body.kind) {
     case "invalid":
       dispatchDefect({ kind: "preview-failed", message: `this build cannot address that service: ${body.reason}` });
