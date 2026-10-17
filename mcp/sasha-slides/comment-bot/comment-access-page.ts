@@ -36,6 +36,7 @@ import type { GoogleClientCredentials } from "../google-auth";
 import { DRIVE_FILE_SCOPE, GOOGLE_CONSENT_ENDPOINT } from "../google-constants";
 import { clearCookie, cookieValues, setCookie } from "../http/cookies";
 import { escapeHtml, layout, messagePage, pageHeaders, sendHtml, sendScript } from "../http/html-pages";
+import { mergeGoogleGrant } from "../http/google-grants";
 import type { GoogleIdentity, RecordStore } from "../http/oauth-store";
 import { scopeAccessOf } from "./owner-drive";
 import { parseDeckId } from "./comment-bot";
@@ -198,20 +199,19 @@ export function createCommentAccessPage(
       });
       return true;
     }
-    const grantedScopes = signedIn.grantedScopes.length > 0 ? signedIn.grantedScopes : stored.grantedScopes;
-    await grants.put({
-      key: signedIn.subject,
-      value: {
-        ...stored,
-        email: signedIn.email ?? stored.email,
+    const merged = mergeGoogleGrant({
+      stored,
+      fresh: {
+        subject: signedIn.subject,
+        email: signedIn.email,
         accessToken: signedIn.accessToken,
-        // Google sends a refresh token only on some consents; the stored one stays otherwise.
-        refreshToken: signedIn.refreshToken ?? stored.refreshToken,
+        refreshToken: signedIn.refreshToken,
         accessTokenExpiresAtMs: signedIn.accessTokenExpiresAtMs,
-        grantedScopes,
+        grantedScopes: signedIn.grantedScopes,
       },
     });
-    if (scopeAccessOf(grantedScopes) === "missing" || picker === null) {
+    await grants.put({ key: signedIn.subject, value: merged });
+    if (scopeAccessOf(merged.grantedScopes) === "missing" || picker === null) {
       sendPage({
         response,
         status: 200,

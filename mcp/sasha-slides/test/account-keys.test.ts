@@ -24,7 +24,8 @@ import {
   type DataKeyStore,
 } from "../http/account-keys";
 import type { AccountVault } from "../http/account-vault";
-import { accountLinkKey, withSealedGoogleIdentities } from "../http/accounts";
+import { accountLinkKey } from "../http/account-directory";
+import { withSealedGoogleIdentities } from "../http/accounts";
 import {
   fileBackedAuthStore,
   inMemoryAuthStore,

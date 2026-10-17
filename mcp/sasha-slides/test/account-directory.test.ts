@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   emailHint,
+  GOOGLE_PROVIDER,
   linkIdOf,
   type AccountDescription,
   storeAccountDirectory,
@@ -18,6 +19,7 @@ import {
   type NewPasskey,
 } from "../http/account-directory";
 import { createAccountEraser } from "../http/account-eraser";
+import { googleAccounts } from "../http/accounts";
 import type { AccountVault } from "../http/account-vault";
 import { fileBackedAuthStore, inMemoryAuthStore } from "../http/oauth-store";
 
@@ -76,6 +78,27 @@ describe("account directory", () => {
     const otherProvider = await directory.findOrCreateByIdentity({ provider: "github", subject: "u1", email: "ada@example.com" });
     assert.equal(again, first);
     assert.equal(new Set([first, otherSubject, otherProvider]).size, 3);
+  });
+
+  test("a Google subject opens ONE account whether the portal or the sealed grant store sees it first", async () => {
+    for (const portalFirst of [true, false]) {
+      const store = inMemoryAuthStore();
+      const vault = fakeVault();
+      const directory = storeAccountDirectory({ store, vault, now: () => new Date(0), newAccountId });
+      const grants = googleAccounts({ store, vault, now: () => new Date(0), newAccountId });
+      const first = portalFirst
+        ? await directory.findOrCreateByIdentity({ provider: GOOGLE_PROVIDER, subject: "g-1", email: "ada@example.com" })
+        : await grants.ensure({ subject: "g-1", email: "ada@example.com" });
+      const second = portalFirst
+        ? await grants.ensure({ subject: "g-1", email: null })
+        : await directory.findOrCreateByIdentity({ provider: GOOGLE_PROVIDER, subject: "g-1", email: null });
+      assert.equal(second, first);
+      assert.equal(await grants.find({ subject: "g-1" }), first);
+      assert.equal((await store.accounts.keys()).length, 1);
+      // The account's Google Slides connection is this subject, and its link carries the sealed address.
+      assert.equal((await store.accounts.get({ key: first }))?.googleSubject, "g-1");
+      assert.deepEqual(summary(await directory.describe({ accountId: first })), [{ provider: "google", emailHint: "a•••@example.com" }]);
+    }
   });
 
   test("a passkey opens its own account, is found by credential id, and lists as a passkey sign-in", async () => {

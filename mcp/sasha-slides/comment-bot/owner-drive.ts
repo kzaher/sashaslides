@@ -22,10 +22,11 @@
  * every call and whose token it carried. Failure reasons carry Google's status and error code,
  * never a body or a token.
  */
-import { asNumber, asRecord, asString, googleErrorCode } from "../http/json-values";
+import { asRecord, asString, googleErrorCode } from "../http/json-values";
 import type { HttpFetch } from "../http/http-kit";
 import type { GoogleClientCredentials } from "../google-auth";
-import { DRIVE_FILE_SCOPE, FULL_DRIVE_SCOPE, GOOGLE_TOKEN_ENDPOINT } from "../google-constants";
+import { DRIVE_FILE_SCOPE, FULL_DRIVE_SCOPE } from "../google-constants";
+import { googleAccessToken } from "../http/google-grants";
 import type { GoogleIdentity, RecordStore } from "../http/oauth-store";
 
 export const DRIVE_API = "https://www.googleapis.com/drive/v3";
@@ -111,13 +112,8 @@ export function googleOwnerDrives(
     forOwner: async ({ ownerSubject }) => {
       const identity = await grants.get({ key: ownerSubject });
       if (identity === null || (identity.refreshToken === null && identity.accessToken === null)) return { kind: "no-grant" };
-      const stored = identity.accessToken;
-      const storedExpiry = identity.accessTokenExpiresAtMs;
-      if (!cachedTokens.has(ownerSubject) && stored !== null && storedExpiry !== null) {
-        cachedTokens.set(ownerSubject, { accessToken: stored, expiresAtMs: storedExpiry });
-      }
       const drive = ownerDrive({
-        accessToken: (forceRefresh) => accessTokenFor({ ownerSubject, refreshToken: identity.refreshToken, forceRefresh }),
+        accessToken: (forceRefresh) => accessTokenFor({ ownerSubject, identity, forceRefresh }),
         fetch,
         timeoutMs,
       });
@@ -125,41 +121,20 @@ export function googleOwnerDrives(
     },
   };
 
+  /** The cached token first (it outlives the stored one once refreshed), then the stored grant's. */
   async function accessTokenFor(
-    request: Readonly<{ ownerSubject: string; refreshToken: string | null; forceRefresh: boolean }>,
+    request: Readonly<{ ownerSubject: string; identity: GoogleIdentity; forceRefresh: boolean }>,
   ): Promise<DriveResult<string>> {
-    const nowMs = now().getTime();
-    const cached = cachedTokens.get(request.ownerSubject);
-    if (!request.forceRefresh && cached !== undefined && cached.expiresAtMs - ACCESS_TOKEN_MARGIN_MS > nowMs) {
-      return { kind: "ok", value: cached.accessToken };
+    const { ownerSubject, identity, forceRefresh } = request;
+    const cached = cachedTokens.get(ownerSubject);
+    const grant = cached === undefined ? identity : { ...identity, accessToken: cached.accessToken, accessTokenExpiresAtMs: cached.expiresAtMs };
+    const token = await googleAccessToken({ grant, client, fetch, nowMs: now().getTime(), timeoutMs, forceRefresh });
+    if (token.kind === "failed") {
+      cachedTokens.delete(ownerSubject);
+      return token;
     }
-    cachedTokens.delete(request.ownerSubject);
-    if (request.refreshToken === null) return { kind: "failed", status: 401, reason: "the Google grant has expired; sign in to Sasha Slides again" };
-    const response = await fetch(GOOGLE_TOKEN_ENDPOINT, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: client.clientId,
-        client_secret: client.clientSecret,
-        refresh_token: request.refreshToken,
-      }).toString(),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const body = asRecord(await response.json().catch(() => null));
-    const token = asString(body?.access_token);
-    const expiresIn = asNumber(body?.expires_in);
-    if (response.status !== 200 || token === null || expiresIn === null) {
-      return {
-        kind: "failed",
-        // `invalid_grant` is Google's answer for a refresh token it no longer honours (revoked, or
-        // past the 7 days of a Testing-mode client): the grant is gone, which callers read as 401.
-        status: googleErrorCode(body?.error) === "invalid_grant" ? 401 : response.status,
-        reason: `token refresh answered ${String(response.status)} ${googleErrorCode(body?.error)}; sign in to Sasha Slides again`,
-      };
-    }
-    cachedTokens.set(request.ownerSubject, { accessToken: token, expiresAtMs: nowMs + expiresIn * 1000 });
-    return { kind: "ok", value: token };
+    cachedTokens.set(ownerSubject, { accessToken: token.accessToken, expiresAtMs: token.expiresAtMs });
+    return { kind: "ok", value: token.accessToken };
   }
 }
 
@@ -170,9 +145,6 @@ export function scopeAccessOf(grantedScopes: readonly string[]): ScopeAccess {
   if (grantedScopes.includes(DRIVE_FILE_SCOPE)) return "per-file";
   return "missing";
 }
-
-/** Refresh this long before Google's stated expiry, so a token never dies mid-request. */
-const ACCESS_TOKEN_MARGIN_MS = 60 * 1000;
 
 function ownerDrive(
   options: Readonly<{ accessToken: (forceRefresh: boolean) => Promise<DriveResult<string>>; fetch: HttpFetch; timeoutMs: number }>,

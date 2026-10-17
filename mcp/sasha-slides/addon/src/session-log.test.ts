@@ -20,7 +20,6 @@ import {
   isParsedSessionEventKind,
   loadedSlideComments,
   parseSessionEventFile,
-  parseSessionEventName,
   SESSION_EVENT_KINDS,
   serializeSessionEvent,
   sessionEventFileName,
@@ -33,6 +32,7 @@ import {
   type SessionEventFile,
   type SlideCommentsLoad,
 } from "./session-log.ts";
+import { parseSessionEventFileName } from "../../session-event-name.ts";
 import { feedbackCommentContent, type FeedbackCommentRecord } from "./feedback.ts";
 
 const PROPOSAL = "p_1791115140000_a1b2c3";
@@ -92,15 +92,15 @@ test("two writers minting the same name are ordered by Drive's file id -- the on
 });
 
 test("the file name grammar: millis, six base36, a kind that may itself contain hyphens", () => {
-  assert.deepEqual(parseSessionEventName("1791115140000-a1b2c3-slides-staged.json"), {
+  assert.deepEqual(parseSessionEventFileName("1791115140000-a1b2c3-slides-staged.json"), {
     atMillis: 1791115140000,
     suffix: "a1b2c3",
     kind: "slides-staged",
   });
-  assert.equal(parseSessionEventName("events.jsonl"), null);
-  assert.equal(parseSessionEventName("1791115140000-A1B2C3-slides-staged.json"), null, "base36 is lower case");
-  assert.equal(parseSessionEventName("1791115140000-a1b2-slides-staged.json"), null, "six characters, exactly");
-  assert.equal(parseSessionEventName("1791115140000-a1b2c3-slides-staged.txt"), null);
+  assert.equal(parseSessionEventFileName("events.jsonl"), null);
+  assert.equal(parseSessionEventFileName("1791115140000-A1B2C3-slides-staged.json"), null, "base36 is lower case");
+  assert.equal(parseSessionEventFileName("1791115140000-a1b2-slides-staged.json"), null, "six characters, exactly");
+  assert.equal(parseSessionEventFileName("1791115140000-a1b2c3-slides-staged.txt"), null);
 });
 
 // --- nothing is ever dropped ---------------------------------------------

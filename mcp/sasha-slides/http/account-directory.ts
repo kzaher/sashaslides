@@ -147,9 +147,8 @@ export function emailHint(email: string): string {
 }
 
 /**
- * Production: accounts in the auth store. Writes the account record before the link, as
- * `accounts.ts` does, so a crash between the two leaves an unlinked account (re-created on
- * the next sign-in), never a link pointing at nothing.
+ * Production: accounts in the auth store. Every write puts the account record before the link
+ * (see `findOrCreateAccountForIdentity`).
  */
 export function storeAccountDirectory(
   options: Readonly<{
@@ -171,28 +170,7 @@ export function storeAccountDirectory(
   });
 
   return {
-    findOrCreateByIdentity: async ({ provider, subject, email }) => {
-      const linkKey = `${provider}:${subject}`;
-      const existing = await store.accountLinks.get({ key: linkKey });
-      if (existing !== null) return existing.accountId;
-      const accountId = newAccountId();
-      const createdAtMs = now().getTime();
-      await store.accounts.put({
-        key: accountId,
-        value: { accountId, createdAtMs, linkKeys: [linkKey], googleSubject: provider === GOOGLE_PROVIDER ? subject : null },
-      });
-      await store.accountLinks.put({
-        key: linkKey,
-        value: {
-          accountId,
-          provider,
-          subject,
-          sealedEmail: email === null ? null : await vault.seal({ accountId, plaintext: email }),
-          linkedAtMs: createdAtMs,
-        },
-      });
-      return accountId;
-    },
+    findOrCreateByIdentity: (identity) => findOrCreateAccountForIdentity({ store, vault, now, newAccountId, ...identity }),
     createAccountWithPasskey: async ({ passkey }) => {
       const linkKey = passkeyLinkKey(passkey.credentialId);
       if ((await store.accountLinks.get({ key: linkKey })) !== null) return { kind: "already-registered" };
@@ -274,7 +252,7 @@ export function storeAccountDirectory(
     linkIdentity: async ({ accountId, provider, subject, email }) => {
       const account = await store.accounts.get({ key: accountId });
       if (account === null) return { kind: "account-missing" };
-      const linkKey = `${provider}:${subject}`;
+      const linkKey = accountLinkKey({ provider, subject });
       const existing = await store.accountLinks.get({ key: linkKey });
       if (existing !== null) return { kind: existing.accountId === accountId ? "already-linked-here" : "linked-to-another-account" };
       if (provider !== PASSKEY_PROVIDER && (await liveLinks({ account })).some((link) => link.provider === provider)) {
@@ -336,7 +314,52 @@ export function storeAccountDirectory(
 }
 
 /** The provider name whose subject is also the account's Google Slides connection. */
-const GOOGLE_PROVIDER = "google";
+export const GOOGLE_PROVIDER = "google";
+
+/** The `accountLinks` key for one sign-in identity. */
+export function accountLinkKey(options: Readonly<{ provider: string; subject: string }>): string {
+  return `${options.provider}:${options.subject}`;
+}
+
+/**
+ * The account a sign-in identity opens, created on its first sign-in: the one implementation behind
+ * the directory's `findOrCreateByIdentity` and the sealed Google identity store (accounts.ts).
+ * The account record is written before the link, so a crash between the two leaves an unlinked
+ * account (re-created on the next sign-in), never a link pointing at nothing.
+ */
+export async function findOrCreateAccountForIdentity(
+  options: Readonly<{
+    store: Pick<AuthStore, "accounts" | "accountLinks">;
+    vault: AccountVault;
+    now: () => Date;
+    newAccountId: () => AccountId;
+    provider: string;
+    subject: string;
+    email: string | null;
+  }>,
+): Promise<AccountId> {
+  const { store, vault, provider, subject, email } = options;
+  const linkKey = accountLinkKey({ provider, subject });
+  const existing = await store.accountLinks.get({ key: linkKey });
+  if (existing !== null) return existing.accountId;
+  const accountId = options.newAccountId();
+  const createdAtMs = options.now().getTime();
+  await store.accounts.put({
+    key: accountId,
+    value: { accountId, createdAtMs, linkKeys: [linkKey], googleSubject: provider === GOOGLE_PROVIDER ? subject : null },
+  });
+  await store.accountLinks.put({
+    key: linkKey,
+    value: {
+      accountId,
+      provider,
+      subject,
+      sealedEmail: email === null ? null : await vault.seal({ accountId, plaintext: email }),
+      linkedAtMs: createdAtMs,
+    },
+  });
+  return accountId;
+}
 
 function passkeyLinkKey(credentialId: string): string {
   return `${PASSKEY_PROVIDER}:${credentialId}`;

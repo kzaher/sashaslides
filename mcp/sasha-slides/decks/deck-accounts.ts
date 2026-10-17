@@ -28,9 +28,10 @@ import type {
 import { SLIDES_SCOPE } from "../google-constants";
 import type { AccountDirectory } from "../http/account-directory";
 import type { AccountId, AccountVault } from "../http/account-vault";
-import { accountLinkKey } from "../http/accounts";
+import { accountLinkKey, GOOGLE_PROVIDER } from "../http/account-directory";
 import { googleSubjectOf, hashToken } from "../http/authorization-server";
-import type { AuthStore, GoogleIdentity } from "../http/oauth-store";
+import { mergeGoogleGrant } from "../http/google-grants";
+import type { AuthStore } from "../http/oauth-store";
 import { agentSessionIdFor } from "../deck-tools/agent-session";
 import { deckCallerFor, displayNameFor, normaliseEmail } from "./deck-identity";
 import type { DeckStorage } from "./deck-storage";
@@ -121,7 +122,7 @@ export function directoryGoogleIdentityAccounts(
 ): GoogleIdentityAccounts {
   return {
     accountForGoogleIdentity: async ({ subject, email, emailVerified }) => {
-      const accountId = await options.directory.findOrCreateByIdentity({ provider: "google", subject, email: emailVerified ? email : null });
+      const accountId = await options.directory.findOrCreateByIdentity({ provider: GOOGLE_PROVIDER, subject, email: emailVerified ? email : null });
       await options.acceptInvitations({ accountId });
       return options.people.callerFor({ accountId });
     },
@@ -140,13 +141,13 @@ export function storeGoogleGrants(options: Readonly<{ store: Pick<AuthStore, "ac
       return { kind: "ok", identity };
     },
     save: async ({ accountId, identity }) => {
-      const linkKey = accountLinkKey({ provider: "google", subject: identity.subject });
+      const linkKey = accountLinkKey({ provider: GOOGLE_PROVIDER, subject: identity.subject });
       const link = await store.accountLinks.get({ key: linkKey });
       if (link !== null && link.accountId !== accountId) return "subjectBelongsToAnotherAccount";
       const account = await store.accounts.get({ key: accountId });
       if (account === null) return "subjectBelongsToAnotherAccount";
       if (account.googleSubject !== null && account.googleSubject !== identity.subject) {
-        const other = await store.accountLinks.get({ key: accountLinkKey({ provider: "google", subject: account.googleSubject }) });
+        const other = await store.accountLinks.get({ key: accountLinkKey({ provider: GOOGLE_PROVIDER, subject: account.googleSubject }) });
         if (other !== null && other.accountId !== accountId) return "subjectBelongsToAnotherAccount";
       }
       // The link and the account's subject first: the sealed identity store seals under the
@@ -155,13 +156,13 @@ export function storeGoogleGrants(options: Readonly<{ store: Pick<AuthStore, "ac
         await store.accounts.put({ key: accountId, value: { ...account, linkKeys: [...account.linkKeys, linkKey], googleSubject: identity.subject } });
         await store.accountLinks.put({
           key: linkKey,
-          value: { accountId, provider: "google", subject: identity.subject, sealedEmail: null, linkedAtMs: options.now() },
+          value: { accountId, provider: GOOGLE_PROVIDER, subject: identity.subject, sealedEmail: null, linkedAtMs: options.now() },
         });
       } else if (account.googleSubject !== identity.subject) {
         await store.accounts.put({ key: accountId, value: { ...account, googleSubject: identity.subject } });
       }
       const previous = await store.googleIdentities.get({ key: identity.subject });
-      await store.googleIdentities.put({ key: identity.subject, value: mergeIdentity({ previous, next: identity }) });
+      await store.googleIdentities.put({ key: identity.subject, value: mergeGoogleGrant({ stored: previous, fresh: identity }) });
       return "saved";
     },
   };
@@ -174,7 +175,7 @@ export function toolCallDeckCallers(
   return async ({ authInfo, sessionId }) => {
     const subject = googleSubjectOf({ authInfo });
     if (subject === null) return { kind: "unavailable", message: "Sign in to the connector with Google to use Sasha decks." };
-    const link = await options.store.accountLinks.get({ key: accountLinkKey({ provider: "google", subject }) });
+    const link = await options.store.accountLinks.get({ key: accountLinkKey({ provider: GOOGLE_PROVIDER, subject }) });
     if (link === null || (await options.store.accounts.get({ key: link.accountId })) === null) {
       return { kind: "unavailable", message: "This Google account has no Sasha account yet; sign in at sashaslides.com/account first." };
     }
@@ -184,14 +185,3 @@ export function toolCallDeckCallers(
   };
 }
 
-/** Keeps the refresh token Google sent only the first time, and every scope ever granted. */
-function mergeIdentity(options: Readonly<{ previous: GoogleIdentity | null; next: GoogleIdentity }>): GoogleIdentity {
-  const { previous, next } = options;
-  if (previous === null) return next;
-  return {
-    ...next,
-    email: next.email ?? previous.email,
-    refreshToken: next.refreshToken ?? previous.refreshToken,
-    grantedScopes: [...new Set([...previous.grantedScopes, ...next.grantedScopes])],
-  };
-}

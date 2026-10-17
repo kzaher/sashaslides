@@ -41,7 +41,7 @@
  *    second authorize.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { missingGoogleGrant } from "./user-drive";
+import { mergeGoogleGrant, missingGoogleGrant } from "./google-grants";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { asRecord, asString, asStringArray } from "./json-values";
 import {
@@ -570,15 +570,17 @@ async function redeemRefreshToken(
   }
   await store.googleIdentities.put({
     key: identity.subject,
-    value: {
-      ...identity,
-      accessToken: refreshed.accessToken,
-      // Google omits the refresh token unless it rotated it; keeping the stored one is
-      // what makes a long-lived grant survive.
-      refreshToken: refreshed.refreshToken ?? identity.refreshToken,
-      accessTokenExpiresAtMs: refreshed.accessTokenExpiresAtMs,
-      grantedScopes: refreshed.grantedScopes.length > 0 ? refreshed.grantedScopes : identity.grantedScopes,
-    },
+    value: mergeGoogleGrant({
+      stored: identity,
+      fresh: {
+        subject: identity.subject,
+        email: null,
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        accessTokenExpiresAtMs: refreshed.accessTokenExpiresAtMs,
+        grantedScopes: refreshed.grantedScopes,
+      },
+    }),
   });
   return {
     kind: "issued",
@@ -629,19 +631,13 @@ async function issueTokens(
   };
 }
 
-/** Merges a fresh Google grant over the stored one, never losing a refresh token. */
+/** Merges a fresh Google grant over the stored one (google-grants.ts). */
 async function rememberIdentity(
   options: Readonly<{ store: AuthStore; identity: GoogleIdentity }>,
 ): Promise<void> {
   const { store, identity } = options;
-  const existing = await store.googleIdentities.get({ key: identity.subject });
-  await store.googleIdentities.put({
-    key: identity.subject,
-    value:
-      existing === null
-        ? identity
-        : { ...identity, refreshToken: identity.refreshToken ?? existing.refreshToken },
-  });
+  const stored = await store.googleIdentities.get({ key: identity.subject });
+  await store.googleIdentities.put({ key: identity.subject, value: mergeGoogleGrant({ stored, fresh: identity }) });
 }
 
 /** PKCE S256: `BASE64URL(SHA256(ASCII(verifier)))`, RFC 7636 section 4.6. */

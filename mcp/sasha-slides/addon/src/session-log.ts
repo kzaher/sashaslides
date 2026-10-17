@@ -44,6 +44,7 @@
 // as a filter.
 
 import { FEEDBACK_DELIVERED_EVENT_KIND } from "../../feedback-delivery.ts";
+import { parseSessionEventFileName } from "../../session-event-name.ts";
 import { readFeedbackComment, type FeedbackCommentRecord, type FeedbackReply } from "./feedback.ts";
 import { PROTOCOL_VERSION, assertNever, type Parsed, type Region } from "./protocol.ts";
 import { asRecord, stringAt } from "./json-fields.ts";
@@ -144,7 +145,7 @@ export function sessionEventsOf({ files }: { files: readonly SessionEventFile[] 
  * event carrying the reason instead of an absence.
  */
 export function parseSessionEventFile({ proposalId, fileId, name, text }: SessionEventFile): SessionEvent {
-  const named = parseSessionEventName(name);
+  const named = parseSessionEventFileName(name);
   const record = asRecord(parseJson(text));
   if (record === null) {
     return {
@@ -174,23 +175,6 @@ export function parseSessionEventFile({ proposalId, fileId, name, text }: Sessio
   }
   return { eventId: name, fileId, atMillis, at, proposalId, body: bodyOf({ rawKind, record }) };
 }
-
-/**
- * The file name's three parts, or null when it is not one of ours. `<epochMillis>-<6 base36>-<kind>.json`
- * -- and `kind` may itself contain hyphens, which is why the split is anchored rather than greedy.
- */
-export function parseSessionEventName(name: string): SessionEventName | null {
-  const matched = /^(\d{1,15})-([0-9a-z]{6})-([a-z][a-z0-9-]*)\.json$/.exec(name);
-  if (matched === null) return null;
-  const millis = matched[1];
-  const suffix = matched[2];
-  const kind = matched[3];
-  if (millis === undefined || suffix === undefined || kind === undefined) return null;
-  const atMillis = Number.parseInt(millis, 10);
-  return Number.isFinite(atMillis) ? { atMillis, suffix, kind } : null;
-}
-
-export type SessionEventName = Readonly<{ atMillis: number; suffix: string; kind: string }>;
 
 /**
  * The name to CREATE an event under. A write is a create -- which cannot clobber -- so the

@@ -23,7 +23,6 @@ import {
   describeSessionEvent,
   ensureEventsFolder,
   parseSessionEvent,
-  parseSessionEventFileName,
   readSessionEvents,
   sessionEventFileName,
   SESSION_EVENT_KINDS,
@@ -32,6 +31,7 @@ import {
   type SessionEventRecord,
   type SessionLogEnvironment,
 } from "../session-log";
+import { parseSessionEventFileName } from "../session-event-name";
 import { createFakeDrive, type FakeDrive } from "./fake-drive";
 
 describe("appendSessionEvent", () => {
@@ -172,7 +172,7 @@ describe("the event file name", () => {
   test("round-trips, and `kind` may contain the dashes every kind has", () => {
     for (const kind of SESSION_EVENT_KINDS) {
       const name = sessionEventFileName({ atMillis: 1791073110901, suffix: "a1b2c3", kind });
-      assert.deepEqual(parseSessionEventFileName({ name }), {
+      assert.deepEqual(parseSessionEventFileName(name), {
         atMillis: 1791073110901,
         suffix: "a1b2c3",
         kind,
@@ -181,8 +181,21 @@ describe("the event file name", () => {
   });
 
   test("rejects a name that is not an event, so a stray file is never parsed as one", () => {
-    for (const name of ["manifest.json", "READY", "01.html", "-aaa111-x.json", "100--x.json", "100-aaa111-.json"]) {
-      assert.equal(parseSessionEventFileName({ name }), null, name);
+    for (const name of [
+      "manifest.json",
+      "READY",
+      "01.html",
+      "-aaa111-x.json",
+      "100--x.json",
+      "100-aaa111-.json",
+      // The shared grammar (session-event-name.ts) the add-on parses with too: six lower-case base36
+      // characters and a lower-case kind, so the two sides list the same files.
+      "100-AAA111-slide-revised.json",
+      "100-aaa11-slide-revised.json",
+      "100-aaa111-Slide-Revised.json",
+      "1234567890123456-aaa111-slide-revised.json",
+    ]) {
+      assert.equal(parseSessionEventFileName(name), null, name);
     }
   });
 });

@@ -49,11 +49,12 @@
  * All network traffic goes through an injected `HttpFetch`, so the tests drive real token
  * signing and verification against fakes.
  */
-import { createHash, createPrivateKey, createPublicKey, sign, verify, type KeyObject } from "node:crypto";
+import { createHash, createPrivateKey, sign, type KeyObject } from "node:crypto";
 import type { GoogleClientCredentials } from "../google-auth";
 import { PASSKEY_PROVIDER } from "./account-directory";
 import type { OAuthParameters } from "./authorization-server";
 import { jsonSegment, type HttpFetch } from "./http-kit";
+import { signingKeysOf, verifyIdToken, type SigningKey } from "./id-token.ts";
 import { asRecord, asString, asStringArray, nodeErrorCode, parseJson, type FieldParse } from "./json-values";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
@@ -578,9 +579,6 @@ type OidcDiscovery = Readonly<{
 
 type Loaded<TValue> = Readonly<{ kind: "ok"; value: TValue }> | Readonly<{ kind: "failed"; reason: string }>;
 
-/** RSA public keys from the JWKS, by `kid` (null when the key has none). */
-type SigningKey = Readonly<{ kid: string | null; key: KeyObject }>;
-
 /** Tolerated clock difference between us and the issuer, for `exp` and `nbf`. */
 const CLOCK_SKEW_MS = 60_000;
 
@@ -650,7 +648,7 @@ function oidcProvider(options: ProviderDependencies & Readonly<{ profile: OidcPr
       if (exchanged.kind === "failed") return exchanged;
       const idToken = asString(exchanged.value.id_token);
       if (idToken === null) return { kind: "failed", reason: `${profile.name}: the token response has no id_token` };
-      return verifyIdToken({ idToken, profile, expectedNonce: pending.nonce, keys, nowMs: now().getTime() });
+      return verifyProviderIdToken({ idToken, profile, expectedNonce: pending.nonce, keys, nowMs: now().getTime() });
     },
   };
 }
@@ -713,27 +711,12 @@ async function fetchSigningKeys(
 ): Promise<Loaded<readonly SigningKey[]>> {
   const fetched = await fetchJson({ fetch: options.fetch, url: options.jwksUri, init: { method: "GET", headers: { accept: "application/json" } }, timeoutMs: options.timeoutMs });
   if (fetched.kind === "failed") return { kind: "failed", reason: `JWKS: ${fetched.reason}` };
-  const keys = asRecord(fetched.value.body)?.keys;
-  if (fetched.value.status !== 200 || !Array.isArray(keys)) return { kind: "failed", reason: `JWKS: no key list at ${options.jwksUri}` };
-  const signingKeys: SigningKey[] = [];
-  for (const candidate of keys) {
-    const jwk = asRecord(candidate);
-    if (jwk === null || jwk.kty !== "RSA") continue;
-    if (jwk.use !== undefined && jwk.use !== "sig") continue;
-    if (jwk.alg !== undefined && jwk.alg !== "RS256") continue;
-    const modulus = asString(jwk.n);
-    const exponent = asString(jwk.e);
-    if (modulus === null || exponent === null) continue;
-    try {
-      signingKeys.push({ kid: asString(jwk.kid), key: createPublicKey({ key: { kty: "RSA", n: modulus, e: exponent }, format: "jwk" }) });
-    } catch {
-      // A malformed key in the set is skipped; the token's own key is what has to be valid.
-    }
-  }
+  const signingKeys = fetched.value.status === 200 ? signingKeysOf(fetched.value.body) : null;
+  if (signingKeys === null) return { kind: "failed", reason: `JWKS: no key list at ${options.jwksUri}` };
   return { kind: "ok", value: signingKeys };
 }
 
-async function verifyIdToken(
+async function verifyProviderIdToken(
   options: Readonly<{
     idToken: string;
     profile: OidcProfile;
@@ -742,48 +725,30 @@ async function verifyIdToken(
     nowMs: number;
   }>,
 ): Promise<SignInOutcome> {
-  const { profile, nowMs } = options;
+  const { profile } = options;
   const fail = (reason: string): SignInOutcome => ({ kind: "failed", reason: `${profile.name} ID token: ${reason}` });
-  const parts = options.idToken.split(".");
-  const [encodedHeader, encodedClaims, encodedSignature] = parts;
-  if (parts.length !== 3 || encodedHeader === undefined || encodedClaims === undefined || encodedSignature === undefined) {
-    return fail("not a compact JWS");
-  }
-  const header = decodeJsonSegment(encodedHeader);
-  const claims = decodeJsonSegment(encodedClaims);
-  if (header === null || claims === null) return fail("header or payload is not base64url JSON");
-  // Pinning the algorithm is what keeps `none` and RS/HS confusion out.
-  if (header.alg !== "RS256") return fail(`unsupported alg ${JSON.stringify(header.alg)}`);
+  // Every OpenID Connect sign-in here sends a nonce; one without is a sign-in we did not start.
+  if (options.expectedNonce === null) return fail("nonce does not match this sign-in");
+  const verdict = await verifyIdToken({
+    token: options.idToken,
+    keyFor: (kid) => findSigningKey({ kid, keys: options.keys }),
+    issuers: profile.issuers,
+    audience: profile.clientId,
+    nowMs: options.nowMs,
+    clockSkewMs: CLOCK_SKEW_MS,
+    nonce: options.expectedNonce,
+  });
+  if (verdict.kind === "rejected") return fail(verdict.reason);
 
-  const kid = asString(header.kid);
-  const key = await findSigningKey({ kid, keys: options.keys });
-  if (key.kind === "failed") return fail(key.reason);
-  const signedInput = Buffer.from(`${encodedHeader}.${encodedClaims}`, "utf-8");
-  const signature = Buffer.from(encodedSignature, "base64url");
-  if (!verify("RSA-SHA256", signedInput, key.value, signature)) return fail("signature does not verify");
-
-  const issuer = asString(claims.iss);
-  if (issuer === null || !profile.issuers.includes(issuer)) return fail(`unexpected issuer ${JSON.stringify(claims.iss)}`);
-  const audience = typeof claims.aud === "string" ? [claims.aud] : asStringArray(claims.aud);
-  if (audience === null || !audience.includes(profile.clientId)) return fail("audience is not this client");
-  // OpenID Connect Core 3.1.3.7: with several audiences, `azp` must name us.
-  if (audience.length > 1 && claims.azp !== profile.clientId) return fail("authorized party is not this client");
-  if (typeof claims.exp !== "number") return fail("no expiry");
-  if (claims.exp * 1000 + CLOCK_SKEW_MS <= nowMs) return fail("expired");
-  if (typeof claims.nbf === "number" && claims.nbf * 1000 - CLOCK_SKEW_MS > nowMs) return fail("not yet valid");
-  if (options.expectedNonce === null || claims.nonce !== options.expectedNonce) return fail("nonce does not match this sign-in");
-  const subject = asString(claims.sub);
-  if (subject === null || subject === "") return fail("no subject");
-
-  const email = asString(claims.email);
+  const email = asString(verdict.claims.email);
   return {
     kind: "signed-in",
     identity: {
       provider: profile.name,
-      subject,
+      subject: verdict.subject,
       email: email === "" ? null : email,
       // Some issuers, Apple among them, send the boolean as the string "true" or "false".
-      emailVerified: email !== null && email !== "" && (claims.email_verified === true || claims.email_verified === "true"),
+      emailVerified: email !== null && email !== "" && (verdict.claims.email_verified === true || verdict.claims.email_verified === "true"),
     },
   };
 }
@@ -800,12 +765,6 @@ async function findSigningKey(
     if (only !== undefined && (options.kid !== null || matches.length === 1)) return { kind: "ok", value: only.key };
   }
   return { kind: "failed", reason: `no signing key ${options.kid === null ? "(no kid)" : JSON.stringify(options.kid)} in the JWKS` };
-}
-
-function decodeJsonSegment(segment: string): Readonly<Record<string, unknown>> | null {
-  if (!/^[A-Za-z0-9_-]*$/.test(segment)) return null;
-  const parsed = parseJson(Buffer.from(segment, "base64url").toString("utf-8"));
-  return parsed.kind === "ok" ? asRecord(parsed.value) : null;
 }
 
 // ---------------------------------------------------------------- GitHub

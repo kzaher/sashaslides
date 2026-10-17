@@ -26,6 +26,7 @@
  */
 import type { DriveChannel, DriveFile, DriveMedia } from "./drive-channel";
 import { FEEDBACK_DELIVERED_EVENT_KIND } from "./feedback-delivery";
+import { parseSessionEventFileName } from "./session-event-name.ts";
 import { assertNever } from "./engine/src/contracts/assert-never.ts";
 import { asArray, asNumber, asRecord, asString } from "./http/json-values.ts";
 
@@ -333,7 +334,7 @@ export async function readSessionEvents(
   const records: SessionEventRecord[] = [];
   const unreadable: string[] = [];
   for (const file of files) {
-    const named = parseSessionEventFileName({ name: file.name });
+    const named = parseSessionEventFileName(file.name);
     if (named === null) {
       // Not ours and not an event: a stray file in the folder is reported, never parsed.
       unreadable.push(`${file.name} (not an <epochMillis>-<suffix>-<kind>.json event name)`);
@@ -364,25 +365,6 @@ export function sessionEventFileName(
   options: Readonly<{ atMillis: number; suffix: string; kind: string }>,
 ): string {
   return `${String(options.atMillis)}-${options.suffix}-${options.kind}.json`;
-}
-
-/**
- * The name is the ORDER, so it is parsed separately from the body and wins over it: a writer
- * whose clock disagrees with its own file name cannot reshuffle the log for everyone else.
- *
- * `kind` may contain `-` (every kind does), so the split is "first field, second field,
- * everything else" rather than a three-way split.
- */
-export function parseSessionEventFileName(
-  options: Readonly<{ name: string }>,
-): Readonly<{ atMillis: number; suffix: string; kind: string }> | null {
-  const match = /^(\d+)-([0-9a-z]+)-(.+)\.json$/i.exec(options.name);
-  if (match === null) return null;
-  const atMillis = Number.parseInt(match[1] ?? "", 10);
-  const suffix = match[2] ?? "";
-  const kind = match[3] ?? "";
-  if (!Number.isSafeInteger(atMillis) || suffix === "" || kind === "") return null;
-  return { atMillis, suffix, kind };
 }
 
 /**

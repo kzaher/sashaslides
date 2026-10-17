@@ -16,7 +16,7 @@ import type { Credentials, OAuth2Client } from "google-auth-library";
 import { googleDriveChannel, type DriveChannel } from "../drive-channel";
 import { googleFeedbackChannel, type FeedbackChannel } from "../feedback/feedback-channel";
 import type { GoogleClientCredentials } from "../google-auth";
-import { DRIVE_SCOPES, SLIDES_SCOPE } from "../google-constants";
+import { mergeGoogleGrant, missingGoogleGrant } from "./google-grants";
 import type { AuthStore, GoogleIdentity } from "./oauth-store";
 
 export type UserDriveFactory = Readonly<{
@@ -79,7 +79,7 @@ export function googleUserDriveFactory(
     // refresh token from being lost.
     auth.on("tokens", (tokens: Credentials) => {
       void store.googleIdentities
-        .put({ key: subject, value: mergeCredentials({ identity, tokens }) })
+        .put({ key: subject, value: mergeGoogleGrant({ stored: identity, fresh: grantOf({ identity, tokens }) }) })
         .catch((cause: unknown) => {
           warn(`could not persist refreshed Google tokens for ${subject}: ${String(cause)}`);
         });
@@ -107,24 +107,6 @@ function missingScopes(identity: GoogleIdentity): string | null {
   return missingGoogleGrant({ grantedScopes: identity.grantedScopes });
 }
 
-/**
- * The scope a Google grant still lacks for the tools to work, or null when it has enough. Shared by
- * the per-call check and the sign-in callback, which refuses a partial grant up front.
- */
-export function missingGoogleGrant(options: Readonly<{ grantedScopes: readonly string[] }>): string | null {
-  const { grantedScopes } = options;
-  // An empty scope list means Google told us nothing, not that nothing was granted; the
-  // API call itself will then be the authority.
-  if (grantedScopes.length === 0) return null;
-  // The same two requirements `google-auth.ts` checks for the stdio token, so the two
-  // modes cannot drift on what "sufficiently granted" means.
-  if (!grantedScopes.includes(SLIDES_SCOPE)) return SLIDES_SCOPE;
-  if (!DRIVE_SCOPES.some((scope) => grantedScopes.includes(scope))) {
-    return DRIVE_SCOPES.join(" or ");
-  }
-  return null;
-}
-
 function asCredentials(identity: GoogleIdentity): Credentials {
   return {
     ...(identity.accessToken === null ? {} : { access_token: identity.accessToken }),
@@ -134,14 +116,15 @@ function asCredentials(identity: GoogleIdentity): Credentials {
   };
 }
 
-function mergeCredentials(
-  options: Readonly<{ identity: GoogleIdentity; tokens: Credentials }>,
-): GoogleIdentity {
+/** What googleapis' refresh reported, as a grant to merge over the stored one. */
+function grantOf(options: Readonly<{ identity: GoogleIdentity; tokens: Credentials }>): GoogleIdentity {
   const { identity, tokens } = options;
   return {
-    ...identity,
-    accessToken: tokens.access_token ?? identity.accessToken,
-    refreshToken: tokens.refresh_token ?? identity.refreshToken,
-    accessTokenExpiresAtMs: tokens.expiry_date ?? identity.accessTokenExpiresAtMs,
+    subject: identity.subject,
+    email: null,
+    accessToken: tokens.access_token ?? null,
+    refreshToken: tokens.refresh_token ?? null,
+    accessTokenExpiresAtMs: tokens.expiry_date ?? null,
+    grantedScopes: (tokens.scope ?? "").split(" ").filter((scope) => scope.length > 0),
   };
 }

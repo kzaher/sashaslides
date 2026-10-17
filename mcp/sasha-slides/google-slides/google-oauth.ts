@@ -1,6 +1,7 @@
 /**
  * The Google OAuth calls the Slides interchange makes: the connect consent address, the code
- * exchange on the shared callback, and refreshing a stored grant into an access token.
+ * exchange on the shared callback, and a stored grant's access token (refreshed by
+ * http/google-grants.ts, the one implementation).
  *
  * WHY OVER THE INJECTED `fetch` rather than http/google-broker.ts's `googleapis` client: the
  * interchange's only network dependency is the `fetch` it is given (deck-service-contract.ts), so
@@ -14,6 +15,7 @@
  */
 import type { GoogleClientCredentials } from "../google-auth";
 import { DRIVE_FILE_SCOPE, GOOGLE_CONSENT_ENDPOINT, GOOGLE_TOKEN_ENDPOINT, SLIDES_SCOPE } from "../google-constants.ts";
+import { googleAccessToken } from "../http/google-grants.ts";
 import type { GoogleIdentity } from "../http/oauth-store";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
@@ -64,29 +66,15 @@ export function exchangeAuthorizationCode(
   });
 }
 
-export function refreshAccessToken(
-  options: Readonly<{ fetch: typeof fetch; client: GoogleClientCredentials; refreshToken: string; now: () => number }>,
-): Promise<GoogleTokenAnswer> {
-  return postTokenForm({
-    fetch: options.fetch,
-    now: options.now,
-    form: {
-      grant_type: "refresh_token",
-      refresh_token: options.refreshToken,
-      client_id: options.client.clientId,
-      client_secret: options.client.clientSecret,
-    },
-  });
-}
-
 export type AccessTokenOutcome =
   | Readonly<{ kind: "ok"; accessToken: string }>
   /** The grant lacks the Slides scope, has no usable token, or Google refused the refresh. */
   | Readonly<{ kind: "notConnected"; message: string }>;
 
 /**
- * A usable access token for a stored grant: the stored one while it has a minute left, otherwise a
- * refresh. A grant without the Slides scope is "not connected": the connect flow asks for it.
+ * A usable access token for a stored grant (http/google-grants.ts: the stored one while it has a
+ * minute left, otherwise a refresh). A grant without the Slides scope is "not connected": the
+ * connect flow asks for it.
  */
 export async function accessTokenForIdentity(
   options: Readonly<{ fetch: typeof fetch; client: GoogleClientCredentials; identity: GoogleIdentity; now: () => number }>,
@@ -95,24 +83,24 @@ export async function accessTokenForIdentity(
   if (!identity.grantedScopes.includes(SLIDES_SCOPE)) {
     return { kind: "notConnected", message: "The Google grant does not include Google Slides." };
   }
-  const expiresAt = identity.accessTokenExpiresAtMs;
-  if (identity.accessToken !== null && expiresAt !== null && expiresAt - options.now() > ACCESS_TOKEN_MARGIN_MILLISECONDS) {
-    return { kind: "ok", accessToken: identity.accessToken };
-  }
-  if (identity.refreshToken === null) return { kind: "notConnected", message: "The Google grant has expired." };
-  const refreshed = await refreshAccessToken({ fetch: options.fetch, client: options.client, refreshToken: identity.refreshToken, now: options.now });
-  switch (refreshed.kind) {
+  const token = await googleAccessToken({
+    grant: identity,
+    client: options.client,
+    fetch: options.fetch,
+    nowMs: options.now(),
+    timeoutMs: TOKEN_CALL_TIMEOUT_MILLISECONDS,
+    forceRefresh: false,
+  });
+  switch (token.kind) {
     case "ok":
-      return { kind: "ok", accessToken: refreshed.accessToken };
+      return { kind: "ok", accessToken: token.accessToken };
     case "failed":
-      return { kind: "notConnected", message: `Google refused to refresh the grant: ${refreshed.message}` };
+      return { kind: "notConnected", message: `Google refused to refresh the grant: ${token.reason}` };
     default:
-      return assertNever(refreshed);
+      return assertNever(token);
   }
 }
 
-/** A token with less than this left is refreshed first, so it cannot expire mid-export. */
-const ACCESS_TOKEN_MARGIN_MILLISECONDS = 60_000;
 const TOKEN_CALL_TIMEOUT_MILLISECONDS = 15_000;
 
 async function postTokenForm(

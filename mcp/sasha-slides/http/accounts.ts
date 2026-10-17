@@ -22,6 +22,7 @@
  * the next `put` for that subject seals it.
  */
 import { randomBytes } from "node:crypto";
+import { accountLinkKey, findOrCreateAccountForIdentity, GOOGLE_PROVIDER } from "./account-directory";
 import type { AccountId, AccountVault } from "./account-vault";
 import { isSealedValue } from "./account-keys";
 import type { AuthStore, GoogleIdentity, RecordStore } from "./oauth-store";
@@ -65,37 +66,13 @@ export function googleAccounts(
     newAccountId: () => AccountId;
   }>,
 ): GoogleAccounts {
-  const { store, vault, now, newAccountId } = options;
-  const find = async ({ subject }: Readonly<{ subject: string }>): Promise<AccountId | null> => {
-    const link = await store.accountLinks.get({ key: accountLinkKey({ provider: GOOGLE_PROVIDER, subject }) });
-    return link === null ? null : link.accountId;
-  };
+  const { store } = options;
   return {
-    find,
-    ensure: async ({ subject, email }) => {
-      const existing = await find({ subject });
-      if (existing !== null) return existing;
-      const accountId = newAccountId();
-      const linkKey = accountLinkKey({ provider: GOOGLE_PROVIDER, subject });
-      const createdAtMs = now().getTime();
-      // The account record first: a crash between the two writes leaves an unlinked
-      // account (harmless, re-created on the next sign-in), never a link to nothing.
-      await store.accounts.put({
-        key: accountId,
-        value: { accountId, createdAtMs, linkKeys: [linkKey], googleSubject: subject },
-      });
-      await store.accountLinks.put({
-        key: linkKey,
-        value: {
-          accountId,
-          provider: GOOGLE_PROVIDER,
-          subject,
-          sealedEmail: email === null ? null : await vault.seal({ accountId, plaintext: email }),
-          linkedAtMs: createdAtMs,
-        },
-      });
-      return accountId;
+    find: async ({ subject }) => {
+      const link = await store.accountLinks.get({ key: accountLinkKey({ provider: GOOGLE_PROVIDER, subject }) });
+      return link === null ? null : link.accountId;
     },
+    ensure: ({ subject, email }) => findOrCreateAccountForIdentity({ ...options, provider: GOOGLE_PROVIDER, subject, email }),
   };
 }
 
@@ -150,14 +127,7 @@ export function sealedGoogleIdentities(
   };
 }
 
-/** The `accountLinks` key for one sign-in identity. */
-export function accountLinkKey(options: Readonly<{ provider: string; subject: string }>): string {
-  return `${options.provider}:${options.subject}`;
-}
-
 /** 16 random bytes, base64url: unguessable, and unrelated to any provider's subject. */
 export function randomAccountId(): AccountId {
   return randomBytes(16).toString("base64url");
 }
-
-const GOOGLE_PROVIDER = "google";
