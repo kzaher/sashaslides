@@ -18,7 +18,7 @@
     "renderer:build:browser": "npx tsx renderer/html2slides/browser/build.ts",
     "renderer:build:addon": "npx tsx renderer/html2slides/browser/build-addon.ts",
     "renderer:deploy:addon": "npm run renderer:build:addon && npx tsx renderer/html2slides/addon/deploy.ts",
-    "renderer:deploy": "bash renderer/html2slides/addon-server/deploy/deploy-sashaslides.sh",
+    "renderer:deploy": "bash deploy/publish.sh site",
     "renderer:regen:basics": "cd renderer/html2slides && bash regen-basics.sh",
     "renderer:regen:complex": "cd renderer/html2slides && bash regen-complex.sh",
     "renderer:regen": "npm run renderer:regen:basics && npm run renderer:regen:complex",

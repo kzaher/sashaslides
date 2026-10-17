@@ -18,3 +18,6 @@ deps/drawio/src/main/mxgraph
 **/__pycache__
 **/*.pyc
 .venv
+# Never built from nor served by the site image (deploy/publish.sh SITE_EXCLUDES lists the same).
+renderer/html2slides/e2e
+renderer/structured-prompts

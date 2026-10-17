@@ -28,6 +28,9 @@ for target in site connector all; do
     expect "$target: drawio checked by sha256" 'local drawio sha256 [0-9a-f]{64}' "$output"
     expect "$target: compose build for the site" 'docker compose -p sashaslides .*build$' "$output"
     expect "$target: checks /privacy" 'check GET https://[^ ]+/privacy' "$output"
+    # The site image neither builds from nor serves the e2e corpus or bug_solving (13 MB of 14).
+    expect "$target: site tarball excludes e2e and structured-prompts" \
+      'site-src\.tgz excludes renderer/html2slides/e2e renderer/structured-prompts$' "$output"
   fi
   if [ "$target" != site ]; then
     expect "$target: connector tarball size" 'connector-src\.tgz: [0-9]+ files, [0-9]+ bytes' "$output"
@@ -38,9 +41,18 @@ for target in site connector all; do
     # Secrets are read at startup: an unchanged image must still restart on new secrets (2026-10-13).
     expect "$target: connector restarts even when its image is unchanged" 'docker compose -p sasha-connector up -d --force-recreate' "$output"
   fi
+  # First deploy obtains the certificate before the site file that names it is installed.
+  expect "$target: certbot only when the certificate is missing" 'if \[ ! -d "/etc/letsencrypt/live/\$domain" \]; then' "$output"
+  expect "$target: certbot via nginx" 'certbot certonly --nginx --non-interactive --agree-tos -m "\$acme_email" -d "\$domain"' "$output"
+  expect "$target: certbot before the site file is installed" '^certbot$' \
+    "$(grep -oE -m1 'certbot certonly|cp /tmp/nginx-sashaslides\.conf\.new' <<< "$output" | cut -d' ' -f1)"
   expect "$target: nginx -t before reload" 'if ! nginx -t; then' "$output"
   expect "$target: reload after the test" 'systemctl reload nginx' "$output"
 done
+
+dockerignore="$(cat "$HERE/../.dockerignore")"
+expect ".dockerignore: e2e corpus" '^renderer/html2slides/e2e$' "$dockerignore"
+expect ".dockerignore: structured-prompts" '^renderer/structured-prompts$' "$dockerignore"
 
 if [ -s "$STUBS/calls" ]; then
   echo "FAIL dry-run invoked the network:"; cat "$STUBS/calls"; failures=$((failures + 1))

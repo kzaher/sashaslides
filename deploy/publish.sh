@@ -19,7 +19,8 @@
 #     src/  data/  secrets/   see mcp/sasha-slides/deploy/docker-compose.yml
 #
 # Environment overrides: DEPLOY_HOST (root@78.46.91.218, the server "holosweat"),
-# DEPLOY_DOMAIN (sashaslides.com), DEPLOY_KEY (unset: ssh uses its agent, e.g. a forwarded
+# DEPLOY_DOMAIN (sashaslides.com), DEPLOY_ACME_EMAIL (certbot registration, used only when the
+# domain has no certificate yet), DEPLOY_KEY (unset: ssh uses its agent, e.g. a forwarded
 # SSH_AUTH_SOCK; set it to force one key file with IdentitiesOnly).
 set -euo pipefail
 
@@ -28,12 +29,17 @@ HOST="${DEPLOY_HOST:-root@78.46.91.218}"
 # deploy does not depend on an SSH agent forwarded by an editor; DEPLOY_KEY overrides, "" forces the agent.
 KEY="${DEPLOY_KEY-$( [ -f "$(dirname "$0")/../.auth/deploy_ed25519" ] && echo "$(cd "$(dirname "$0")/.." && pwd)/.auth/deploy_ed25519" )}"
 DOMAIN="${DEPLOY_DOMAIN:-sashaslides.com}"
+ACME_EMAIL="${DEPLOY_ACME_EMAIL:-krunoslav.zaher@gmail.com}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITE_DIR="renderer/html2slides/addon-server"
 CONNECTOR_DEPLOY_DIR="mcp/sasha-slides/deploy"
 NGINX_CONF="$SITE_DIR/deploy/nginx-sashaslides.conf"
 DRAWIO_WEBAPP="deps/drawio/src/main/webapp"
 SITE_HOME="/root/sashaslides"
+# Trees under renderer/ that the site image never builds from nor serves: the e2e fixture corpus
+# and the bug_solving scaffolding (13 MB of the 14 MB context). The image builds only from
+# browser/build-addon.ts's and addon-server/server.ts's import graphs. .dockerignore lists the same.
+SITE_EXCLUDES=(renderer/html2slides/e2e renderer/structured-prompts)
 CONNECTOR_HOME="/root/sasha-connector"
 # The connector's container user (mcp/sasha-slides/deploy/Dockerfile). Not 1000: on the
 # server uid 1000 is a login user, who would then own the secrets.
@@ -58,6 +64,8 @@ if [ -n "$KEY" ]; then SSH_OPTS+=(-i "$KEY" -o IdentitiesOnly=yes); export SSH_A
 # Wall-clock budgets (seconds). Each remote step is killed past its budget, and the ssh
 # keepalive above kills a dead connection within ~30 s, so no step can hang silently.
 BUDGET_SHORT=30
+# install_nginx: two certbot attempts of at most 120 s each on a first deploy, otherwise seconds.
+BUDGET_CERT=300
 BUDGET_UPLOAD=600
 BUDGET_BUILD=1800
 
@@ -105,11 +113,17 @@ publish_site() {
 
   step "website: packing build context (package*.json, .dockerignore, deps/pptxgenjs, renderer)"
   tar -czf "$WORK/site-src.tgz" \
+    "${SITE_EXCLUDES[@]/#/--exclude=}" \
     --exclude=node_modules --exclude=.git --exclude=__pycache__ --exclude='*.pyc' \
     --exclude='*.log' --exclude='.sxs-*' --exclude=.auth \
     --exclude=deps/pptxgenjs/dist --exclude=deps/pptxgenjs/demos \
     package.json package-lock.json .dockerignore deps/pptxgenjs renderer
   report_tarball "$WORK/site-src.tgz"
+  local excluded
+  for excluded in "${SITE_EXCLUDES[@]}"; do
+    ! tar -tzf "$WORK/site-src.tgz" | grep -q "^$excluded/" || die "site-src.tgz still contains $excluded/"
+  done
+  info "site-src.tgz excludes ${SITE_EXCLUDES[*]}"
 
   step "website: drawio webapp"
   local drawio_sha remote_sha
@@ -155,8 +169,8 @@ docker compose -p sashaslides "${env_args[@]}" ps
 REMOTE
 }
 
-# The two downloads the old local-Docker deploy regenerated before every build: the
-# Claude-bridge zip and the Apps Script add-on bundle that install.sh?doc= pushes.
+# The two committed downloads regenerated before every build: the Claude-bridge zip (drawio
+# embedding) and the old html2slides Apps Script add-on bundle that install.sh?doc= pushes.
 regenerate_site_downloads() {
   if [ "$DRY" = 1 ]; then
     info "[dry-run] would regenerate $SITE_DIR/public/sasha-bridge.zip and $SITE_DIR/public/addon-bundle/"
@@ -296,11 +310,22 @@ REMOTE
 install_nginx() {
   step "nginx: installing $NGINX_CONF as sites-available/$DOMAIN"
   run timeout "$BUDGET_SHORT" scp -q "${SSH_OPTS[@]}" "$NGINX_CONF" "$HOST:/tmp/nginx-sashaslides.conf.new"
-  remote_script "$BUDGET_SHORT" "$DOMAIN" "$SITE_HOME" <<'REMOTE'
+  remote_script "$BUDGET_CERT" "$DOMAIN" "$SITE_HOME" "$ACME_EMAIL" <<'REMOTE'
 set -euo pipefail
-domain="$1"; home="$2"
-test -d "/etc/letsencrypt/live/$domain" \
-  || { echo "!! no certificate for $domain — run the certbot step of deploy-sashaslides.sh first"; exit 1; }
+domain="$1"; home="$2"; acme_email="$3"
+# First deploy only: obtain the certificate the site file names, before installing that file
+# (nginx -t would reject it otherwise). certbot's own timer renews it afterwards.
+if [ ! -d "/etc/letsencrypt/live/$domain" ]; then
+  echo "  -> certbot: obtaining a certificate for $domain"
+  timeout 120 certbot certonly --nginx --non-interactive --agree-tos -m "$acme_email" -d "$domain" || {
+    echo "  !! certbot --nginx failed; retrying with --webroot /var/www/html"
+    mkdir -p /var/www/html
+    timeout 120 certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos -m "$acme_email" -d "$domain"
+  }
+  test -d "/etc/letsencrypt/live/$domain" || { echo "!! certbot produced no certificate for $domain"; exit 1; }
+else
+  echo "  -> certificate for $domain present (certbot renews it on its own timer)"
+fi
 site="/etc/nginx/sites-available/$domain"
 mkdir -p "$home"
 [ -f "$site" ] && cp "$site" "$home/nginx-sashaslides.conf.previous"

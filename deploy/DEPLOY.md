@@ -47,9 +47,9 @@ in `mcp/sasha-slides/engine`) before packing, because the connector serves
    redirect URIs that the connector prints at startup:
    `https://sashaslides.com/oauth/google/callback` and
    `https://sashaslides.com/account/callback/google`.
-4. The certificate for sashaslides.com must already exist. `publish.sh` refuses to install the
-   nginx file without it; `renderer/html2slides/addon-server/deploy/deploy-sashaslides.sh` has the
-   certbot step.
+4. Certificate: when `/etc/letsencrypt/live/sashaslides.com` is missing, `publish.sh` runs
+   `certbot certonly --nginx` (falling back to `--webroot /var/www/html`) before installing the
+   nginx file, registering `DEPLOY_ACME_EMAIL`. certbot's timer renews it afterwards.
 
 ## First deploy
 

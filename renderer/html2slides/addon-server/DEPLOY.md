@@ -1,51 +1,15 @@
 # Deploying html2slides (server + SSL + Google Slides add-on)
 
 Two halves:
-1. **The UI server** — a Docker container (Node + Caddy) on *your* host, with automatic Let's Encrypt SSL.
+1. **The UI server** — a Docker container on the holosweat server, behind its nginx and certbot certificate.
 2. **The add-on** — a Google Apps Script project that loads the server-hosted UI into the Slides sidebar.
-
-The browser/sidebar never sees a cert you manage — Caddy terminates TLS and auto-renews.
 
 ---
 
-## Phase 1 — UI server + SSL (on your host)
+## Phase 1 — UI server + SSL
 
-### Prereqs
-- A host with Docker + Docker Compose, ports **80 and 443** open to the internet.
-- A domain/subdomain (e.g. `slides.yourdomain.com`) with a DNS **A record → your host's public IP**. (Caddy needs port 80 reachable to solve the ACME HTTP challenge.)
-
-### Steps
-```bash
-# 1. Get the repo onto the host (with submodules — drawio is one).
-git clone --recurse-submodules <your-repo-url> sashaslides
-cd sashaslides
-git submodule update --init deps/drawio      # populates the self-hosted drawio editor
-
-# 2. Configure the domain + ACME email.
-cd renderer/html2slides/addon-server
-cat > .env <<EOF
-DOMAIN=slides.yourdomain.com
-ACME_EMAIL=you@yourdomain.com
-EOF
-
-# 3. (Recommended) Build the drawio webapp once if the submodule ships source only.
-#    drawio's prebuilt webapp lives under src/main/webapp; if a build step is
-#    needed, run it on the host (it's heavy) — see deps/drawio/README. The server
-#    serves whatever is under deps/drawio/src/main/webapp (or build/).
-
-# 4. Bring it up. Caddy fetches the cert on first request.
-docker compose up -d --build
-
-# 5. Verify.
-curl https://slides.yourdomain.com/healthz       # -> ok
-curl https://slides.yourdomain.com/api/config    # -> {"oversampling":...,"drawioAvailable":true,...}
-```
-
-### Cert lifecycle (automatic)
-- First hit on the domain → Caddy gets a Let's Encrypt cert.
-- Renews ~30 days before expiry, no cron.
-- Certs + ACME account key live in the `caddy_data` Docker **volume** → survive `docker compose down/up` and never needlessly re-issue (stays under LE rate limits).
-- **Tip:** before going live, test with the staging CA (uncomment `acme_ca …staging…` in `Caddyfile`) so a typo doesn't burn your weekly rate limit; switch back once `curl` succeeds, then `docker compose restart caddy`.
+`bash deploy/publish.sh site` (or `npm run renderer:deploy`) from the repository root builds the image on the
+server, installs the nginx site and obtains the certificate on a first deploy. See `deploy/DEPLOY.md`.
 
 ---
 
@@ -89,6 +53,6 @@ clasp push
 ## Updating the UI later (no add-on redeploy)
 Because the sidebar fetches its UI from the server, UI changes ship by redeploying the container only:
 ```bash
-cd renderer/html2slides/addon-server && docker compose up -d --build
+bash deploy/publish.sh site
 ```
 Re-push the add-on **only** when `Code.gs` / scopes / `SERVER_ORIGIN` change.

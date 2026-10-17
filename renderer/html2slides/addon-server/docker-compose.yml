@@ -6,7 +6,7 @@
 # untouched by this stack.
 #
 # Its own compose project + dir (/root/sashaslides) so it never disturbs the
-# existing /root/holosweat/images stack. Built locally, pushed via the registry.
+# existing /root/holosweat/images stack. Built on the server by deploy/publish.sh.
 
 services:
   sashaslides:
@@ -31,5 +31,5 @@ services:
     ports:
       - "127.0.0.1:${HOST_PORT:-6000}:8787"
     # drawio editor webapp is OPTIONAL for v1: /drawio 503s until you populate the
-    # submodule and rebuild with it baked in (see HOLOSWEAT-DEPLOY.md "drawio").
+    # submodule and rebuild with it baked in (deploy/publish.sh uploads it).
     # Detection, export, oversampling, and the UI all work without it.
