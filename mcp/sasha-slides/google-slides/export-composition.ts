@@ -23,6 +23,7 @@ import { hexadecimalOfColour } from "./export-colours.ts";
 import type { PageScale } from "./interchange-geometry.ts";
 import type { InterchangeLossSink } from "./interchange-losses.ts";
 import type { ExportRequest } from "./slides-requests.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /** True when a box needs the composition path rather than one native shape. */
 export function needsComposition(box: BoxStyle): boolean {
@@ -168,8 +169,4 @@ function createdIdsOf(requests: readonly ExportRequest[]): readonly string[] {
     else if ("createTable" in request) ids.push(request.createTable.objectId);
   }
   return ids;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

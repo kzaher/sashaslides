@@ -43,7 +43,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { missingGoogleGrant } from "./user-drive";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { assertNever } from "../google-auth";
 import { asRecord, asString, asStringArray } from "./json-values";
 import {
   authorizationServerMetadata,
@@ -56,6 +55,7 @@ import {
 import { HOSTED_REDIRECT_URIS, matchRedirectUri } from "./redirect-uris";
 import type { AuthStore, GoogleIdentity, RegisteredClient } from "./oauth-store";
 import type { GoogleBroker } from "./google-broker";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type AuthorizationServer = Readonly<{
   endpoints: Endpoints;

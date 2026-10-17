@@ -123,9 +123,8 @@
  * The page HTML is rendered with template strings: these are static pages whose only script
  * shows the passkey buttons and runs the ceremony, which is the exception the React rule names.
  */
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { assertNever } from "../google-auth";
 import {
   PASSKEY_PROVIDER,
   type AccountDirectory,
@@ -138,6 +137,10 @@ import {
 import type { AccountEraser, AccountId, EraseReport } from "./account-vault";
 import { clientAddress, type TrustedProxies } from "./client-address";
 import type { IdentityProvider, PendingSignIn, ResponseMode, VerifiedIdentity } from "./identity-providers";
+import { clearCookie, constantTimeEqual, cookieValues, setCookie, signedValues, type SameSite as CookieSameSite } from "./cookies";
+import { createExpiringTable } from "./expiring-table";
+import { escapeHtml, layout, messagePage, pageHeaders, sendHtml, sendScript, STYLE_HASH } from "./html-pages";
+import { mediaTypeOf, readBodyText, sendJson } from "./http-kit";
 import { asRecord, asString, parseJson } from "./json-values";
 import {
   EMAIL_LINK_LIFETIME_MS,
@@ -153,7 +156,6 @@ import {
 } from "./password-sign-in";
 import { PASSKEY_SCRIPT } from "./passkey-script.generated";
 import { providerButtonClass, providerMark } from "./provider-marks";
-import { SASHA_ICON_SVG } from "./sasha-icon.generated";
 import {
   parseAuthenticationCredential,
   parseRegistrationCredential,
@@ -164,6 +166,7 @@ import {
   verifyRegistration,
   type RelyingParty,
 } from "./webauthn";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type AccountPortal = Readonly<{
   /** The configured provider names, in button order, for the startup banner. */
@@ -266,9 +269,10 @@ export function createAccountPortal(
   const passwordSignIn = options.passwordSignIn ?? null;
   const deckSessionStart = options.deckSessionStart ?? null;
   const providers = new Map(options.providers.map((provider) => [provider.name, provider]));
-  const pendingSignIns = new Map<string, Readonly<{ pending: PendingProviderFlow; expiresAtMs: number }>>();
-  const pendingLinkCompletions = new Map<string, Readonly<{ pending: LinkCompletion; expiresAtMs: number }>>();
-  const pendingPasskeys = new Map<string, Readonly<{ pending: PendingPasskey; expiresAtMs: number }>>();
+  const clock = (): number => now().getTime();
+  const pendingSignIns = createExpiringTable<PendingProviderFlow>({ now: clock, capacity: MAX_PENDING_SIGNINS });
+  const pendingLinkCompletions = createExpiringTable<LinkCompletion>({ now: clock, capacity: MAX_PENDING_SIGNINS });
+  const pendingPasskeys = createExpiringTable<PendingPasskey>({ now: clock, capacity: MAX_PENDING_SIGNINS });
   // "preferred": a PIN-less security key is still a phishing-proof possession factor.
   const relyingParty = relyingPartyFor({ publicUrl, requireUserVerification: false });
   // Only the two pages with passkey buttons get a policy that admits the script.
@@ -308,7 +312,7 @@ export function createAccountPortal(
         return logout(request, response);
       case "passkey-script":
         if (method !== "GET") return sendMethodNotAllowed({ response, allow: "GET" });
-        return sendScript(response);
+        return sendScript({ response, script: PASSKEY_SCRIPT });
       case "passkey-options":
         if (method !== "POST") return sendMethodNotAllowed({ response, allow: "POST" });
         return passkeyOptions(request, response, target.ceremony);
@@ -426,11 +430,10 @@ export function createAccountPortal(
    */
   async function linkComplete(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const token = cookieValues({ request, name: LINK_COOKIE_NAME })[0] ?? null;
-    const entry = token === null ? undefined : pendingLinkCompletions.get(token);
     // Taken on first sight, like a pending sign-in, so a reload cannot attach it twice.
-    if (token !== null) pendingLinkCompletions.delete(token);
+    const pending = token === null ? null : pendingLinkCompletions.take(token);
     const clearLink = clearCookie({ name: LINK_COOKIE_NAME, path: LINK_COMPLETE_PATH, sameSite: "Lax" });
-    if (entry === undefined || entry.expiresAtMs <= now().getTime()) {
+    if (pending === null) {
       return sendPage({
         response,
         status: 400,
@@ -442,7 +445,6 @@ export function createAccountPortal(
         cookies: [clearLink],
       });
     }
-    const { pending } = entry;
     const session = sessions.read({ request, nowMs: now().getTime() });
     if (session === null || session.accountId !== pending.accountId || !constantTimeEqual(session.csrf, pending.sessionCsrf)) {
       audit({ accountId: pending.accountId, action: "link", provider: pending.identity.provider, outcome: "refused, the session changed" });
@@ -673,7 +675,7 @@ export function createAccountPortal(
   }
 
   function rememberPendingSignIn(pending: PendingProviderFlow): void {
-    rememberBounded({ entries: pendingSignIns, key: pending.signIn.state, pending, nowMs: now().getTime(), lifetimeMs: PENDING_SIGNIN_LIFETIME_MS });
+    pendingSignIns.put({ key: pending.signIn.state, value: pending, lifetimeMilliseconds: PENDING_SIGNIN_LIFETIME_MS });
   }
 
   async function callback(
@@ -693,17 +695,15 @@ export function createAccountPortal(
     // Every cookie of that name the browser sent: a stale one from another provider's
     // sign-in, on a broader path, must not hide the one this sign-in set.
     const boundStates = cookieValues({ request, name: SIGNIN_COOKIE_NAME });
-    const entry = state === null ? undefined : pendingSignIns.get(state);
     // Taken on first sight, so a replay finds nothing whatever happens below.
-    if (state !== null) pendingSignIns.delete(state);
+    const started = state === null ? null : pendingSignIns.take(state);
     const scope = signInCookieScope(provider);
     const clearSignIn = clearCookie({ name: SIGNIN_COOKIE_NAME, path: scope.path, sameSite: scope.sameSite });
     if (
       state === null ||
       !boundStates.some((boundState) => constantTimeEqual(state, boundState)) ||
-      entry === undefined ||
-      entry.expiresAtMs <= now().getTime() ||
-      entry.pending.signIn.provider !== provider.name
+      started === null ||
+      started.signIn.provider !== provider.name
     ) {
       sendPage({
         response,
@@ -717,9 +717,9 @@ export function createAccountPortal(
       });
       return;
     }
-    const { purpose } = entry.pending;
+    const { purpose } = started;
     const outcome = await provider.complete({
-      pending: entry.pending.signIn,
+      pending: started.signIn,
       parameters,
       redirectUri: accountCallbackUrl({ publicUrl, provider: provider.name }),
     });
@@ -744,12 +744,10 @@ export function createAccountPortal(
       case "link": {
         // Parked, not attached: see "Finishing in another session" in the header.
         const token = randomToken();
-        rememberBounded({
-          entries: pendingLinkCompletions,
+        pendingLinkCompletions.put({
           key: token,
-          pending: { accountId: purpose.accountId, sessionCsrf: purpose.sessionCsrf, identity },
-          nowMs: now().getTime(),
-          lifetimeMs: LINK_COMPLETION_LIFETIME_MS,
+          value: { accountId: purpose.accountId, sessionCsrf: purpose.sessionCsrf, identity },
+          lifetimeMilliseconds: LINK_COMPLETION_LIFETIME_MS,
         });
         sendRedirect({
           response,
@@ -872,7 +870,7 @@ export function createAccountPortal(
       default:
         return assertNever(ceremony);
     }
-    rememberBounded({ entries: pendingPasskeys, key: challenge, pending, nowMs, lifetimeMs: PASSKEY_CHALLENGE_LIFETIME_MS });
+    pendingPasskeys.put({ key: challenge, value: pending, lifetimeMilliseconds: PASSKEY_CHALLENGE_LIFETIME_MS });
     sendJson({
       response,
       status: 200,
@@ -895,12 +893,10 @@ export function createAccountPortal(
       sendJson({ response, status, body: { message }, cookies: [clearChallenge] });
     };
     const challenge = cookieValues({ request, name: PASSKEY_COOKIE_NAME })[0] ?? null;
-    const entry = challenge === null ? undefined : pendingPasskeys.get(challenge);
-    if (challenge !== null) pendingPasskeys.delete(challenge);
-    if (challenge === null || entry === undefined || entry.expiresAtMs <= now().getTime() || entry.pending.ceremony !== ceremony) {
+    const pending = challenge === null ? null : pendingPasskeys.take(challenge);
+    if (challenge === null || pending === null || pending.ceremony !== ceremony) {
       return refuse({ status: 400, message: "This passkey request has expired or was already used. Please try again.", reason: "no live challenge for this browser" });
     }
-    const { pending } = entry;
     switch (pending.ceremony) {
       case "create":
       case "add":
@@ -1054,7 +1050,7 @@ export function createAccountPortal(
       sendJson({ response, status: 415, body: { message: "This request must be sent by the account page." }, cookies: [] });
       return null;
     }
-    const text = await readBodyUpTo({ request, maxBytes: MAX_PASSKEY_BODY_BYTES });
+    const text = await readBodyText({ request, maximumBytes: MAX_PASSKEY_BODY_BYTES, onOverflow: "destroy" });
     const parsed = text === null ? null : parseJson(text);
     const body = parsed?.kind === "ok" ? asRecord(parsed.value) : null;
     if (body === null) {
@@ -1332,16 +1328,6 @@ export function createAccountPortal(
   };
 }
 
-/** Escapes text for an HTML element body or a double- or single-quoted attribute. */
-export function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 // ---------------------------------------------------------------- routing
 
 type PasskeyCeremony = "create" | "signin" | "add";
@@ -1448,31 +1434,6 @@ function parsePasskeyRoute(
 }
 
 /**
- * Remembers one pending ceremony: expired entries are dropped first, then the oldest, so
- * someone hammering the start endpoints bounds memory instead of exhausting it.
- */
-function rememberBounded<TPending>(
-  options: Readonly<{
-    entries: Map<string, Readonly<{ pending: TPending; expiresAtMs: number }>>;
-    key: string;
-    pending: TPending;
-    nowMs: number;
-    lifetimeMs: number;
-  }>,
-): void {
-  const { entries, key, pending, nowMs, lifetimeMs } = options;
-  for (const [existing, entry] of entries) {
-    if (entry.expiresAtMs <= nowMs) entries.delete(existing);
-  }
-  while (entries.size >= MAX_PENDING_SIGNINS) {
-    const oldest = entries.keys().next();
-    if (oldest.done === true) break;
-    entries.delete(oldest.value);
-  }
-  entries.set(key, { pending, expiresAtMs: nowMs + lifetimeMs });
-}
-
-/**
  * The parse-boundary guard for the closed action set. Its input is any path segment, so it
  * cannot be exhaustive over `EmailAction`; a new action is added here by hand.
  */
@@ -1547,7 +1508,7 @@ async function callbackParameters(
   }
 }
 
-type SameSite = "Lax" | "None";
+type SameSite = Extract<CookieSameSite, "Lax" | "None">;
 
 /** Where the pending sign-in cookie lives and whether a cross-site callback carries it. */
 function signInCookieScope(provider: IdentityProvider): Readonly<{ path: string; sameSite: SameSite }> {
@@ -1573,14 +1534,14 @@ type SessionCodec = Readonly<{
 }>;
 
 function sessionCodec(options: Readonly<{ secret: string }>): SessionCodec {
-  const mac = (payload: string): string => createHmac("sha256", options.secret).update(payload).digest("base64url");
+  // Unlabelled: the label was added with the deck cookie, and a new one would sign everyone out.
+  const signed = signedValues({ secret: options.secret, label: "" });
   return {
     issue: ({ accountId, nowMs, csrf }) => {
       // Every session is issued by a sign-in, so its issue time is when the sign-in happened.
-      const payload = Buffer.from(JSON.stringify({ accountId, exp: nowMs + SESSION_LIFETIME_MS, csrf, auth: nowMs }), "utf-8").toString("base64url");
       return setCookie({
         name: SESSION_COOKIE_NAME,
-        value: `${payload}.${mac(payload)}`,
+        value: signed.seal({ accountId, exp: nowMs + SESSION_LIFETIME_MS, csrf, auth: nowMs }),
         path: ACCOUNT_PATH,
         maxAgeSeconds: SESSION_LIFETIME_MS / 1000,
         sameSite: "Lax",
@@ -1589,11 +1550,7 @@ function sessionCodec(options: Readonly<{ secret: string }>): SessionCodec {
     read: ({ request, nowMs }) => {
       const [value] = cookieValues({ request, name: SESSION_COOKIE_NAME });
       if (value === undefined) return null;
-      const [payload, signature, extra] = value.split(".");
-      if (payload === undefined || signature === undefined || extra !== undefined) return null;
-      if (!constantTimeEqual(signature, mac(payload))) return null;
-      const parsed = parseJson(Buffer.from(payload, "base64url").toString("utf-8"));
-      const claims = parsed.kind === "ok" ? asRecord(parsed.value) : null;
+      const claims = signed.open(value);
       const accountId = asString(claims?.accountId);
       const csrf = asString(claims?.csrf);
       const expiresAtMs = claims?.exp;
@@ -1635,16 +1592,6 @@ function formCodec(options: Readonly<{ secret: string; randomToken: () => string
   };
 }
 
-function setCookie(
-  options: Readonly<{ name: string; value: string; path: string; maxAgeSeconds: number; sameSite: SameSite }>,
-): string {
-  return `${options.name}=${options.value}; Path=${options.path}; Max-Age=${String(options.maxAgeSeconds)}; HttpOnly; Secure; SameSite=${options.sameSite}`;
-}
-
-function clearCookie(options: Readonly<{ name: string; path: string; sameSite: SameSite }>): string {
-  return `${options.name}=; Path=${options.path}; Max-Age=0; HttpOnly; Secure; SameSite=${options.sameSite}`;
-}
-
 function clearSessionCookie(): string {
   return clearCookie({ name: SESSION_COOKIE_NAME, path: ACCOUNT_PATH, sameSite: "Lax" });
 }
@@ -1660,24 +1607,6 @@ function safeDecode(value: string): string | null {
   } catch {
     return null;
   }
-}
-
-/** Every value sent under `name`, most specific path first (the order browsers send them in). */
-function cookieValues(options: Readonly<{ request: IncomingMessage; name: string }>): readonly string[] {
-  const header = options.request.headers.cookie;
-  if (header === undefined) return [];
-  const values: string[] = [];
-  for (const pair of header.split(/;\s*/)) {
-    const equals = pair.indexOf("=");
-    if (equals > 0 && pair.slice(0, equals) === options.name) values.push(pair.slice(equals + 1));
-  }
-  return values;
-}
-
-/** Compares digests, so neither the length nor the content of the secret leaks by timing. */
-function constantTimeEqual(left: string, right: string): boolean {
-  const digest = (text: string): Buffer => createHash("sha256").update(text, "utf-8").digest();
-  return timingSafeEqual(digest(left), digest(right));
 }
 
 // ---------------------------------------------------------------- passkey options
@@ -1708,90 +1637,12 @@ function creationOptions(
 
 // ---------------------------------------------------------------- request bodies
 
-function mediaTypeOf(request: IncomingMessage): string | null {
-  const header = request.headers["content-type"];
-  if (typeof header !== "string") return null;
-  return header.split(";")[0]?.trim().toLowerCase() ?? null;
-}
-
-/** The body as text, or null when it exceeds `MAX_FORM_BYTES`. */
+/** A form body as text, or null when it exceeds `MAX_FORM_BYTES`. */
 function readBody(request: IncomingMessage): Promise<string | null> {
-  return readBodyUpTo({ request, maxBytes: MAX_FORM_BYTES });
-}
-
-/** The body as text, or null when it exceeds `maxBytes`. */
-function readBodyUpTo(options: Readonly<{ request: IncomingMessage; maxBytes: number }>): Promise<string | null> {
-  const { request, maxBytes } = options;
-  return new Promise<string | null>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let bytes = 0;
-    request.on("data", (chunk: Buffer) => {
-      bytes += chunk.length;
-      if (bytes > maxBytes) {
-        request.destroy();
-        resolve(null);
-        return;
-      }
-      chunks.push(chunk);
-    });
-    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    request.on("error", reject);
-  });
+  return readBodyText({ request, maximumBytes: MAX_FORM_BYTES, onOverflow: "destroy" });
 }
 
 // ---------------------------------------------------------------- responses
-
-const STYLE = `
-:root{--bg:#EEF1F6;--fg:#1C2333;--muted:#4B5468;--line:rgba(28,35,51,.12);--panel:rgba(255,255,255,.62);--panel-edge:rgba(255,255,255,.85);--link:#4338CA;--danger:#c4161c;--sans:"Manrope","Helvetica Neue",Helvetica,Arial,system-ui,-apple-system,sans-serif}
-@media (prefers-color-scheme:dark){:root{--bg:#0E1220;--fg:#EEF1F8;--muted:#AEB6C9;--line:rgba(255,255,255,.12);--panel:rgba(36,46,72,.62);--panel-edge:rgba(255,255,255,.16);--link:#A5B4FC;--danger:#ff6961;color-scheme:dark}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased}
-a{color:var(--link);text-decoration:none}
-a:hover{text-decoration:underline}
-:focus-visible{outline:2px solid var(--link);outline-offset:2px;border-radius:4px}
-.bar{border-bottom:1px solid var(--line)}
-.bar-inner,.wrap{max-width:560px;margin:0 auto;padding-inline:16px}
-.bar-inner{display:flex;align-items:center;height:52px}
-.brand{color:var(--fg);font-weight:600;letter-spacing:-.01em;display:inline-flex;align-items:center;gap:10px}
-.brand svg{width:26px;height:26px}
-.wrap{padding-block:48px 80px}
-h1{font-size:clamp(28px,6vw,40px);letter-spacing:-.03em;line-height:1.1;margin:0 0 12px;font-weight:600}
-h2{font-size:20px;letter-spacing:-.015em;margin:36px 0 8px;font-weight:600}
-p{margin:0 0 12px}
-.muted{color:var(--muted)}
-.providers{display:grid;gap:12px;margin-top:28px}
-.button,button{display:block;width:100%;padding:13px 18px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;font-weight:500;text-align:center;cursor:pointer}
-.button:hover{text-decoration:none;border-color:var(--muted)}
-.button{display:flex;align-items:center;justify-content:center;gap:12px}
-.button .mark{width:20px;height:20px;flex:none}
-.button-apple{background:#000;border-color:#000;color:#fff}
-.button-apple:hover{border-color:#000;opacity:.85}
-@media (prefers-color-scheme:dark){.button-apple{background:#fff;border-color:#fff;color:#000}.button-apple:hover{border-color:#fff}}
-button.danger{background:var(--danger);border-color:var(--danger);color:#fff}
-button.quiet{display:inline;width:auto;padding:0;border:0;background:none;color:var(--link);font-weight:400}
-ul.links{list-style:none;padding:0;margin:0;border-top:1px solid var(--line)}
-ul.links li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--line)}
-.hint{color:var(--muted);word-break:break-all}
-label.confirm{display:flex;gap:10px;align-items:flex-start;margin:16px 0}
-label.confirm input{flex:none;width:18px;height:18px;margin-top:4px}
-form.signout{margin-top:32px}
-[hidden]{display:none!important}
-.passkeys{margin-top:16px}
-.providers[data-passkeys]{margin-top:12px}
-.status{margin:0;color:var(--danger)}
-label.field{display:block;margin:16px 0 0;font-weight:500}
-label.field input{display:block;width:100%;margin-top:6px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-weight:400}
-label.field+button,label.field~button{margin-top:22px}
-.error{color:var(--danger);font-weight:500}
-.alternatives{margin-top:20px;display:flex;flex-wrap:wrap;gap:8px 20px}
-ul.links li{align-items:center}
-.method{display:flex;flex-direction:column;min-width:0}
-.method-name{font-weight:500}
-.method-side{display:flex;align-items:center;gap:16px;color:var(--muted);font-size:15px}
-form.inline{display:inline;margin:0}
-.notice{margin-top:16px;padding:16px 18px;border-radius:14px;background:var(--panel);border:1px solid var(--panel-edge)}
-.notice p{margin:0 0 14px}
-`;
 
 /** A key, drawn in the text colour: passkeys belong to no company, so no logo. */
 const PASSKEY_MARK =
@@ -1801,23 +1652,12 @@ const PASSKEY_MARK =
 const EMAIL_MARK =
   '<svg class="mark" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
 
-/** The CSP admits exactly this stylesheet by hash, so no `'unsafe-inline'` is needed. */
-const STYLE_HASH = `'sha256-${createHash("sha256").update(STYLE, "utf-8").digest("base64")}'`;
-
 /** The passkey script's absolute URL: the one script source the CSP names. */
 function scriptUrlFor(relyingParty: RelyingParty): string {
   return `${relyingParty.origin}${PASSKEY_SCRIPT_PATH}`;
 }
 
-const PAGE_HEADERS: Readonly<Record<string, string>> = {
-  "content-type": "text/html; charset=utf-8",
-  "cache-control": "no-store",
-  "content-security-policy": `default-src 'none'; style-src ${STYLE_HASH}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
-  "x-content-type-options": "nosniff",
-  "x-frame-options": "DENY",
-  // Keeps the callback's code and state out of any Referer a later navigation sends.
-  "referrer-policy": "no-referrer",
-};
+const PAGE_HEADERS = pageHeaders({ formAction: "'self'" });
 
 /**
  * `PAGE_HEADERS` for the two pages with passkey buttons: the policy also admits the passkey
@@ -1848,13 +1688,12 @@ function sendPage(
     headers?: Readonly<Record<string, string>>;
   }>,
 ): void {
-  const { response, status, html, cookies } = options;
-  response.writeHead(status, {
-    ...(options.headers ?? PAGE_HEADERS),
-    "content-length": String(Buffer.byteLength(html, "utf-8")),
-    ...(cookies === undefined || cookies.length === 0 ? {} : { "set-cookie": [...cookies] }),
-  });
-  response.end(html);
+  sendHtml({ ...options, headers: options.headers ?? PAGE_HEADERS });
+}
+
+function sendMethodNotAllowed(options: Readonly<{ response: ServerResponse; allow: string }>): void {
+  const html = messagePage({ title: "Not allowed", message: "This page does not accept that kind of request." });
+  sendHtml({ response: options.response, status: 405, html, headers: { ...PAGE_HEADERS, allow: options.allow } });
 }
 
 function sendRedirect(
@@ -1884,63 +1723,7 @@ function sendThrottled(options: Readonly<{ response: ServerResponse; retryAfterM
   });
 }
 
-function sendMethodNotAllowed(options: Readonly<{ response: ServerResponse; allow: string }>): void {
-  const html = messagePage({ title: "Not allowed", message: "This page does not accept that kind of request." });
-  options.response.writeHead(405, {
-    ...PAGE_HEADERS,
-    allow: options.allow,
-    "content-length": String(Buffer.byteLength(html, "utf-8")),
-  });
-  options.response.end(html);
-}
-
-function sendJson(
-  options: Readonly<{ response: ServerResponse; status: number; body: Readonly<Record<string, unknown>>; cookies: readonly string[] }>,
-): void {
-  const text = JSON.stringify(options.body);
-  options.response.writeHead(options.status, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": String(Buffer.byteLength(text, "utf-8")),
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-    ...(options.cookies.length === 0 ? {} : { "set-cookie": [...options.cookies] }),
-  });
-  options.response.end(text);
-}
-
-function sendScript(response: ServerResponse): void {
-  response.writeHead(200, {
-    "content-type": "text/javascript; charset=utf-8",
-    "content-length": String(Buffer.byteLength(PASSKEY_SCRIPT, "utf-8")),
-    // Revalidated on every page load, so a deploy is picked up at once.
-    "cache-control": "no-cache",
-    "x-content-type-options": "nosniff",
-  });
-  response.end(PASSKEY_SCRIPT);
-}
-
 // ---------------------------------------------------------------- pages
-
-function layout(options: Readonly<{ title: string; main: string; scriptUrl?: string }>): string {
-  const script = options.scriptUrl === undefined ? "" : `\n<script src="${escapeHtml(options.scriptUrl)}" defer></script>`;
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>${escapeHtml(options.title)} · Sasha Slides</title>
-<style>${STYLE}</style>${script}
-</head>
-<body>
-<header class="bar"><div class="bar-inner"><a class="brand" href="https://sashaslides.com/">${SASHA_ICON_SVG}Sasha Slides</a></div></header>
-<main class="wrap">
-${options.main}
-</main>
-</body>
-</html>
-`;
-}
 
 type EmailFormState = Readonly<{ token: string; email: string; error: string | null }>;
 
@@ -2255,18 +2038,5 @@ function erasedPage(options: Readonly<{ report: EraseReport }>): string {
 <p>Your key was reset, so anything stored before now can no longer be read — including in backups.</p>
 ${google}
 <p class="muted">You have been signed out. Signing in again starts a new, empty account.</p>`,
-  });
-}
-
-function messagePage(
-  options: Readonly<{ title: string; message: string; action?: Readonly<{ href: string; label: string }> }>,
-): string {
-  const action =
-    options.action === undefined ? "" : `<p><a href="${escapeHtml(options.action.href)}">${escapeHtml(options.action.label)}</a></p>`;
-  return layout({
-    title: options.title,
-    main: `<h1>${escapeHtml(options.title)}</h1>
-<p>${escapeHtml(options.message)}</p>
-${action}`,
   });
 }

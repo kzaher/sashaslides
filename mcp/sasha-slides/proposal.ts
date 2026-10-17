@@ -14,7 +14,6 @@
  */
 import { countUnresolvedThreads, type FeedbackEnvironment } from "./feedback/feedback.ts";
 import type { DriveChannel, DriveFile, DriveMedia, SashaRole } from "./drive-channel";
-import { assertNever } from "./google-auth";
 import {
   appendSessionEvent,
   ensureEventsFolder,
@@ -23,6 +22,9 @@ import {
   type ReadSessionEventsOutcome,
   type SessionEvent,
 } from "./session-log";
+import { assertNever } from "./engine/src/contracts/assert-never.ts";
+import { mapWithConcurrency } from "./concurrency.ts";
+import { asArray, asNumber, asRecord, asString } from "./http/json-values.ts";
 
 /** `manifest.json` as PROTOCOL.md defines it. */
 export type ProposalManifest = Readonly<{
@@ -1327,24 +1329,6 @@ function asSashaRole(value: string | undefined): SashaRole | null {
   }
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function asArray(value: unknown): readonly unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 /**
  * WHAT IS WAITING FOR THE SIGNED-IN USER, with no identifier supplied by anybody.
  *
@@ -1390,9 +1374,11 @@ export async function listOpenWork(
   // (measured 2026-10-13 on sashaslides.com). Each proposal's own calls stay in order, so at most
   // OPEN_WORK_CONCURRENCY Drive calls are in flight -- enough to hide the latency, few enough
   // not to trip Drive's per-user rate limit.
-  const items = await mapWithConcurrency(proposalIds, OPEN_WORK_CONCURRENCY, (proposalId) =>
-    openWorkItem({ env, feedback, proposalId }),
-  );
+  const items = await mapWithConcurrency({
+    items: proposalIds,
+    limit: OPEN_WORK_CONCURRENCY,
+    work: (proposalId) => openWorkItem({ env, feedback, proposalId }),
+  });
 
   return { kind: "ok", items: [...items].sort(byWhatNeedsAnsweringFirst) };
 }
@@ -1431,25 +1417,6 @@ async function openWorkItem(
     unresolved: counts.reduce((total, count) => total + (count.unresolved ?? 0), 0),
     unreadableReason: null,
   };
-}
-
-/** `work` over every item, at most `limit` at a time; results keep the input order. */
-async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  limit: number,
-  work: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array<R>(items.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < items.length) {
-      const at = next;
-      next += 1;
-      results[at] = await work(items[at] as T);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
 }
 
 /** An open comment outranks being newer; ties go to the newer proposal (ids sort by time). */

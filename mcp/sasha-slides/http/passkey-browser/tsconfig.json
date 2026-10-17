@@ -1,6 +1,6 @@
 // The passkey script's own gate: it runs in the browser, so it gets the DOM library and NOT
 // @types/node (the connector's tsconfig is the reverse), and a browser/node mix-up is a type
-// error. esbuild (`build.ts`) emits; this only checks:
+// error. esbuild (`browser-scripts/build.ts`) emits; this only checks:
 //
 //   npx tsc -p mcp/sasha-slides/http/passkey-browser
 {

@@ -17,6 +17,7 @@ import { storeAccountDirectory, type AccountDirectory } from "../http/account-di
 import { createAccountVault, inMemoryDataKeyStore } from "../http/account-keys";
 import type { AccountVault } from "../http/account-vault";
 import { randomAccountId, withSealedGoogleIdentities } from "../http/accounts";
+import { randomUrlSafeToken } from "../http/authorization-server";
 import { inMemoryAuthStore, type AuthStore } from "../http/oauth-store";
 import { createDeckServer, type DeckServer } from "./deck-stack";
 import type { DeckTimers } from "./deck-registry";
@@ -63,7 +64,7 @@ export function createMemoryDeckService(
     now: options.now,
     random: Math.random,
     randomBytes: (size) => randomBytes(size),
-    randomToken: () => randomBytes(32).toString("base64url"),
+    randomToken: randomUrlSafeToken,
     fetch: () => Promise.reject(new Error("the memory deck service makes no network requests")),
     warn: () => undefined,
   });

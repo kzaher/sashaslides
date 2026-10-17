@@ -18,10 +18,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { assertNever } from "../google-auth";
 import { googleSubjectOf } from "../http/authorization-server";
 import { describeWatchOutcome, MAX_REPLY_CHARACTERS, type CommentBot, type ReplyOutcome } from "./comment-bot";
 import type { CommentTask, CommentWatch } from "./comment-records";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /** One comment task as the session sees it. */
 export type CommentTaskPayload = Readonly<{

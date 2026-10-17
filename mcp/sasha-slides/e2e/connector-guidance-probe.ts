@@ -34,13 +34,13 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { assertNever } from "../google-auth.ts";
 import {
   CLAUDE_CODE_INSTRUCTIONS_BUDGET,
   SKILL_RELATIVE_PATH,
   stripSkillFrontmatter,
 } from "../workflow-instructions.ts";
 import { PROMPT_ARGUMENT_LOG_ENV, type ReceivedPromptArguments } from "./prompt-argument-probe-server.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type GuidanceMechanism =
   | "instructions"

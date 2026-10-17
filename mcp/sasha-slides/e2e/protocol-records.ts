@@ -1,3 +1,4 @@
+import { asRecord } from "../http/json-values";
 /**
  * The records of PROTOCOL.md — both the files on Drive and the MCP tool payloads that
  * report them — as types plus parsers.
@@ -256,10 +257,6 @@ export function pickReplyFromRecord(record: PickRecord): PickReply {
   };
 }
 
-export function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${String(value)}`);
-}
-
 /** A parse-boundary guard over an untrusted string, so it cannot be status-exhaustive. */
 function isPickStatus(candidate: string): candidate is PickStatus {
   return PICK_STATUSES.includes(candidate as PickStatus);
@@ -296,12 +293,6 @@ function parseJsonObject(text: string): Parsed<Readonly<Record<string, unknown>>
   } catch (cause) {
     return invalid(`not JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
 }
 
 function stringField(json: Readonly<Record<string, unknown>>, key: string): string | null {

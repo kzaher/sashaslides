@@ -9,6 +9,7 @@
  */
 import type { Colour, ThemeColourSlot } from "../engine/src/contracts/style.ts";
 import type { SlidesColour } from "./slides-presentation.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type ColourContext = Readonly<{
   /** The first master's colour scheme: `ThemeColorType` to `#rrggbb`. */
@@ -74,8 +75,4 @@ function aliasSlot(options: Readonly<{ type: string; context: ColourContext }>):
     if (slot !== undefined) return slot;
   }
   return null;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

@@ -67,6 +67,7 @@ import {
   type SlidesTableCell,
   type SlidesTransform,
 } from "./slides-presentation.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /** What fetching and storing one image address came to (import-assets.ts). */
 export type ImportedImage = Readonly<{ kind: "stored"; asset: AssetRecord }> | Readonly<{ kind: "failed"; message: string }>;
@@ -1266,7 +1267,4 @@ function clampFraction(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
-}
 

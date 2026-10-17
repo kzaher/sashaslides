@@ -37,7 +37,6 @@ import {
   type ReplyFeedbackOutcome,
   type UnresolvedSlideCount,
 } from "./feedback";
-import { assertNever } from "../google-auth";
 import {
   appendProposalEvent,
   findCandidate,
@@ -46,6 +45,7 @@ import {
   type ProposalEnvironment,
 } from "../proposal";
 import { SESSION_LOG_PROTOCOL_VERSION, type FeedbackDeliveryTool, type SessionEvent } from "../session-log";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /**
  * Both halves, injected. They are separate environments rather than one merged one because

@@ -13,7 +13,10 @@
  */
 export const AGENT_REPLY_MARKER = "[sasha-slides-agent]";
 
-/** Whether this post was written by the agent. The one test for authorship anywhere. */
+/**
+ * Whether this post was written by the agent: the one test for candidate feedback (the comment bot
+ * marks its deck comments with `SASHA_PREFIX` instead, comment-bot/comment-bot.ts).
+ */
 export function authoredByAgentText(text: string): boolean {
   return text.includes(AGENT_REPLY_MARKER);
 }

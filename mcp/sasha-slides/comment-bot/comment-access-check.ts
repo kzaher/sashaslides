@@ -21,13 +21,14 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { MINIMUM_BINDING_SECRET_LENGTH } from "../google-slides/addon-identity";
-import { answerError, answerWithBody, readRequestBody, stringFieldOf } from "../google-slides/http-answers";
+import { readJsonBody, sendDeckApiError, sendJson } from "../http/http-kit";
+import { stringFieldOf } from "../http/json-values";
 import type { IdentityClaims } from "../google-slides/identity-token";
-import { assertNever } from "../google-auth";
 import { createThrottle, type ThrottleRule } from "../http/request-throttle";
 import { parseDeckId } from "./comment-bot";
 import { COMMENT_ACCESS_PATH, type CommentAccessAnswer } from "./comment-access-contract";
 import type { OwnerDrives } from "./owner-drive";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /** Far above one check per sidebar open; a reducer loop stops here instead of at Google's quota. */
 export const COMMENT_ACCESS_RULE: ThrottleRule = { name: "comment access check", limit: 30, windowMs: 10 * 60 * 1000 };
@@ -64,36 +65,36 @@ export function createCommentAccessCheck(
         response.writeHead(405, { allow: "POST" }).end();
         return true;
       }
-      const body = await readRequestBody({ request, maximumBytes: REQUEST_BODY_LIMIT_BYTES });
+      const body = await readJsonBody({ request, maximumBytes: REQUEST_BODY_LIMIT_BYTES, onOverflow: "destroy" });
       if (body.kind !== "parsed") {
-        answerError({ response, status: body.kind === "tooLarge" ? 413 : 400, error: body.kind === "tooLarge" ? "tooLarge" : "invalidRequest", message: "The check is not JSON." });
+        sendDeckApiError({ response, status: body.kind === "tooLarge" ? 413 : 400, error: body.kind === "tooLarge" ? "tooLarge" : "invalidRequest", message: "The check is not JSON." });
         return true;
       }
       const identityToken = stringFieldOf(body.value, "identityToken");
       const bindingSecret = stringFieldOf(body.value, "bindingSecret");
       const fileId = parseDeckId(stringFieldOf(body.value, "presentationId") ?? "");
       if (identityToken === null || fileId === null || bindingSecret === null || bindingSecret.length < MINIMUM_BINDING_SECRET_LENGTH) {
-        answerError({ response, status: 400, error: "invalidRequest", message: "The check needs an identity token, the presentation and its binding secret." });
+        sendDeckApiError({ response, status: 400, error: "invalidRequest", message: "The check needs an identity token, the presentation and its binding secret." });
         return true;
       }
       const claims = await verifyIdentity(identityToken);
       if (claims === null) {
-        answerError({ response, status: 401, error: "addonIdentityRejected", message: "Sign in again: Google did not vouch for this request." });
+        sendDeckApiError({ response, status: 401, error: "addonIdentityRejected", message: "Sign in again: Google did not vouch for this request." });
         return true;
       }
       const admitted = throttle.admit({ checks: [{ rule: COMMENT_ACCESS_RULE, key: claims.subject }] });
       if (admitted.kind === "refused") {
-        answerError({ response, status: 429, error: "rateLimited", message: "Too many checks; try again in a few minutes." });
+        sendDeckApiError({ response, status: 429, error: "rateLimited", message: "Too many checks; try again in a few minutes." });
         return true;
       }
       const outcome = await commentAccessFor({ drives, ownerSubject: claims.subject, fileId, allowUrlFor, connectUrl });
       switch (outcome.kind) {
         case "answered":
-          answerWithBody({ response, status: 200, body: outcome.answer });
+          sendJson({ response, status: 200, body: outcome.answer });
           return true;
         case "driveFailed":
           warn(`comment access: the check could not reach Drive: ${outcome.reason}`);
-          answerError({ response, status: 502, error: "googleFailed", message: "Google Drive did not answer; try again later." });
+          sendDeckApiError({ response, status: 502, error: "googleFailed", message: "Google Drive did not answer; try again later." });
           return true;
         default:
           return assertNever(outcome);

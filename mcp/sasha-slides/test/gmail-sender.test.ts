@@ -14,11 +14,11 @@ import {
   createGmailSender,
   encodeHeaderText,
   GMAIL_SEND_SCOPE,
-  GOOGLE_TOKEN_URL,
   JWT_BEARER_GRANT_TYPE,
   parseMailSenderConfig,
   type MailSenderConfig,
 } from "../http/gmail-sender";
+import { GOOGLE_TOKEN_ENDPOINT } from "../google-constants";
 import { createFakeGmail, type FakeGmail } from "./fake-gmail";
 import { fakeFetch } from "./fake-identity-providers";
 
@@ -48,7 +48,7 @@ const KEY_FILE = {
   client_email: SERVICE_ACCOUNT_EMAIL,
   client_id: "123456789012345678901",
   auth_uri: "https://accounts.google.com/o/oauth2/auth",
-  token_uri: GOOGLE_TOKEN_URL,
+  token_uri: GOOGLE_TOKEN_ENDPOINT,
   auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
   client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/sasha-mailer%40sasha-slides.iam.gserviceaccount.com",
   universe_domain: "googleapis.com",
@@ -111,7 +111,7 @@ describe("mail sender config", () => {
     assert.equal(credentials.clientEmail, SERVICE_ACCOUNT_EMAIL);
     assert.equal(credentials.impersonate, IMPERSONATE);
     assert.equal(credentials.privateKeyId, SERVICE_KEY_ID);
-    assert.equal(credentials.tokenUrl, GOOGLE_TOKEN_URL);
+    assert.equal(credentials.tokenUrl, GOOGLE_TOKEN_ENDPOINT);
     assert.equal(credentials.privateKey.asymmetricKeyType, "rsa");
   });
 
@@ -119,7 +119,7 @@ describe("mail sender config", () => {
     const parsed = parseServiceAccount(JSON.stringify({ ...KEY_FILE, token_uri: undefined, private_key_id: undefined }));
     assert.equal(parsed.kind, "ok", parsed.kind === "error" ? parsed.message : "");
     if (parsed.kind !== "ok" || parsed.config.credentials.kind !== "service-account") return;
-    assert.equal(parsed.config.credentials.tokenUrl, GOOGLE_TOKEN_URL);
+    assert.equal(parsed.config.credentials.tokenUrl, GOOGLE_TOKEN_ENDPOINT);
     assert.equal(parsed.config.credentials.privateKeyId, null);
   });
 
@@ -298,7 +298,7 @@ describe("sending as a service account with domain-wide delegation", () => {
       .map((segment) => JSON.parse(Buffer.from(segment, "base64url").toString("utf-8")) as Record<string, unknown>);
     assert.deepEqual(header, { alg: "RS256", typ: "JWT", kid: SERVICE_KEY_ID });
     const issuedAt = Date.parse("2026-10-13T09:30:00Z") / 1000;
-    assert.deepEqual(claims, { iss: SERVICE_ACCOUNT_EMAIL, sub: IMPERSONATE, scope: GMAIL_SEND_SCOPE, aud: GOOGLE_TOKEN_URL, iat: issuedAt, exp: issuedAt + 3600 });
+    assert.deepEqual(claims, { iss: SERVICE_ACCOUNT_EMAIL, sub: IMPERSONATE, scope: GMAIL_SEND_SCOPE, aud: GOOGLE_TOKEN_ENDPOINT, iat: issuedAt, exp: issuedAt + 3600 });
 
     const [request] = gmail.sendRequests();
     assert.equal(request?.init.headers.authorization, "Bearer fake-access-1");

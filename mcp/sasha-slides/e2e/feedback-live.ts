@@ -44,6 +44,7 @@ import {
 } from "../feedback/feedback";
 import { parseCommentAnchor } from "../feedback/comment-anchor";
 import { describeAuthFailure, loadOAuthClient } from "../google-auth";
+import { asRecord } from "../http/json-values";
 
 const DEFAULT_DECK = "1zsd1n66C18A4dAzSsxmmD_H1k8KLo9z3HUJu01zHF8U";
 
@@ -388,12 +389,6 @@ function narrowInsertedComment(body: unknown): Readonly<{ commentId: string; anc
   if (typeof commentId !== "string") return null;
   const anchorId = thread?.["anchorId"];
   return { commentId, anchorId: typeof anchorId === "string" ? anchorId : null };
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
 }
 
 function liveEnvironment(options: Readonly<{ channel: FeedbackChannel }>): FeedbackEnvironment {

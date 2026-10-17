@@ -22,17 +22,13 @@
  * every call and whose token it carried. Failure reasons carry Google's status and error code,
  * never a body or a token.
  */
-import { asNumber, asRecord, asString } from "../http/json-values";
-import type { HttpFetch } from "../http/identity-providers";
-import { GOOGLE_TOKEN_URL } from "../http/gmail-sender";
+import { asNumber, asRecord, asString, googleErrorCode } from "../http/json-values";
+import type { HttpFetch } from "../http/http-kit";
 import type { GoogleClientCredentials } from "../google-auth";
+import { DRIVE_FILE_SCOPE, FULL_DRIVE_SCOPE, GOOGLE_TOKEN_ENDPOINT } from "../google-constants";
 import type { GoogleIdentity, RecordStore } from "../http/oauth-store";
 
 export const DRIVE_API = "https://www.googleapis.com/drive/v3";
-/** Per file, granted by choosing the file in the Google Picker. Non-sensitive. */
-export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-/** Restricted; never requested here, but a grant that already holds it can read comments too. */
-export const FULL_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 export const SLIDES_MIME_TYPE = "application/vnd.google-apps.presentation";
 export const OWNER_DRIVE_TIMEOUT_MS = 10_000;
 
@@ -139,7 +135,7 @@ export function googleOwnerDrives(
     }
     cachedTokens.delete(request.ownerSubject);
     if (request.refreshToken === null) return { kind: "failed", status: 401, reason: "the Google grant has expired; sign in to Sasha Slides again" };
-    const response = await fetch(GOOGLE_TOKEN_URL, {
+    const response = await fetch(GOOGLE_TOKEN_ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
       body: new URLSearchParams({
@@ -158,8 +154,8 @@ export function googleOwnerDrives(
         kind: "failed",
         // `invalid_grant` is Google's answer for a refresh token it no longer honours (revoked, or
         // past the 7 days of a Testing-mode client): the grant is gone, which callers read as 401.
-        status: errorCode(body?.error) === "invalid_grant" ? 401 : response.status,
-        reason: `token refresh answered ${String(response.status)} ${errorCode(body?.error)}; sign in to Sasha Slides again`,
+        status: googleErrorCode(body?.error) === "invalid_grant" ? 401 : response.status,
+        reason: `token refresh answered ${String(response.status)} ${googleErrorCode(body?.error)}; sign in to Sasha Slides again`,
       };
     }
     cachedTokens.set(request.ownerSubject, { accessToken: token, expiresAtMs: nowMs + expiresIn * 1000 });
@@ -205,7 +201,7 @@ function ownerDrive(
         const body = asRecord(await response.json().catch(() => null));
         if (response.status >= 200 && response.status < 300) return { kind: "ok", value: body };
         const error = asRecord(body?.error);
-        return { kind: "failed", status: response.status, reason: `drive answered ${String(response.status)} ${errorCode(error?.status)}` };
+        return { kind: "failed", status: response.status, reason: `drive answered ${String(response.status)} ${googleErrorCode(error?.status)}` };
       }
       return { kind: "failed", status: 401, reason: "drive refused two fresh access tokens" };
     } catch (cause) {
@@ -314,11 +310,6 @@ function ownerDrive(
       return answer.kind === "failed" ? answer : { kind: "ok", value: null };
     },
   };
-}
-
-function errorCode(value: unknown): string {
-  const code = asString(value);
-  return code !== null && /^[A-Za-z_]{1,64}$/.test(code) ? code : "(no error code)";
 }
 
 function parseComment(value: unknown): DriveComment | null {

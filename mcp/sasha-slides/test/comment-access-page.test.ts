@@ -1,6 +1,5 @@
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
@@ -11,8 +10,7 @@ import {
   projectNumberOf,
   type GoogleSignInResult,
 } from "../comment-bot/comment-access-page.ts";
-import { DRIVE_FILE_SCOPE, FULL_DRIVE_SCOPE } from "../comment-bot/owner-drive.ts";
-import { PICKER_SCRIPT_MODULE, renderPickerScriptModule } from "../comment-bot/access-browser/build.ts";
+import { DRIVE_FILE_SCOPE, FULL_DRIVE_SCOPE } from "../google-constants.ts";
 import { inMemoryAuthStore, type AuthStore, type GoogleIdentity } from "../http/oauth-store.ts";
 
 /**
@@ -216,10 +214,6 @@ describe("/comments/allow", () => {
     } finally {
       await target.close();
     }
-  });
-
-  test("picker-script.generated.ts is the current build of picker.ts (rebuild: npx tsx mcp/sasha-slides/comment-bot/access-browser/build.ts)", async () => {
-    assert.equal(readFileSync(PICKER_SCRIPT_MODULE, "utf-8"), await renderPickerScriptModule());
   });
 
   test("the picker's app id is the OAuth client's project number", () => {

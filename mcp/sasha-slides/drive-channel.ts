@@ -24,7 +24,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { assertNever } from "./google-auth";
+import { assertNever } from "./engine/src/contracts/assert-never.ts";
 
 export type DriveChannel = Readonly<{
   createFolder(

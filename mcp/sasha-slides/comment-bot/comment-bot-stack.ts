@@ -12,6 +12,7 @@
  * grant can already read (for example, ones Sasha created).
  */
 import { randomBytes } from "node:crypto";
+import { randomUrlSafeToken } from "../http/authorization-server";
 import { DRIVE_HOOK_PATH } from "../http/http-server";
 import { MCP_PATH } from "../http/oauth-metadata";
 import type { GoogleClientCredentials } from "../google-auth";
@@ -71,7 +72,7 @@ export function loadCommentBot(
     grants: store.googleIdentities,
     signIn: googleSignIn({ client: googleClient }),
     now,
-    randomToken: () => randomBytes(32).toString("base64url"),
+    randomToken: randomUrlSafeToken,
     warn,
   });
   const addonVerifier = createIdentityVerifier({ fetch, now: () => Date.now() });

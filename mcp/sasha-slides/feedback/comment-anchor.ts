@@ -31,10 +31,10 @@
  * comments". So the agent's own comments can never be anchored this way, and the fallback
  * is an explicit `[slide:…]` marker in the comment text — see `formatSlideMarker`.
  */
-import { assertNever } from "../google-auth";
 // Type only: one fractional (0-1) region convention across the whole protocol, shared with
 // `PICK.anomalies`, with no runtime dependency on the staging protocol.
 import type { AnomalyRegion } from "../proposal";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /**
  * A Drive comment's `anchor`, narrowed. `opaque` is a first-class outcome, not a failure:

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { createAccountEraser } from "../http/account-eraser";
 import { createAccountVault, inMemoryDataKeyStore } from "../http/account-keys";
+import { parseSessionSecret } from "../http/account-portal";
 import { loadAccountPortal } from "../http/account-portal-stack";
 import { inMemoryAuthStore } from "../http/oauth-store";
 
@@ -26,8 +27,8 @@ function load(mailSenderText: string, besideMailSender: Readonly<Record<string, 
   return loadAccountPortal({
     publicUrl: "https://sashaslides.example",
     identityProvidersPath: write("identity-providers.json", '{"providers":[{"name":"google"}]}'),
-    googleClientPath: write("google.json", JSON.stringify({ web: { client_id: "id.apps.googleusercontent.com", client_secret: "secret" } })),
-    sessionSecret: randomBytes(32).toString("hex"),
+    googleClient: { clientId: "id.apps.googleusercontent.com", clientSecret: "secret" },
+    sessionSecret: parseSessionSecret(randomBytes(32).toString("hex")),
     mailSenderPath: write("mail-sender.json", mailSenderText),
     trustedProxies: null,
     store,

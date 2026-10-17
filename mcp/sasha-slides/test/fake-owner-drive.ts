@@ -11,9 +11,9 @@
  *
  * Every call is COUNTED by endpoint and recorded with its caller.
  */
-import type { HttpFetch, HttpFetchInit, HttpFetchResponse } from "../http/identity-providers";
-import { DRIVE_FILE_SCOPE, SLIDES_MIME_TYPE } from "../comment-bot/owner-drive";
-import { GOOGLE_TOKEN_URL } from "../http/gmail-sender";
+import type { HttpFetch, HttpFetchInit, HttpFetchResponse } from "../http/http-kit";
+import { SLIDES_MIME_TYPE } from "../comment-bot/owner-drive";
+import { DRIVE_FILE_SCOPE, GOOGLE_TOKEN_ENDPOINT, SLIDES_SCOPE } from "../google-constants";
 import type { GoogleIdentity } from "../http/oauth-store";
 
 export type Endpoint =
@@ -103,7 +103,7 @@ export function createFakeOwnerDrive(options: Readonly<{ now: () => Date }>): Fa
   const fetch: HttpFetch = (url, init) => Promise.resolve(route(url, init));
 
   function route(url: string, init: HttpFetchInit): HttpFetchResponse {
-    if (url === GOOGLE_TOKEN_URL) {
+    if (url === GOOGLE_TOKEN_ENDPOINT) {
       const refresh = new URLSearchParams(init.body ?? "").get("refresh_token") ?? "";
       const subject = refresh.replace(/^refresh-/, "");
       record("token", subject, url);
@@ -253,7 +253,7 @@ export function createFakeOwnerDrive(options: Readonly<{ now: () => Date }>): Fa
         accessToken: null,
         refreshToken: `refresh-${subject}`,
         accessTokenExpiresAtMs: null,
-        grantedScopes: scopes ?? ["openid", "email", "https://www.googleapis.com/auth/presentations", DRIVE_FILE_SCOPE],
+        grantedScopes: scopes ?? ["openid", "email", SLIDES_SCOPE, DRIVE_FILE_SCOPE],
       };
     },
     addDeck: ({ fileId, name, sharedWith, mimeType }) => {

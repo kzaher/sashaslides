@@ -15,7 +15,7 @@ import type { DeckId } from "../engine/src/contracts/ids.ts";
 import type { DeckCaller, GoogleGrantStore, GoogleIdentityAccounts, GoogleSlidesInterchange } from "../deck-contracts/deck-service-contract.ts";
 import type { GoogleIdentity } from "../http/oauth-store";
 import { GOOGLE_KEYS_ADDRESS } from "./identity-token.ts";
-import { GOOGLE_TOKEN_ENDPOINT } from "./google-oauth.ts";
+import { GOOGLE_TOKEN_ENDPOINT } from "../google-constants.ts";
 import { SLIDES_API_ORIGIN } from "./slides-client.ts";
 import { testCaller } from "./testing-deck-service.ts";
 

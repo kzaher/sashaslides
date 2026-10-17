@@ -15,7 +15,8 @@ import { google } from "googleapis";
 import type { Credentials, OAuth2Client } from "google-auth-library";
 import { googleDriveChannel, type DriveChannel } from "../drive-channel";
 import { googleFeedbackChannel, type FeedbackChannel } from "../feedback/feedback-channel";
-import { DRIVE_SCOPES, SLIDES_SCOPE, type GoogleClientCredentials } from "../google-auth";
+import type { GoogleClientCredentials } from "../google-auth";
+import { DRIVE_SCOPES, SLIDES_SCOPE } from "../google-constants";
 import type { AuthStore, GoogleIdentity } from "./oauth-store";
 
 export type UserDriveFactory = Readonly<{

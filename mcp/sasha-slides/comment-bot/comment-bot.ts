@@ -64,11 +64,13 @@
  * the randomness. State is mirrored in memory and written through to the store, which assumes
  * ONE server process serves the bot, as one process serves the store.
  */
-import { createHash, timingSafeEqual } from "node:crypto";
-import { assertNever } from "../google-auth";
+import { createHash } from "node:crypto";
+import { mapWithConcurrency } from "../concurrency";
+import { constantTimeEqual } from "../http/cookies";
 import type { RecordStore } from "../http/oauth-store";
 import { SLIDES_MIME_TYPE, type DriveComment, type DriveResult, type OwnerDrive, type OwnerDrives } from "./owner-drive";
 import { fileCursorKey, type CommentTask, type CommentWatch, type FileCursor, type OwnerChannel } from "./comment-records";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /** How long a watch lasts unless renewed by calling `watch_comments` again. */
 export const WATCH_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -315,10 +317,10 @@ export function createCommentBot(
   async function tick(): Promise<void> {
     await expireNow();
     const owners = [...new Set([...watches.values()].map((watch) => watch.ownerSubject))];
-    await inParallel({
+    await mapWithConcurrency({
       items: owners,
       limit: COMMENT_SCAN_CONCURRENCY,
-      run: async (ownerSubject) => {
+      work: async (ownerSubject) => {
         const lookup = await drives.forOwner({ ownerSubject });
         if (lookup.kind !== "ok") {
           warn("comment bot: a watch owner's Google grant is gone; their watches wait for a new sign-in");
@@ -415,10 +417,10 @@ export function createCommentBot(
       pageToken = page.value.newStartPageToken ?? pageToken;
       break;
     }
-    await inParallel({
+    await mapWithConcurrency({
       items: [...changed.entries()],
       limit: COMMENT_SCAN_CONCURRENCY,
-      run: ([fileId, name]) => scanDeck({ ownerSubject, drive, fileId, name }),
+      work: ([fileId, name]) => scanDeck({ ownerSubject, drive, fileId, name }),
     });
     // Saved after the scans: a crash before this line re-reads the same changes, which the
     // task keys make harmless, while saving first could skip a deck forever.
@@ -662,7 +664,7 @@ export function createCommentBot(
     },
     pickUpTasks: async ({ ownerSubject }) => {
       const open = await bot.openTasks({ ownerSubject });
-      await inParallel({ items: open.map((task) => task.taskId), limit: COMMENT_SCAN_CONCURRENCY, run: acknowledge });
+      await mapWithConcurrency({ items: open.map((task) => task.taskId), limit: COMMENT_SCAN_CONCURRENCY, work: acknowledge });
       return open.map((task) => tasks.get(task.taskId) ?? task);
     },
     reply: async ({ ownerSubject, taskId, text }) => {
@@ -691,7 +693,7 @@ export function createCommentBot(
       const token = headerValue(headers, "x-goog-channel-token");
       const ownerSubject = channelId === null ? undefined : ownerByChannelId.get(channelId);
       const channel = ownerSubject === undefined ? undefined : channels.get(ownerSubject);
-      if (ownerSubject === undefined || channel === undefined || channel.channelId !== channelId || token === null || !sameSecret(token, channel.token)) {
+      if (ownerSubject === undefined || channel === undefined || channel.channelId !== channelId || token === null || !constantTimeEqual(token, channel.token)) {
         return Promise.resolve({ kind: "ignored" });
       }
       const state = headerValue(headers, "x-goog-resource-state");
@@ -778,12 +780,6 @@ function headerValue(headers: PushHeaders, name: string): string | null {
   return value?.[0] ?? null;
 }
 
-function sameSecret(given: string, expected: string): boolean {
-  const left = Buffer.from(given, "utf-8");
-  const right = Buffer.from(expected, "utf-8");
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
 function taskIdFor(options: Readonly<{ watchId: string; commentId: string; replyId: string | null }>): string {
   const digest = createHash("sha256").update(`${options.watchId}\n${options.commentId}\n${options.replyId ?? ""}`).digest("base64url");
   return `ct_${digest.slice(0, 22)}`;
@@ -795,18 +791,4 @@ function isoTime(milliseconds: number): string {
 
 function describe(cause: unknown): string {
   return cause instanceof Error ? cause.name : "unknown error";
-}
-
-async function inParallel<TItem>(
-  options: Readonly<{ items: readonly TItem[]; limit: number; run: (item: TItem) => Promise<void> }>,
-): Promise<void> {
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < options.items.length) {
-      const item = options.items[next];
-      next += 1;
-      if (item !== undefined) await options.run(item);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(options.limit, options.items.length) }, worker));
 }

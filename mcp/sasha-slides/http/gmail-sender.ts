@@ -45,12 +45,12 @@
  * All network traffic goes through an injected `HttpFetch`, so tests use a fake Gmail.
  */
 import { createPrivateKey, sign, type KeyObject } from "node:crypto";
-import { assertNever } from "../google-auth";
-import type { HttpFetch } from "./identity-providers";
-import { asRecord, asString, parseJson } from "./json-values";
+import { GOOGLE_TOKEN_ENDPOINT } from "../google-constants";
+import { jsonSegment, type HttpFetch } from "./http-kit";
+import { asRecord, asString, googleErrorCode, nodeErrorCode, parseJson, type FieldParse } from "./json-values";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export const GMAIL_SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
-export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 /** RFC 7523's grant type: an access token for a signed JWT, as a service account asks for one. */
 export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -145,7 +145,7 @@ export function createGmailSender(
     const token = asString(body?.access_token);
     const expiresIn = body?.expires_in;
     if (response.status !== 200 || token === null || typeof expiresIn !== "number") {
-      const code = errorCode(body?.error);
+      const code = googleErrorCode(body?.error);
       return { kind: "failed", reason: `${grant.description} answered ${String(response.status)} ${code}; ${tokenFailureAdvice({ credentials: config.credentials, code })}` };
     }
     cached = { accessToken: token, expiresAtMs: nowMs + expiresIn * 1000 };
@@ -187,7 +187,7 @@ export function createGmailSender(
       }
       const messageId = asString(answer.body?.id);
       if (answer.status === 200 && messageId !== null) return { kind: "sent", messageId };
-      return { kind: "failed", reason: `gmail answered ${String(answer.status)} ${errorCode(asRecord(answer.body?.error)?.status)}` };
+      return { kind: "failed", reason: `gmail answered ${String(answer.status)} ${googleErrorCode(asRecord(answer.body?.error)?.status)}` };
     }
     return { kind: "failed", reason: "gmail refused two fresh access tokens" };
   }
@@ -301,8 +301,6 @@ const BASE64_LINE_LENGTH = 76;
 const DAY_NAMES: readonly string[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES: readonly string[] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-type FieldParse<TValue> = Readonly<{ kind: "ok"; value: TValue }> | Readonly<{ kind: "error"; message: string }>;
-
 function parseRefreshToken(root: Readonly<Record<string, unknown>>): FieldParse<MailSenderCredentials> {
   // The values are deliberately absent from every message below.
   const clientId = asString(root.clientId);
@@ -332,7 +330,7 @@ function parseServiceAccount(
     text = options.readKeyFile(keyPath);
   } catch (cause) {
     // Only the error code: the message would repeat the path, and a parser error the content.
-    return { kind: "error", message: `${field}: cannot read the key file (${fileErrorCode(cause)})` };
+    return { kind: "error", message: `${field}: cannot read the key file (${nodeErrorCode(cause)})` };
   }
   const parsed = parseJson(text);
   const key = parsed.kind === "ok" ? asRecord(parsed.value) : null;
@@ -355,7 +353,7 @@ function parseServiceAccount(
   if (privateKeyId === "" || (privateKeyId === null && key.private_key_id !== undefined)) {
     return { kind: "error", message: `${field}: the key file's private_key_id must be a non-empty string when present` };
   }
-  const tokenUrl = key.token_uri === undefined ? GOOGLE_TOKEN_URL : asString(key.token_uri);
+  const tokenUrl = key.token_uri === undefined ? GOOGLE_TOKEN_ENDPOINT : asString(key.token_uri);
   if (tokenUrl === null || !isHttpsUrl(tokenUrl)) return { kind: "error", message: `${field}: the key file's token_uri must be an https URL` };
   return { kind: "ok", value: { kind: "service-account", clientEmail, privateKey, privateKeyId, tokenUrl, impersonate } };
 }
@@ -368,11 +366,6 @@ function isHttpsUrl(text: string): boolean {
   }
 }
 
-function fileErrorCode(cause: unknown): string {
-  const code = cause instanceof Error && "code" in cause ? cause.code : undefined;
-  return typeof code === "string" ? code : "unreadable";
-}
-
 /** The token request for either grant; `description` names it in a failure reason. */
 function tokenGrant(
   options: Readonly<{ credentials: MailSenderCredentials; nowMs: number }>,
@@ -381,7 +374,7 @@ function tokenGrant(
   switch (credentials.kind) {
     case "refresh-token":
       return {
-        url: GOOGLE_TOKEN_URL,
+        url: GOOGLE_TOKEN_ENDPOINT,
         description: "token refresh",
         form: new URLSearchParams({
           grant_type: "refresh_token",
@@ -450,15 +443,6 @@ function serviceAccountAssertion(
   const signedInput = `${jsonSegment(header)}.${jsonSegment(claims)}`;
   const signature = sign("sha256", Buffer.from(signedInput, "utf-8"), credentials.privateKey);
   return `${signedInput}.${signature.toString("base64url")}`;
-}
-
-function jsonSegment(value: Readonly<Record<string, unknown>>): string {
-  return Buffer.from(JSON.stringify(value), "utf-8").toString("base64url");
-}
-
-function errorCode(value: unknown): string {
-  const code = asString(value);
-  return code !== null && /^[A-Za-z_]{1,64}$/.test(code) ? code : "(no error code)";
 }
 
 function domainOf(address: string): string {

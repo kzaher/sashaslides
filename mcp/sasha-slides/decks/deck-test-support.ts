@@ -5,12 +5,13 @@
  * exactly the headers a test names (Origin and Cookie included), a `ws` client that records frames
  * and close codes, and the account portal's session cookie minted the way the portal mints it.
  */
-import { createHmac, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { createServer, request as outgoingRequest, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import WebSocket from "ws";
 import type { ServerMessage } from "../engine/src/contracts/collaboration.ts";
 import type { AccountPortal } from "../http/account-portal";
+import { signedValues } from "../http/cookies";
 import type { DeckServer } from "./deck-stack";
 import type { DeckTimers } from "./deck-registry";
 
@@ -117,9 +118,8 @@ export function setCookieLine(headers: IncomingHttpHeaders, name: string): strin
 
 /** The account portal's session cookie for `accountId`, minted exactly as account-portal.ts mints it. */
 export function accountSessionCookie(options: Readonly<{ secret: string; accountId: string; now: number }>): string {
-  const payload = Buffer.from(JSON.stringify({ accountId: options.accountId, exp: options.now + 15 * 60 * 1000, csrf: randomBytes(16).toString("base64url") }), "utf-8").toString("base64url");
-  const mac = createHmac("sha256", options.secret).update(payload).digest("base64url");
-  return `sasha_account=${payload}.${mac}`;
+  const signed = signedValues({ secret: options.secret, label: "" });
+  return `sasha_account=${signed.seal({ accountId: options.accountId, exp: options.now + 15 * 60 * 1000, csrf: randomBytes(16).toString("base64url") })}`;
 }
 
 export type RecordingSocket = Readonly<{

@@ -11,6 +11,7 @@
 import type { AssetMediaType, AssetRecord } from "../engine/src/contracts/document.ts";
 import type { DeckHandle } from "../deck-contracts/deck-service-contract.ts";
 import type { ImportedImage } from "./import-presentation.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export async function fetchImportImages(
   options: Readonly<{ addresses: readonly string[]; fetch: typeof fetch; deck: DeckHandle; accessToken: string | null }>,
@@ -151,8 +152,4 @@ function littleEndian24(bytes: Uint8Array, offset: number): number {
 
 function ascii(bytes: Uint8Array, offset: number, length: number): string {
   return String.fromCharCode(...bytes.subarray(offset, offset + length));
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

@@ -18,6 +18,7 @@ import { readPptxSupplement } from "./import-pptx-supplement.ts";
 import { imageAddressesIn, planImport, type ImportPlan } from "./import-presentation.ts";
 import { presentationAddressOf } from "./slides-client.ts";
 import { parsePresentation } from "./slides-presentation.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type ImportOutcome =
   | Readonly<{ kind: "imported"; report: GoogleSlidesImportReport; link: GoogleSlidesLink }>
@@ -116,8 +117,4 @@ export function importEnvelope(
 export function idSeedFrom(randomToken: string): IdSeed {
   const prefix = randomToken.replace(/[^A-Za-z0-9]/g, "").padEnd(8, "0").slice(0, 8);
   return { sessionPrefix: prefix, counter: 0 };
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

@@ -28,6 +28,7 @@
  *    one; the scope is a signal, not something we pass on to Google (Google's equivalent is
  *    `access_type=offline`, set in `google-broker.ts`).
  */
+import { DRIVE_FILE_SCOPE, SLIDES_SCOPE } from "../google-constants";
 
 export const MCP_PATH = "/mcp";
 export const AUTHORIZE_PATH = "/authorize";
@@ -45,15 +46,7 @@ export const AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorizat
  * `drive.file` is non-sensitive (PROTOCOL.md "Drive layout"); full `drive` is restricted
  * and is deliberately not requested here.
  */
-/* Kept as literals, not imported from `google-auth.ts`, so this module stays a pure
- * function of `publicUrl` with no googleapis dependency. `user-drive.ts` checks the
- * granted scopes against `google-auth.ts`'s constants, which is where drift would bite. */
-export const BROKERED_SCOPES = [
-  "openid",
-  "email",
-  "https://www.googleapis.com/auth/presentations",
-  "https://www.googleapis.com/auth/drive.file",
-] as const;
+export const BROKERED_SCOPES = ["openid", "email", SLIDES_SCOPE, DRIVE_FILE_SCOPE] as const;
 
 export type Endpoints = Readonly<{
   /** Origin plus optional base path, no trailing slash. Also the AS issuer. */

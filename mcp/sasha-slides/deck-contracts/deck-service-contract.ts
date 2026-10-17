@@ -9,8 +9,8 @@
  *
  * The last two never edit the first one's files. They receive a `DeckService` (implemented by the
  * collaboration server over its live rooms) and are mounted by it through the two factories typed
- * at the bottom (`CreateGoogleSlidesInterchange`, `RegisterDeckTools`), whose stub implementations
- * ship with this file so `server.ts` composes on day one.
+ * at the bottom (`CreateGoogleSlidesInterchange`, `RegisterDeckTools`), which `server.ts` and
+ * `decks/deck-stack.ts` compose.
  *
  * WHY A SERVICE AND NOT THE STORE: every write -- an agent's edit, an import -- must go through the
  * deck's ROOM, the one authoritative replica that broadcasts to connected editors and persists, or

@@ -17,9 +17,17 @@
  */
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { assertNever, describeAuthFailure, loadClientCredentials } from "../google-auth";
+import type { GoogleClientCredentials } from "../google-auth";
 import { storeAccountDirectory } from "./account-directory";
-import { accountCallbackUrl, createAccountPortal, parseSessionSecret, ACCOUNT_PATH, type AccountPortal, type DeckSessionStart } from "./account-portal";
+import {
+  accountCallbackUrl,
+  createAccountPortal,
+  parseSessionSecret,
+  ACCOUNT_PATH,
+  type AccountPortal,
+  type DeckSessionStart,
+  type SessionSecretParse,
+} from "./account-portal";
 import type { AccountEraser, AccountVault } from "./account-vault";
 import { randomAccountId } from "./accounts";
 import {
@@ -27,9 +35,9 @@ import {
   defaultIdentityProviders,
   IDENTITY_PROVIDER_TIMEOUT_MS,
   parseIdentityProvidersConfig,
-  randomSignInToken,
   type IdentityProviderSpec,
 } from "./identity-providers";
+import { randomUrlSafeToken } from "./authorization-server";
 import { LOOPBACK_PROXIES, parseTrustedProxies, type TrustedProxies } from "./client-address";
 import { createGmailSender, MAIL_SENDER_TIMEOUT_MS, parseMailSenderConfig, type MailSenderConfig } from "./gmail-sender";
 import { emailHint, type AccountDirectory } from "./account-directory";
@@ -37,6 +45,7 @@ import type { AuthStore } from "./oauth-store";
 import { DEFAULT_SCRYPT_COST } from "./password-hashing";
 import { createPasswordSignIn, DEFAULT_PASSWORD_LIMITS, type PasswordSignIn } from "./password-sign-in";
 import { createThrottle } from "./request-throttle";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type AccountPortalLoad =
   | Readonly<{ kind: "ok"; portal: AccountPortal; banner: readonly string[] }>
@@ -48,10 +57,10 @@ export function loadAccountPortal(
     publicUrl: string;
     /** Null offers Google alone, on the connector's client. */
     identityProvidersPath: string | null;
-    /** The connector's Google OAuth client file, reused when the providers file omits Google credentials. */
-    googleClientPath: string;
-    /** `process.env.SASHA_SESSION_SECRET`, read by the caller. */
-    sessionSecret: string | undefined;
+    /** The connector's Google OAuth client, reused when the providers file omits Google credentials. */
+    googleClient: GoogleClientCredentials;
+    /** `SASHA_SESSION_SECRET`, parsed by the caller; null when it is not set. */
+    sessionSecret: SessionSecretParse | null;
     /** Null leaves email and password sign-in off; a path is the `--mail-sender` JSON file. */
     mailSenderPath: string | null;
     /** `--trusted-proxy`, comma-separated addresses or subnets; null trusts loopback alone. */
@@ -66,13 +75,14 @@ export function loadAccountPortal(
 ): AccountPortalLoad {
   const { publicUrl, identityProvidersPath } = options;
   const wanted = identityProvidersPath !== null || options.mailSenderPath !== null;
-  if (!wanted && (options.sessionSecret === undefined || options.sessionSecret === "")) {
+  if (!wanted && options.sessionSecret === null) {
     return { kind: "off", banner: [`account portal: off (set SASHA_SESSION_SECRET to serve ${ACCOUNT_PATH})`] };
   }
-  const secret = parseSessionSecret(options.sessionSecret);
+  // Wanted without a secret: the parse names what is missing.
+  const secret = options.sessionSecret ?? parseSessionSecret(undefined);
   if (secret.kind === "error") return { kind: "failed", message: secret.message };
 
-  const specs = loadSpecs({ identityProvidersPath, googleClientPath: options.googleClientPath });
+  const specs = loadSpecs({ identityProvidersPath, googleClient: options.googleClient });
   if (specs.kind === "failed") return specs;
   const now = (): Date => new Date();
   const directory = storeAccountDirectory({ store: options.store, vault: options.vault, now, newAccountId: randomAccountId });
@@ -90,12 +100,12 @@ export function loadAccountPortal(
     publicUrl,
     sessionSecret: secret.secret,
     providers: specs.specs.map((spec) =>
-      createIdentityProvider({ spec, fetch, now, randomToken: randomSignInToken, timeoutMs: IDENTITY_PROVIDER_TIMEOUT_MS }),
+      createIdentityProvider({ spec, fetch, now, randomToken: randomUrlSafeToken, timeoutMs: IDENTITY_PROVIDER_TIMEOUT_MS }),
     ),
     directory,
     eraser: options.eraser,
     now,
-    randomToken: randomSignInToken,
+    randomToken: randomUrlSafeToken,
     warn: options.warn,
     passwordSignIn: password.passwordSignIn,
     deckSessionStart: options.deckSessionStart,
@@ -149,11 +159,11 @@ function loadPasswordSignIn(
     publicUrl: options.publicUrl,
     credentials: options.store.passwordCredentials,
     directory: options.directory,
-    mailSender: createGmailSender({ config: config.config, fetch, now, randomToken: randomSignInToken, timeoutMs: MAIL_SENDER_TIMEOUT_MS }),
+    mailSender: createGmailSender({ config: config.config, fetch, now, randomToken: randomUrlSafeToken, timeoutMs: MAIL_SENDER_TIMEOUT_MS }),
     throttle: createThrottle({ now, maxKeys: THROTTLE_MAX_KEYS }),
     limits: DEFAULT_PASSWORD_LIMITS,
     now,
-    randomToken: randomSignInToken,
+    randomToken: randomUrlSafeToken,
     scryptCost: DEFAULT_SCRYPT_COST,
     // Mail failures are already turned into warnings inside the work; it never rejects.
     runInBackground: (work) => {
@@ -204,15 +214,11 @@ function describeMailCredentials(config: MailSenderConfig): string {
 }
 
 function loadSpecs(
-  options: Readonly<{ identityProvidersPath: string | null; googleClientPath: string }>,
+  options: Readonly<{ identityProvidersPath: string | null; googleClient: GoogleClientCredentials }>,
 ): Readonly<{ kind: "ok"; specs: readonly IdentityProviderSpec[] }> | Readonly<{ kind: "failed"; message: string }> {
-  const credentials = loadClientCredentials({ path: options.googleClientPath });
-  const connectorGoogleCredentials = credentials.kind === "ok" ? credentials.credentials : null;
+  const connectorGoogleCredentials = options.googleClient;
   if (options.identityProvidersPath === null) {
-    if (credentials.kind !== "ok") {
-      return { kind: "failed", message: `account portal: no --identity-providers and no Google client: ${describeAuthFailure(credentials)}` };
-    }
-    return { kind: "ok", specs: defaultIdentityProviders({ connectorGoogleCredentials: credentials.credentials }) };
+    return { kind: "ok", specs: defaultIdentityProviders({ connectorGoogleCredentials }) };
   }
   let text: string;
   try {

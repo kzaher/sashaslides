@@ -34,7 +34,8 @@ import { googleBroker } from "./google-broker";
 import { endpointsFor, type Endpoints } from "./oauth-metadata";
 import { fileBackedAuthStore, inMemoryAuthStore, type AuthStore } from "./oauth-store";
 import { googleUserDriveFactory, type UserDriveFactory } from "./user-drive";
-import { assertNever, describeAuthFailure, loadClientCredentials, type GoogleClientCredentials } from "../google-auth";
+import { describeAuthFailure, loadClientCredentials, type GoogleClientCredentials } from "../google-auth";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type BrokeredStack = Readonly<{
   endpoints: Endpoints;

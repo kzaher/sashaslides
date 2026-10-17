@@ -45,8 +45,8 @@ import {
   type SlideLocation,
 } from "./comment-anchor";
 import type { CommentThread, FeedbackChannel, ReplyAction } from "./feedback-channel";
-import { assertNever } from "../google-auth";
 import { AGENT_REPLY_MARKER, authoredByAgentText, withoutAgentMarker } from "../agent-marker.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /**
  * Everything this module touches that is not pure. Required, not defaulted: a unit that can

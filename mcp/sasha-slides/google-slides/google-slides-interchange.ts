@@ -50,12 +50,14 @@ import {
 } from "../deck-contracts/deck-service-contract.ts";
 import { ADDON_BINDING_SECRET_HEADER, ADDON_IDENTITY_HEADER, ADDON_PAGE_IDS_HEADER, MINIMUM_BINDING_SECRET_LENGTH, verifyAddonIdentityToken } from "./addon-identity.ts";
 import { addonExportRequests, runExport, type ExportTarget } from "./export-run.ts";
-import { createExpiringTable } from "./expiring-table.ts";
+import { createExpiringTable } from "../http/expiring-table.ts";
 import { accessTokenForIdentity, exchangeAuthorizationCode, GOOGLE_SLIDES_CONNECT_SCOPES, googleConsentAddress } from "./google-oauth.ts";
-import { answerError, answerWithBody, fieldOf, readRequestBody, redirect, stringFieldOf } from "./http-answers.ts";
+import { readJsonBody, redirect, sendDeckApiError, sendJson } from "../http/http-kit.ts";
+import { fieldOf, stringFieldOf } from "../http/json-values.ts";
 import { createIdentityVerifier, type IdentityClaims } from "./identity-token.ts";
 import { idSeedFrom, importIntoDeck, type ImportOutcome } from "./import-into-deck.ts";
 import { createSlidesClient, googleFailureCodeOf, presentationAddressOf, presentationIdFrom } from "./slides-client.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export const EXPORT_ASSET_LIFETIME_MILLISECONDS = 30 * 60 * 1000;
 export const CONNECT_STATE_LIFETIME_MILLISECONDS = 10 * 60 * 1000;
@@ -88,7 +90,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
 
   const handleConnect = async (request: RouteRequest): Promise<void> => {
     const { response, url, caller } = request;
-    if (caller === null) return answerError({ response, status: 401, error: "signedOut", message: "Sign in to connect Google Slides.", signInAddress: "/account/deck-session?return=/decks" });
+    if (caller === null) return sendDeckApiError({ response, status: 401, error: "signedOut", message: "Sign in to connect Google Slides.", signInAddress: "/account/deck-session?return=/decks" });
     const state = options.randomToken();
     connectStates.put({ key: state, value: { caller, returnPath: safeReturnPath(url.searchParams.get("return")) }, lifetimeMilliseconds: CONNECT_STATE_LIFETIME_MILLISECONDS });
     redirect({ response, location: googleConsentAddress({ client: options.googleClient, redirectAddress, state, scopes: GOOGLE_SLIDES_CONNECT_SCOPES }) });
@@ -136,21 +138,21 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
 
   const handleImport = async (request: RouteRequest): Promise<void> => {
     const { response, caller } = request;
-    if (caller === null) return answerError({ response, status: 401, error: "signedOut", message: "Sign in to import.", signInAddress: "/account/deck-session?return=/decks" });
-    const body = await readRequestBody({ request: request.request, maximumBytes: REQUEST_BODY_LIMIT_BYTES });
-    if (body.kind !== "parsed") return answerError({ response, status: body.kind === "tooLarge" ? 413 : 400, error: body.kind === "tooLarge" ? "tooLarge" : "invalidRequest", message: "The request is not a JSON import request." });
+    if (caller === null) return sendDeckApiError({ response, status: 401, error: "signedOut", message: "Sign in to import.", signInAddress: "/account/deck-session?return=/decks" });
+    const body = await readJsonBody({ request: request.request, maximumBytes: REQUEST_BODY_LIMIT_BYTES, onOverflow: "destroy" });
+    if (body.kind !== "parsed") return sendDeckApiError({ response, status: body.kind === "tooLarge" ? 413 : 400, error: body.kind === "tooLarge" ? "tooLarge" : "invalidRequest", message: "The request is not a JSON import request." });
     const presentationId = presentationIdFrom(stringFieldOf(body.value, "presentation") ?? "");
-    if (presentationId === null) return answerError({ response, status: 400, error: "invalidRequest", message: "That is not a Google Slides address or presentation id." });
+    if (presentationId === null) return sendDeckApiError({ response, status: 400, error: "invalidRequest", message: "That is not a Google Slides address or presentation id." });
     const connectAddress = `${DECK_API_PATHS.googleSlidesConnect}?return=${encodeURIComponent("/decks")}`;
     const grant = await options.googleGrants.forAccount({ accountId: caller.accountId });
-    if (grant.kind === "notConnected") return answerError({ response, status: 409, error: "googleNotConnected", message: "Connect Google Slides to import from it.", connectAddress });
+    if (grant.kind === "notConnected") return sendDeckApiError({ response, status: 409, error: "googleNotConnected", message: "Connect Google Slides to import from it.", connectAddress });
     const token = await accessTokenForIdentity({ fetch: options.fetch, client: options.googleClient, identity: grant.identity, now });
-    if (token.kind === "notConnected") return answerError({ response, status: 409, error: "googleNotConnected", message: token.message, connectAddress });
+    if (token.kind === "notConnected") return sendDeckApiError({ response, status: 409, error: "googleNotConnected", message: token.message, connectAddress });
     const slides = createSlidesClient({ fetch: options.fetch, accessToken: token.accessToken });
     const read = await slides.getPresentation({ presentationId, fields: null });
     if (read.kind === "failed") {
       const code = googleFailureCodeOf(read.status);
-      return answerError({ response, status: statusOfGoogleFailure(code), error: code, message: read.message, ...(code === "googleNotConnected" ? { connectAddress } : {}) });
+      return sendDeckApiError({ response, status: statusOfGoogleFailure(code), error: code, message: read.message, ...(code === "googleNotConnected" ? { connectAddress } : {}) });
     }
     // Started before the deck is created so the two overlap; it never rejects (a failure is a value).
     const exporting = slides.exportPresentationPptx({ presentationId });
@@ -159,10 +161,10 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
       case "opened":
         break;
       case "limitReached":
-        return answerError({ response, status: 409, error: "limitReached", message: created.message });
+        return sendDeckApiError({ response, status: 409, error: "limitReached", message: created.message });
       case "notFound":
       case "notPermitted":
-        return answerError({ response, status: 403, error: "notPermitted", message: "A deck could not be created." });
+        return sendDeckApiError({ response, status: 403, error: "notPermitted", message: "A deck could not be created." });
       case "deckUnreadable":
         return answerUnreadable({ response, message: created.message });
       default:
@@ -182,22 +184,22 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     });
     if (imported.kind !== "imported") return answerImportFailure({ response, outcome: imported });
     const answer: GoogleSlidesImportBody = { deck: deck.summary(), report: imported.report };
-    answerWithBody({ response, status: 201, body: answer });
+    sendJson({ response, status: 201, body: answer });
   };
 
   const handleExport = async (request: RouteRequest & Readonly<{ deckId: DeckId }>): Promise<void> => {
     const { response, caller, deckId } = request;
-    if (caller === null) return answerError({ response, status: 401, error: "signedOut", message: "Sign in to export.", signInAddress: `/account/deck-session?return=/deck/${deckId}` });
-    const body = await readRequestBody({ request: request.request, maximumBytes: REQUEST_BODY_LIMIT_BYTES });
+    if (caller === null) return sendDeckApiError({ response, status: 401, error: "signedOut", message: "Sign in to export.", signInAddress: `/account/deck-session?return=/deck/${deckId}` });
+    const body = await readJsonBody({ request: request.request, maximumBytes: REQUEST_BODY_LIMIT_BYTES, onOverflow: "destroy" });
     const targetKind = body.kind === "parsed" ? stringFieldOf(fieldOf(body.value, "target"), "kind") : null;
-    if (targetKind !== "newPresentation" && targetKind !== "linkedPresentation") return answerError({ response, status: 400, error: "invalidRequest", message: "Say where to export: a new or the linked presentation." });
+    if (targetKind !== "newPresentation" && targetKind !== "linkedPresentation") return sendDeckApiError({ response, status: 400, error: "invalidRequest", message: "Say where to export: a new or the linked presentation." });
     const opened = await deckService.openDeck({ caller, deckId });
     if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
-    if (opened.kind !== "opened") return answerError({ response, status: 404, error: "notFound", message: "No such deck." });
+    if (opened.kind !== "opened") return sendDeckApiError({ response, status: 404, error: "notFound", message: "No such deck." });
     await using deck = opened.deck;
-    if (!roleAllows({ role: deck.role(), permission: "exchangeWithGoogleSlides" })) return answerError({ response, status: 403, error: "notPermitted", message: "Only editors can export this deck." });
+    if (!roleAllows({ role: deck.role(), permission: "exchangeWithGoogleSlides" })) return sendDeckApiError({ response, status: 403, error: "notPermitted", message: "Only editors can export this deck." });
     const link = deck.googleSlidesLink();
-    if (targetKind === "linkedPresentation" && link === null) return answerError({ response, status: 409, error: "invalidRequest", message: "This deck is not linked to a presentation yet." });
+    if (targetKind === "linkedPresentation" && link === null) return sendDeckApiError({ response, status: 409, error: "invalidRequest", message: "This deck is not linked to a presentation yet." });
     const target: ExportTarget = targetKind === "linkedPresentation" && link !== null ? { kind: "linkedPresentation", presentationId: link.presentationId, importedPageIds: link.importedPageIds } : { kind: "newPresentation" };
 
     const grant = await options.googleGrants.forAccount({ accountId: caller.accountId });
@@ -207,9 +209,9 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
         const exportId = options.randomToken();
         addonExports.put({ key: exportId, value: { caller, deckId, presentationId: link.presentationId, finished: null }, lifetimeMilliseconds: ADDON_EXPORT_LIFETIME_MILLISECONDS });
         const answer: GoogleSlidesExportBody = { kind: "runInAddon", exportId };
-        return answerWithBody({ response, status: 200, body: answer });
+        return sendJson({ response, status: 200, body: answer });
       }
-      return answerError({ response, status: 409, error: "googleNotConnected", message: "Connect Google Slides to export to it.", connectAddress: `${DECK_API_PATHS.googleSlidesConnect}?return=${encodeURIComponent(`/deck/${deckId}`)}` });
+      return sendDeckApiError({ response, status: 409, error: "googleNotConnected", message: "Connect Google Slides to export to it.", connectAddress: `${DECK_API_PATHS.googleSlidesConnect}?return=${encodeURIComponent(`/deck/${deckId}`)}` });
     }
     const snapshot = deck.snapshot();
     const assetAddress = exportAssetAddresses({ caller, deckId, assetIds: snapshot.assets.map((asset) => asset.id) });
@@ -218,11 +220,11 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
       case "exported": {
         await deck.setGoogleSlidesLink({ link: exportedLink({ previous: link, presentationId: outcome.report.presentationId, title: outcome.title, now: now() }) });
         const answer: GoogleSlidesExportBody = { kind: "exported", report: outcome.report };
-        return answerWithBody({ response, status: 200, body: answer });
+        return sendJson({ response, status: 200, body: answer });
       }
       case "failed":
         if (outcome.presentationId !== null) await deck.setGoogleSlidesLink({ link: exportedLink({ previous: link, presentationId: outcome.presentationId, title: snapshot.title, now: now() }) });
-        return answerError({ response, status: statusOfGoogleFailure(outcome.code), error: outcome.code, message: outcome.message });
+        return sendDeckApiError({ response, status: statusOfGoogleFailure(outcome.code), error: outcome.code, message: outcome.message });
       default:
         return assertNever(outcome);
     }
@@ -231,13 +233,13 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
   const handleExportAsset = async (request: RouteRequest & Readonly<{ token: string; assetId: AssetId }>): Promise<void> => {
     const { response } = request;
     const grant = exportAssets.get(request.token);
-    if (grant === null || !grant.assetIds.has(request.assetId)) return answerError({ response, status: 404, error: "notFound", message: "No such picture." });
+    if (grant === null || !grant.assetIds.has(request.assetId)) return sendDeckApiError({ response, status: 404, error: "notFound", message: "No such picture." });
     const opened = await deckService.openDeck({ caller: grant.caller, deckId: grant.deckId });
     if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
-    if (opened.kind !== "opened") return answerError({ response, status: 404, error: "notFound", message: "No such picture." });
+    if (opened.kind !== "opened") return sendDeckApiError({ response, status: 404, error: "notFound", message: "No such picture." });
     await using deck = opened.deck;
     const asset = await deck.readAsset({ assetId: request.assetId });
-    if (asset === null) return answerError({ response, status: 404, error: "notFound", message: "No such picture." });
+    if (asset === null) return sendDeckApiError({ response, status: 404, error: "notFound", message: "No such picture." });
     response.writeHead(200, {
       "content-type": asset.mediaType,
       "content-length": String(asset.bytes.byteLength),
@@ -250,17 +252,17 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
 
   const handleHandoff = async (request: RouteRequest): Promise<void> => {
     const { response } = request;
-    const body = await readRequestBody({ request: request.request, maximumBytes: REQUEST_BODY_LIMIT_BYTES });
-    if (body.kind !== "parsed") return answerError({ response, status: 400, error: "invalidRequest", message: "The handoff is not JSON." });
+    const body = await readJsonBody({ request: request.request, maximumBytes: REQUEST_BODY_LIMIT_BYTES, onOverflow: "destroy" });
+    if (body.kind !== "parsed") return sendDeckApiError({ response, status: 400, error: "invalidRequest", message: "The handoff is not JSON." });
     const identityToken = stringFieldOf(body.value, "identityToken");
     const presentationId = stringFieldOf(body.value, "presentationId");
     const bindingSecret = stringFieldOf(body.value, "bindingSecret");
     const revisionId = stringFieldOf(body.value, "revisionId");
     if (identityToken === null || presentationId === null || bindingSecret === null || revisionId === null || bindingSecret.length < MINIMUM_BINDING_SECRET_LENGTH) {
-      return answerError({ response, status: 400, error: "invalidRequest", message: "The handoff needs an identity token, the presentation, its binding secret and its revision." });
+      return sendDeckApiError({ response, status: 400, error: "invalidRequest", message: "The handoff needs an identity token, the presentation, its binding secret and its revision." });
     }
     const claims = await verifyAddon(identityToken);
-    if (claims === null) return answerError({ response, status: 401, error: "addonIdentityRejected", message: "Sign in again: Google did not vouch for this request." });
+    if (claims === null) return sendDeckApiError({ response, status: 401, error: "addonIdentityRejected", message: "Sign in again: Google did not vouch for this request." });
     const caller = await options.accounts.accountForGoogleIdentity({ subject: claims.subject, email: claims.email, emailVerified: claims.emailVerified });
     const bindingSecretHash = sha256(bindingSecret);
     const ticketFor = (replaceDeckId: DeckId | null): string => {
@@ -271,44 +273,44 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
     const boundDeckId = await deckService.findDeckByAddonBinding({ bindingSecretHash });
     if (boundDeckId === null) {
       const answer: AddonHandoffBody = { kind: "needsImport", importToken: ticketFor(null) };
-      return answerWithBody({ response, status: 200, body: answer });
+      return sendJson({ response, status: 200, body: answer });
     }
     const opened = await deckService.openDeck({ caller, deckId: boundDeckId });
     if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
-    if (opened.kind !== "opened") return answerError({ response, status: 403, error: "notPermitted", message: "This presentation's Sasha deck belongs to someone who has not shared it with you." });
+    if (opened.kind !== "opened") return sendDeckApiError({ response, status: 403, error: "notPermitted", message: "This presentation's Sasha deck belongs to someone who has not shared it with you." });
     await using deck = opened.deck;
     if (!roleAllows({ role: deck.role(), permission: "editDocument" })) {
-      return answerError({ response, status: 403, error: "notPermitted", message: "This presentation's Sasha deck belongs to someone who has not shared it with you." });
+      return sendDeckApiError({ response, status: 403, error: "notPermitted", message: "This presentation's Sasha deck belongs to someone who has not shared it with you." });
     }
     const ticket = await options.embedTickets.issue({ accountId: caller.accountId, deckId: boundDeckId });
     const imported = deck.googleSlidesLink()?.importedRevisionId ?? null;
     const answer: AddonHandoffBody =
       imported === revisionId ? { kind: "open", deckId: boundDeckId, ticket } : { kind: "changedSinceImport", deckId: boundDeckId, ticket, importToken: ticketFor(boundDeckId) };
-    answerWithBody({ response, status: 200, body: answer });
+    sendJson({ response, status: 200, body: answer });
   };
 
   const handleAddonImport = async (request: RouteRequest): Promise<void> => {
     const { response } = request;
-    const body = await readRequestBody({ request: request.request, maximumBytes: ADDON_IMPORT_BODY_LIMIT_BYTES });
-    if (body.kind !== "parsed") return answerError({ response, status: body.kind === "tooLarge" ? 413 : 400, error: body.kind === "tooLarge" ? "tooLarge" : "invalidRequest", message: "The import is not JSON." });
+    const body = await readJsonBody({ request: request.request, maximumBytes: ADDON_IMPORT_BODY_LIMIT_BYTES, onOverflow: "destroy" });
+    if (body.kind !== "parsed") return sendDeckApiError({ response, status: body.kind === "tooLarge" ? 413 : 400, error: body.kind === "tooLarge" ? "tooLarge" : "invalidRequest", message: "The import is not JSON." });
     const importToken = stringFieldOf(body.value, "importToken");
     const ticket = importToken === null ? null : importTokens.take(sha256(importToken));
-    if (ticket === null) return answerError({ response, status: 401, error: "addonIdentityRejected", message: "This import was already used or has expired; open the editor again." });
+    if (ticket === null) return sendDeckApiError({ response, status: 401, error: "addonIdentityRejected", message: "This import was already used or has expired; open the editor again." });
     const replaceDeckId = stringFieldOf(body.value, "replaceDeckId");
-    if (replaceDeckId !== ticket.replaceDeckId) return answerError({ response, status: 400, error: "invalidRequest", message: "The import names a different deck than its handoff." });
+    if (replaceDeckId !== ticket.replaceDeckId) return sendDeckApiError({ response, status: 400, error: "invalidRequest", message: "The import names a different deck than its handoff." });
     const presentation = fieldOf(body.value, "presentation");
-    if (stringFieldOf(presentation, "presentationId") !== ticket.presentationId) return answerError({ response, status: 400, error: "invalidRequest", message: "The presentation is not the one the handoff named." });
+    if (stringFieldOf(presentation, "presentationId") !== ticket.presentationId) return sendDeckApiError({ response, status: 400, error: "invalidRequest", message: "The presentation is not the one the handoff named." });
     const { caller } = ticket;
     const opened = ticket.replaceDeckId === null ? await deckService.createDeck({ caller, title: stringFieldOf(presentation, "title") ?? "Imported presentation" }) : await deckService.openDeck({ caller, deckId: ticket.replaceDeckId });
     if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
-    if (opened.kind !== "opened") return answerError({ response, status: opened.kind === "limitReached" ? 409 : 403, error: opened.kind === "limitReached" ? "limitReached" : "notPermitted", message: "The deck could not be opened for the import." });
+    if (opened.kind !== "opened") return sendDeckApiError({ response, status: opened.kind === "limitReached" ? 409 : 403, error: opened.kind === "limitReached" ? "limitReached" : "notPermitted", message: "The deck could not be opened for the import." });
     await using deck = opened.deck;
     // Code.gs posts only the presentations.get answer, so gradient fills are reported as lost here.
     const imported = await importIntoDeck({ presentationAnswer: presentation, deck, author: authorOf(caller), fetch: options.fetch, accessToken: null, pptxExport: null, idSeed: idSeedFrom(options.randomToken()), now });
     if (imported.kind !== "imported") return answerImportFailure({ response, outcome: imported });
     await deck.bindAddon({ bindingSecretHash: ticket.bindingSecretHash, presentationId: ticket.presentationId });
     const answer: AddonImportBody = { deckId: deck.deckId, ticket: await options.embedTickets.issue({ accountId: caller.accountId, deckId: deck.deckId }), report: imported.report };
-    answerWithBody({ response, status: 201, body: answer });
+    sendJson({ response, status: 201, body: answer });
   };
 
   /** Code.gs's own calls about an export: the identity token, and the binding secret of the export's deck. */
@@ -331,25 +333,25 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
   const handleAddonExportPlan = async (request: RouteRequest & Readonly<{ exportId: string }>): Promise<void> => {
     const { response } = request;
     const record = await authenticateAddonExport(request);
-    if (record === null) return answerError({ response, status: 401, error: "addonIdentityRejected", message: "Sign in again: this export could not be verified." });
+    if (record === null) return sendDeckApiError({ response, status: 401, error: "addonIdentityRejected", message: "Sign in again: this export could not be verified." });
     const opened = await deckService.openDeck({ caller: record.caller, deckId: record.deckId });
     if (opened.kind === "deckUnreadable") return answerUnreadable({ response, message: opened.message });
-    if (opened.kind !== "opened") return answerError({ response, status: 404, error: "notFound", message: "No such deck." });
+    if (opened.kind !== "opened") return sendDeckApiError({ response, status: 404, error: "notFound", message: "No such deck." });
     await using deck = opened.deck;
     const snapshot = deck.snapshot();
     const existingPageIds = (headerOf(request.request, ADDON_PAGE_IDS_HEADER) ?? "").split(",").filter((pageId) => pageId.length > 0);
     const plan = addonExportRequests({ snapshot, existingPageIds, importedPageIds: deck.googleSlidesLink()?.importedPageIds ?? [], assetAddress: exportAssetAddresses({ caller: record.caller, deckId: record.deckId, assetIds: snapshot.assets.map((asset) => asset.id) }) });
     const answer: AddonExportPlanBody = { presentationId: record.presentationId, requests: plan.requests };
-    answerWithBody({ response, status: 200, body: answer });
+    sendJson({ response, status: 200, body: answer });
   };
 
   const handleAddonExportResult = async (request: RouteRequest & Readonly<{ exportId: string }>): Promise<void> => {
     const { response } = request;
     const record = await authenticateAddonExport(request);
-    if (record === null) return answerError({ response, status: 401, error: "addonIdentityRejected", message: "Sign in again: this export could not be verified." });
-    const body = await readRequestBody({ request: request.request, maximumBytes: REQUEST_BODY_LIMIT_BYTES });
+    if (record === null) return sendDeckApiError({ response, status: 401, error: "addonIdentityRejected", message: "Sign in again: this export could not be verified." });
+    const body = await readJsonBody({ request: request.request, maximumBytes: REQUEST_BODY_LIMIT_BYTES, onOverflow: "destroy" });
     const kind = body.kind === "parsed" ? stringFieldOf(fieldOf(body.value, "outcome"), "kind") : null;
-    if (kind !== "applied" && kind !== "failed") return answerError({ response, status: 400, error: "invalidRequest", message: "The result is neither applied nor failed." });
+    if (kind !== "applied" && kind !== "failed") return sendDeckApiError({ response, status: 400, error: "invalidRequest", message: "The result is neither applied nor failed." });
     addonExports.put({ key: request.exportId, value: { ...record, finished: kind }, lifetimeMilliseconds: ADDON_EXPORT_LIFETIME_MILLISECONDS });
     if (kind === "applied") {
       const opened = await deckService.openDeck({ caller: record.caller, deckId: record.deckId });
@@ -358,7 +360,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
         await deck.setGoogleSlidesLink({ link: exportedLink({ previous: deck.googleSlidesLink(), presentationId: record.presentationId, title: deck.snapshot().title, now: now() }) });
       }
     }
-    answerWithBody({ response, status: 200, body: { recorded: kind } });
+    sendJson({ response, status: 200, body: { recorded: kind } });
   };
 
   const handleRequest: DeckRouteHandler = async ({ request, response, url, caller }) => {
@@ -383,7 +385,7 @@ export const createGoogleSlidesInterchange: CreateGoogleSlidesInterchange = (opt
       if (addonExportMatch[2] !== undefined && method === "POST") return answered(handleAddonExportResult({ ...routed, exportId }));
     }
     if (isOwnedPath(path)) {
-      answerError({ response, status: 404, error: "notFound", message: "No such Google Slides route." });
+      sendDeckApiError({ response, status: 404, error: "notFound", message: "No such Google Slides route." });
       return true;
     }
     return false;
@@ -443,18 +445,18 @@ function exportedLink(options: Readonly<{ previous: GoogleSlidesLink | null; pre
 
 /** 503 `deckUnreadable`: the deck's saved snapshot does not open or decode, so it was refused. */
 function answerUnreadable(options: Readonly<{ response: ServerResponse; message: string }>): void {
-  answerError({ response: options.response, status: 503, error: "deckUnreadable", message: options.message });
+  sendDeckApiError({ response: options.response, status: 503, error: "deckUnreadable", message: options.message });
 }
 
 function answerImportFailure(options: Readonly<{ response: ServerResponse; outcome: Exclude<ImportOutcome, Readonly<{ kind: "imported" }>> }>): void {
   const { response, outcome } = options;
   switch (outcome.kind) {
     case "invalidPresentation":
-      return answerError({ response, status: 400, error: "invalidRequest", message: outcome.message });
+      return sendDeckApiError({ response, status: 400, error: "invalidRequest", message: outcome.message });
     case "rejected":
-      return answerError({ response, status: 422, error: "invalidRequest", message: outcome.message });
+      return sendDeckApiError({ response, status: 422, error: "invalidRequest", message: outcome.message });
     case "notPermitted":
-      return answerError({ response, status: 403, error: "notPermitted", message: "You cannot edit this deck." });
+      return sendDeckApiError({ response, status: 403, error: "notPermitted", message: "You cannot edit this deck." });
     default:
       return assertNever(outcome);
   }
@@ -476,9 +478,5 @@ function statusOfGoogleFailure(code: DeckApiErrorCode): number {
 
 function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }
 

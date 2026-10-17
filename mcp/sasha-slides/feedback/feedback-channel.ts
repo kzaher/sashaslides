@@ -19,6 +19,7 @@
  */
 import { google, type drive_v3, type slides_v1 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type FeedbackChannel = Readonly<{
   /**
@@ -353,8 +354,4 @@ function narrowQuoted(
   // Slides sets this to "" for a whole-page anchor and to the marked run for a text anchor,
   // so empty is "nothing quoted", not "quoted the empty string".
   return typeof value === "string" && value !== "" ? value : null;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

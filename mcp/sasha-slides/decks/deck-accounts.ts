@@ -25,6 +25,7 @@ import type {
   GoogleGrantStore,
   GoogleIdentityAccounts,
 } from "../deck-contracts/deck-service-contract";
+import { SLIDES_SCOPE } from "../google-constants";
 import type { AccountDirectory } from "../http/account-directory";
 import type { AccountId, AccountVault } from "../http/account-vault";
 import { accountLinkKey } from "../http/accounts";
@@ -127,9 +128,6 @@ export function directoryGoogleIdentityAccounts(
   };
 }
 
-/** The Slides scope the Google Slides module asks for; a grant without it is "not connected". */
-export const GOOGLE_SLIDES_SCOPE = "https://www.googleapis.com/auth/presentations";
-
 export function storeGoogleGrants(options: Readonly<{ store: Pick<AuthStore, "accounts" | "accountLinks" | "googleIdentities">; now: () => number }>): GoogleGrantStore {
   const { store } = options;
   return {
@@ -138,7 +136,7 @@ export function storeGoogleGrants(options: Readonly<{ store: Pick<AuthStore, "ac
       const subject = account?.googleSubject ?? null;
       if (subject === null) return { kind: "notConnected", googleSubject: null };
       const identity = await store.googleIdentities.get({ key: subject });
-      if (identity === null || !identity.grantedScopes.includes(GOOGLE_SLIDES_SCOPE)) return { kind: "notConnected", googleSubject: subject };
+      if (identity === null || !identity.grantedScopes.includes(SLIDES_SCOPE)) return { kind: "notConnected", googleSubject: subject };
       return { kind: "ok", identity };
     },
     save: async ({ accountId, identity }) => {

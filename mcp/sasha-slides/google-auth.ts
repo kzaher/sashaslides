@@ -13,25 +13,15 @@
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import { existsSync, readFileSync } from "node:fs";
+import { assertNever } from "./engine/src/contracts/assert-never.ts";
+import { DRIVE_SCOPES, SLIDES_SCOPE } from "./google-constants.ts";
+import { asRecord } from "./http/json-values.ts";
 
 export const CLIENT_PATH = "/workspaces/sashaslides/.auth/google_oauth.json";
 export const TOKENS_PATH = "/workspaces/sashaslides/.auth/tokens.json";
 
 /** The redirect the client is registered with; must match generate-token.ts. */
 const REDIRECT_URI = "http://localhost:8080";
-
-export const SLIDES_SCOPE = "https://www.googleapis.com/auth/presentations";
-
-/**
- * Either scope lets the server create and read its own staging files. `drive.file` is
- * non-sensitive and is what a published connector should ask for; full `drive` is a
- * restricted scope needing app verification plus a security assessment when a server
- * transmits the data. We accept whichever the user granted.
- */
-export const DRIVE_SCOPES = [
-  "https://www.googleapis.com/auth/drive",
-  "https://www.googleapis.com/auth/drive.file",
-] as const;
 
 export type AuthFailure =
   | Readonly<{ kind: "missing-file"; path: string; remedy: string }>
@@ -56,16 +46,6 @@ export function describeAuthFailure(failure: AuthFailure): string {
     default:
       return assertNever(failure);
   }
-}
-
-export function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${String(value)}`);
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
 }
 
 type ReadJson = Readonly<{ json: Readonly<Record<string, unknown>> }> | Readonly<{ error: string }>;

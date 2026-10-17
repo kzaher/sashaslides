@@ -12,7 +12,7 @@
  * transition would leave the slides' steps naming a script they can no longer run.
  *
  * Sizes are checked here, before anything is sent, against the runner's limits
- * (transition-limits.ts): a script the presenter would refuse to load is not worth storing.
+ * (engine contracts/transition-limits.ts): a script the presenter would refuse to load is not worth storing.
  */
 import type { AssistantAnimationScript, AssistantTransitionScript } from "../engine/src/contracts/assistant-deck-tools.ts";
 import type { AnimationStep } from "../engine/src/contracts/animations.ts";
@@ -20,7 +20,7 @@ import type { DocumentCommand } from "../engine/src/contracts/commands.ts";
 import { assertNever } from "../engine/src/contracts/assert-never.ts";
 import type { DocumentSnapshot, ElementSnapshot, ScriptPurpose, TransitionScriptRecord } from "../engine/src/contracts/document.ts";
 import { mintId, type AnimationStepId, type ElementId, type IdSeed, type SlideId, type TransitionScriptId } from "../engine/src/contracts/ids.ts";
-import { SCRIPT_LIMITS } from "./transition-limits.ts";
+import { TRANSITION_LIMITS } from "../engine/src/contracts/transition-limits.ts";
 
 export type TransitionScriptExpansion =
   | Readonly<{ kind: "expanded"; scriptId: TransitionScriptId; commands: readonly DocumentCommand[]; seed: IdSeed }>
@@ -175,9 +175,9 @@ function childrenOf(element: ElementSnapshot): readonly ElementSnapshot[] {
 
 function sizeProblem(request: Readonly<{ script: string; stylesheet: string; markup: string }>): string | null {
   const checks = [
-    { field: "script", text: request.script, limit: SCRIPT_LIMITS.maximumScriptBytes },
-    { field: "stylesheet", text: request.stylesheet, limit: SCRIPT_LIMITS.maximumStylesheetBytes },
-    { field: "markup", text: request.markup, limit: SCRIPT_LIMITS.maximumOverlayMarkupBytes },
+    { field: "script", text: request.script, limit: TRANSITION_LIMITS.maximumScriptBytes },
+    { field: "stylesheet", text: request.stylesheet, limit: TRANSITION_LIMITS.maximumStylesheetBytes },
+    { field: "markup", text: request.markup, limit: TRANSITION_LIMITS.maximumOverlayMarkupBytes },
   ] as const;
   for (const check of checks) {
     const bytes = Buffer.byteLength(check.text, "utf8");

@@ -8,7 +8,7 @@
  * is drawn on, and its z-order position.
  *
  * ACCESS. The connector's grant includes `https://www.googleapis.com/auth/presentations`
- * (google-auth.ts `SLIDES_SCOPE`, http/oauth-metadata.ts), which reads ANY deck the user can open --
+ * (google-constants.ts `SLIDES_SCOPE`, http/oauth-metadata.ts), which reads ANY deck the user can open --
  * unlike `drive.file`, which only sees files this app created. So an existing deck is readable;
  * a deck the user cannot open answers with Google's own error, which is reported as it is.
  *

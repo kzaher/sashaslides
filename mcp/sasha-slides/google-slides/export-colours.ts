@@ -9,6 +9,7 @@ import type { ThemeSnapshot } from "../engine/src/contracts/document.ts";
 import type { Colour } from "../engine/src/contracts/style.ts";
 import type { InterchangeLossSink } from "./interchange-losses.ts";
 import type { WireChannels, WireSolidFill } from "./slides-requests.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export function wireSolidFill(options: Readonly<{ colour: Colour; theme: ThemeSnapshot; losses: InterchangeLossSink }>): WireSolidFill {
   return { color: { rgbColor: channelsOf(hexadecimalOfColour(options)) }, alpha: roundAlpha(options.colour.alpha) };
@@ -38,8 +39,4 @@ export function channelsOf(hexadecimal: string): WireChannels {
 
 function roundAlpha(alpha: number): number {
   return Math.round(Math.min(1, Math.max(0, alpha)) * 1000) / 1000;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

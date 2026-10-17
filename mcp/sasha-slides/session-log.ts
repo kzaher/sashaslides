@@ -26,7 +26,8 @@
  */
 import type { DriveChannel, DriveFile, DriveMedia } from "./drive-channel";
 import { FEEDBACK_DELIVERED_EVENT_KIND } from "./feedback-delivery";
-import { assertNever } from "./google-auth";
+import { assertNever } from "./engine/src/contracts/assert-never.ts";
+import { asArray, asNumber, asRecord, asString } from "./http/json-values.ts";
 
 /**
  * One line of the conversation. Every variant but the last is one of PROTOCOL.md's `kind` values;
@@ -723,16 +724,6 @@ function parseEventRegion(value: unknown): EventRegion | null {
   return fractional ? { x, y, w, h } : null;
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function asArray(value: unknown): readonly unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
 function asStringArray(value: unknown): readonly string[] {
   return asArray(value).flatMap((entry) => {
     const text = asString(entry);
@@ -745,12 +736,4 @@ function asNumberArray(value: unknown): readonly number[] {
     const number = asNumber(entry);
     return number === null ? [] : [number];
   });
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

@@ -31,13 +31,13 @@
  * is `no-store`, `no-referrer`, and its Content-Security-Policy admits only this server's script
  * and Google's picker origins.
  */
-import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { GoogleClientCredentials } from "../google-auth";
-import { escapeHtml } from "../http/account-portal";
+import { DRIVE_FILE_SCOPE, GOOGLE_CONSENT_ENDPOINT } from "../google-constants";
+import { clearCookie, cookieValues, setCookie } from "../http/cookies";
+import { escapeHtml, layout, messagePage, pageHeaders, sendHtml, sendScript } from "../http/html-pages";
 import type { GoogleIdentity, RecordStore } from "../http/oauth-store";
-import { SASHA_ICON_SVG } from "../http/sasha-icon.generated";
-import { DRIVE_FILE_SCOPE, scopeAccessOf } from "./owner-drive";
+import { scopeAccessOf } from "./owner-drive";
 import { parseDeckId } from "./comment-bot";
 import { PICKER_SCRIPT } from "./picker-script.generated";
 
@@ -47,7 +47,6 @@ export const ALLOW_STATE_COOKIE_NAME = "sasha_comments_state";
 export const ALLOW_STATE_LIFETIME_MS = 10 * 60 * 1000;
 /** Exactly what the page asks Google for: identity, and drive.file. Never the full `drive` scope. */
 export const ALLOW_SCOPES: readonly string[] = ["openid", "email", DRIVE_FILE_SCOPE];
-export const GOOGLE_CONSENT_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 /** Google's loader for the picker (https://developers.google.com/drive/picker). */
 export const GOOGLE_API_LOADER_URL = "https://apis.google.com/js/api.js";
 
@@ -135,7 +134,7 @@ export function createCommentAccessPage(
     }
     const state = randomToken();
     pending.set(state, { fileId, expiresAtMs: nowMs + ALLOW_STATE_LIFETIME_MS });
-    const consent = new URL(GOOGLE_CONSENT_URL);
+    const consent = new URL(GOOGLE_CONSENT_ENDPOINT);
     consent.search = new URLSearchParams({
       client_id: googleClient.clientId,
       redirect_uri: googleCallbackUrl,
@@ -150,7 +149,7 @@ export function createCommentAccessPage(
     response.writeHead(302, {
       location: consent.toString(),
       "cache-control": "no-store",
-      "set-cookie": `${ALLOW_STATE_COOKIE_NAME}=${state}; Path=${callbackPath}; Max-Age=${String(ALLOW_STATE_LIFETIME_MS / 1000)}; HttpOnly; Secure; SameSite=Lax`,
+      "set-cookie": setCookie({ name: ALLOW_STATE_COOKIE_NAME, value: state, path: callbackPath, maxAgeSeconds: ALLOW_STATE_LIFETIME_MS / 1000, sameSite: "Lax" }),
     });
     response.end();
   }
@@ -163,24 +162,24 @@ export function createCommentAccessPage(
     if (started === undefined) return false;
     pending.delete(state);
     const retry = allowUrlFor({ publicUrl: options.publicUrl, fileId: started.fileId });
-    const cookies = [`${ALLOW_STATE_COOKIE_NAME}=; Path=${callbackPath}; Max-Age=0; HttpOnly; Secure; SameSite=Lax`];
+    const cookies = [clearCookie({ name: ALLOW_STATE_COOKIE_NAME, path: callbackPath, sameSite: "Lax" })];
     if (started.expiresAtMs <= now().getTime()) {
-      sendPage({ response, status: 400, cookies, html: messagePage({ title: "Link expired", message: "That took too long.", retry }) });
+      sendPage({ response, status: 400, cookies, html: retryPage({ title: "Link expired", message: "That took too long.", retry }) });
       return true;
     }
     if (!cookieValues({ request: request.request, name: ALLOW_STATE_COOKIE_NAME }).includes(state)) {
-      sendPage({ response, status: 400, cookies, html: messagePage({ title: "Start again", message: "This page was opened in a different browser from the one that started it.", retry }) });
+      sendPage({ response, status: 400, cookies, html: retryPage({ title: "Start again", message: "This page was opened in a different browser from the one that started it.", retry }) });
       return true;
     }
     const code = url.searchParams.get("code");
     if (code === null) {
-      sendPage({ response, status: 200, cookies, html: messagePage({ title: "Nothing changed", message: "Google was not asked to let Sasha in, so nothing changed.", retry }) });
+      sendPage({ response, status: 200, cookies, html: retryPage({ title: "Nothing changed", message: "Google was not asked to let Sasha in, so nothing changed.", retry }) });
       return true;
     }
     const signedIn = await signIn.finish({ code, redirectAddress: googleCallbackUrl });
     if (signedIn.kind === "failed") {
       warn(`comment access: Google sign-in failed: ${signedIn.reason}`);
-      sendPage({ response, status: 502, cookies, html: messagePage({ title: "Google did not answer", message: "Signing in with Google did not finish.", retry }) });
+      sendPage({ response, status: 502, cookies, html: retryPage({ title: "Google did not answer", message: "Signing in with Google did not finish.", retry }) });
       return true;
     }
     const stored = await grants.get({ key: signedIn.subject });
@@ -189,7 +188,7 @@ export function createCommentAccessPage(
         response,
         status: 403,
         cookies,
-        html: messagePage({
+        html: retryPage({
           title: "Sign in to Sasha Slides first",
           message:
             "This Google account has not connected Sasha Slides yet. Connect Sasha Slides to your assistant with this Google " +
@@ -217,7 +216,7 @@ export function createCommentAccessPage(
         response,
         status: 200,
         cookies,
-        html: messagePage({
+        html: retryPage({
           title: "Access was not given",
           message: "Google did not give Sasha access to the files you choose. Open the link again and allow it when Google asks.",
           retry,
@@ -245,7 +244,7 @@ export function createCommentAccessPage(
       const path = url.pathname.replace(/\/+$/, "");
       if (path === callbackPath) return method === "GET" ? finish({ request, response, url }) : false;
       if (path === PICKER_SCRIPT_PATH && method === "GET") {
-        sendScript(response);
+        sendScript({ response, script: PICKER_SCRIPT });
         return true;
       }
       if (path !== COMMENTS_ALLOW_PATH) return false;
@@ -262,43 +261,7 @@ export function createCommentAccessPage(
 /** At most this many sign-ins waiting for Google's answer at once; each lives 10 minutes. */
 const MAX_PENDING = 10_000;
 
-/** The stylesheet of `/account` ("Tidepool"), repeated here because the portal does not export it. */
-const STYLE = `
-:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--panel:#f5f5f7;--link:#0066cc;--danger:#c4161c;--sans:"Helvetica Neue",Helvetica,Arial,system-ui,-apple-system,sans-serif}
-@media (prefers-color-scheme:dark){:root{--bg:#000;--fg:#f5f5f7;--muted:#a1a1a6;--line:#2c2c2e;--panel:#111113;--link:#2997ff;--danger:#ff453a;color-scheme:dark}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased}
-a{color:var(--link);text-decoration:none}
-a:hover{text-decoration:underline}
-:focus-visible{outline:2px solid var(--link);outline-offset:2px;border-radius:4px}
-.bar{border-bottom:1px solid var(--line)}
-.bar-inner,.wrap{max-width:560px;margin:0 auto;padding-inline:16px}
-.bar-inner{display:flex;align-items:center;height:52px}
-.brand{color:var(--fg);font-weight:600;letter-spacing:-.01em;display:inline-flex;align-items:center;gap:10px}
-.brand svg{width:26px;height:26px}
-.wrap{padding-block:48px 80px}
-h1{font-size:clamp(28px,6vw,40px);letter-spacing:-.03em;line-height:1.1;margin:0 0 12px;font-weight:600}
-p{margin:0 0 12px}
-.muted{color:var(--muted)}
-.button,button{display:block;width:100%;margin-top:28px;padding:13px 18px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;font-weight:500;text-align:center;cursor:pointer}
-.button:hover{text-decoration:none;border-color:var(--muted)}
-button:disabled{cursor:default;opacity:.6}
-.status{margin-top:16px}
-.status.done{font-weight:500}
-[hidden]{display:none!important}
-`;
-
-const STYLE_HASH = `'sha256-${createHash("sha256").update(STYLE, "utf-8").digest("base64")}'`;
-
-const PAGE_HEADERS: Readonly<Record<string, string>> = {
-  "content-type": "text/html; charset=utf-8",
-  "cache-control": "no-store",
-  "content-security-policy": `default-src 'none'; style-src ${STYLE_HASH}; form-action 'none'; frame-ancestors 'none'; base-uri 'none'`,
-  "x-content-type-options": "nosniff",
-  "x-frame-options": "DENY",
-  // Keeps the callback's code and state out of any Referer a later navigation sends.
-  "referrer-policy": "no-referrer",
-};
+const PAGE_HEADERS = pageHeaders({ formAction: "'none'" });
 
 /**
  * The picker page's policy. Google's loader pulls further scripts from apis.google.com and the
@@ -324,50 +287,23 @@ function pickerPolicy(options: Readonly<{ scriptUrl: string }>): string {
 function sendPage(
   options: Readonly<{ response: ServerResponse; status: number; html: string; cookies?: readonly string[]; policy?: string; referrerPolicy?: string }>,
 ): void {
-  const cookies = options.cookies ?? [];
-  options.response.writeHead(options.status, {
-    ...PAGE_HEADERS,
-    ...(options.policy === undefined ? {} : { "content-security-policy": options.policy }),
-    ...(options.referrerPolicy === undefined ? {} : { "referrer-policy": options.referrerPolicy }),
-    ...(cookies.length === 0 ? {} : { "set-cookie": [...cookies] }),
+  const { policy, referrerPolicy, ...rest } = options;
+  sendHtml({
+    ...rest,
+    headers: {
+      ...PAGE_HEADERS,
+      ...(policy === undefined ? {} : { "content-security-policy": policy }),
+      ...(referrerPolicy === undefined ? {} : { "referrer-policy": referrerPolicy }),
+    },
   });
-  options.response.end(options.html);
 }
 
-function sendScript(response: ServerResponse): void {
-  response.writeHead(200, {
-    "content-type": "text/javascript; charset=utf-8",
-    "content-length": String(Buffer.byteLength(PICKER_SCRIPT, "utf-8")),
-    // Revalidated on every page load, so a deploy is picked up at once.
-    "cache-control": "no-cache",
-    "x-content-type-options": "nosniff",
+/** A failure page with a way to start over. */
+function retryPage(options: Readonly<{ title: string; message: string; retry: string }>): string {
+  return layout({
+    title: options.title,
+    main: `<h1>${escapeHtml(options.title)}</h1>\n<p>${escapeHtml(options.message)}</p>\n<a class="button retry" href="${escapeHtml(options.retry)}">Try again</a>`,
   });
-  response.end(PICKER_SCRIPT);
-}
-
-function layout(options: Readonly<{ title: string; main: string; head?: string }>): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>${escapeHtml(options.title)} · Sasha Slides</title>
-<style>${STYLE}</style>${options.head ?? ""}
-</head>
-<body>
-<header class="bar"><div class="bar-inner"><a class="brand" href="https://sashaslides.com/">${SASHA_ICON_SVG}Sasha Slides</a></div></header>
-<main class="wrap">
-${options.main}
-</main>
-</body>
-</html>
-`;
-}
-
-function messagePage(options: Readonly<{ title: string; message: string; retry?: string }>): string {
-  const retry = options.retry === undefined ? "" : `\n<a class="button" href="${escapeHtml(options.retry)}">Try again</a>`;
-  return layout({ title: options.title, main: `<h1>${escapeHtml(options.title)}</h1>\n<p>${escapeHtml(options.message)}</p>${retry}` });
 }
 
 function pickerPage(
@@ -376,21 +312,12 @@ function pickerPage(
   const who = options.email === null ? "you" : `you (${options.email})`;
   return layout({
     title: "Let Sasha answer comments",
-    head: `\n<script src="${escapeHtml(options.scriptUrl)}" defer></script>`,
+    scriptUrl: options.scriptUrl,
     main: `<h1>Let Sasha answer the comments on this deck</h1>
 <p>Choose the deck in Google's window. That lets Sasha read and answer the comments on this one deck, as ${escapeHtml(who)}, starting each line with &ldquo;Sasha:&rdquo;. Nothing else in your Drive.</p>
 <div data-picker data-token="${escapeHtml(options.accessToken)}" data-key="${escapeHtml(options.picker.apiKey)}" data-app="${escapeHtml(options.picker.appId)}" data-deck="${escapeHtml(options.fileId)}" data-loader="${escapeHtml(GOOGLE_API_LOADER_URL)}">
 <button type="button" data-open disabled>Choose the deck</button>
-<p class="status muted" data-status role="status">Opening Google&rsquo;s file picker&hellip;</p>
+<p class="picker-status muted" data-status role="status">Opening Google&rsquo;s file picker&hellip;</p>
 </div>`,
-  });
-}
-
-function cookieValues(options: Readonly<{ request: IncomingMessage; name: string }>): readonly string[] {
-  const header = options.request.headers.cookie;
-  if (header === undefined) return [];
-  return header.split(/;\s*/u).flatMap((pair) => {
-    const equals = pair.indexOf("=");
-    return equals > 0 && pair.slice(0, equals) === options.name ? [pair.slice(equals + 1)] : [];
   });
 }

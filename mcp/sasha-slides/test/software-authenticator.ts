@@ -9,8 +9,8 @@
  * flipped signature, a signature counter that goes backwards, missing flags.
  */
 import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from "node:crypto";
-import { assertNever } from "../google-auth";
 import type { PasskeyAlgorithm } from "../http/webauthn";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type RegistrationResponseJson = Readonly<{
   id: string;

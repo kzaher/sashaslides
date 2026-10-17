@@ -16,6 +16,7 @@ import type { DeckRole, LinkSharing } from "../engine/src/contracts/deck-access.
 import type { GoogleSlidesLink } from "../engine/src/contracts/deck-api.ts";
 import { parseDeckId, type DeckId } from "../engine/src/contracts/ids.ts";
 import type { AccountId } from "../http/account-vault";
+import { asNumber, asRecord, asString } from "../http/json-values.ts";
 
 export type DeckRecord = Readonly<{
   version: 1;
@@ -202,19 +203,6 @@ function parseList<TValue>(options: Readonly<{ value: unknown; parse: (value: un
     parsed.push(value);
   }
   return parsed;
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  return Object.fromEntries(Object.entries(value));
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /** `undefined` when malformed, so null stays a legal value. */

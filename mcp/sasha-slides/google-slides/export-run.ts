@@ -20,6 +20,7 @@ import type { AssetId, SlideId } from "../engine/src/contracts/ids.ts";
 import { OBJECT_ID_REUSE_AFTER_DELETE, planExport, type ExportPlan } from "./export-deck.ts";
 import { googleFailureCodeOf, presentationAddressOf, type SlidesClient } from "./slides-client.ts";
 import type { ExportInstruction, ExportRequest } from "./slides-requests.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type ExportTarget =
   | Readonly<{ kind: "newPresentation" }>
@@ -217,8 +218,4 @@ function stringField(value: unknown, key: string): string | null {
 function arrayField(value: unknown, key: string): readonly unknown[] {
   const field = objectField(value, key);
   return Array.isArray(field) ? field : [];
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

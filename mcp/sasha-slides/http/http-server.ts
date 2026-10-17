@@ -23,6 +23,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { escapeHtml, layout, pageHeaders, sendHtml } from "./html-pages";
+import { mediaTypeOf, readBodyText, sendJson as sendJsonAnswer } from "./http-kit";
 import { parseJson } from "./json-values";
 import {
   AUTHORIZATION_SERVER_METADATA_PATH,
@@ -34,12 +36,12 @@ import {
   REGISTER_PATH,
   TOKEN_PATH,
 } from "./oauth-metadata";
-import { assertNever } from "../google-auth";
 import type { AuthorizationServer, OAuthErrorCode } from "./authorization-server";
 import type { AccountPortal } from "./account-portal";
 import type { DeckRouter } from "../decks/deck-router";
 import type { DeckSockets } from "../decks/deck-socket";
 import type { CommentAccessPage } from "../comment-bot/comment-access-page";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 type RequestListener = (request: IncomingMessage, response: ServerResponse) => void;
 
@@ -254,11 +256,11 @@ async function handleRegister(
     return;
   }
   const body = await readBody({ request });
-  if (body.kind === "too-large") {
-    sendOAuthError({ response, error: "invalid_request", description: body.reason });
+  if (body === null) {
+    sendOAuthError({ response, error: "invalid_request", description: BODY_TOO_LARGE });
     return;
   }
-  const parsed = parseJson(body.text);
+  const parsed = parseJson(body);
   if (parsed.kind === "error") {
     sendOAuthError({ response, error: "invalid_request", description: `body is not JSON: ${parsed.reason}` });
     return;
@@ -329,23 +331,14 @@ async function handleGoogleCallback(
 
 /** Shown when Google signed the person in without the Slides/Drive permissions. */
 function sendConsentIncompletePage(options: Readonly<{ response: ServerResponse; retryUrl: string }>): void {
-  const href = options.retryUrl.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>One more step · Sasha Slides</title>
-<style>body{font:17px/1.55 "Helvetica Neue",Helvetica,Arial,sans-serif;max-width:560px;margin:64px auto;padding:0 20px;color:#1d1d1f}
-h1{font-size:28px;letter-spacing:-.02em;margin:0 0 12px}a.button{display:inline-block;margin-top:20px;padding:12px 22px;border-radius:12px;background:#1d1d1f;color:#fff;text-decoration:none}
-@media (prefers-color-scheme:dark){body{background:#000;color:#f5f5f7}a.button{background:#f5f5f7;color:#000}}</style></head><body>
-<h1>Sasha Slides needs both permissions</h1>
+  const html = layout({
+    title: "One more step",
+    main: `<h1>Sasha Slides needs both permissions</h1>
 <p>Google signed you in, but without access to your Google Slides presentations and to the files Sasha Slides creates in your Drive. Without them the connector cannot stage or insert slides.</p>
 <p>On Google's screen, tick <strong>Select all</strong> (or both boxes), then click Continue.</p>
-<a class="button" href="${href}">Try again</a>
-</body></html>`;
-  options.response.writeHead(200, {
-    "content-type": "text/html; charset=utf-8",
-    "cache-control": "no-store",
-    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+<a class="button" href="${escapeHtml(options.retryUrl)}">Try again</a>`,
   });
-  options.response.end(html);
+  sendHtml({ response: options.response, status: 200, html, headers: pageHeaders({ formAction: "'none'" }) });
 }
 
 async function handleToken(
@@ -365,11 +358,11 @@ async function handleToken(
     return;
   }
   const body = await readBody({ request });
-  if (body.kind === "too-large") {
-    sendOAuthError({ response, error: "invalid_request", description: body.reason });
+  if (body === null) {
+    sendOAuthError({ response, error: "invalid_request", description: BODY_TOO_LARGE });
     return;
   }
-  const outcome = await authorizationServer.token({ parameters: new URLSearchParams(body.text) });
+  const outcome = await authorizationServer.token({ parameters: new URLSearchParams(body) });
   switch (outcome.kind) {
     case "issued":
       // RFC 6749 section 5.1: a token response must not be cached.
@@ -444,38 +437,12 @@ async function handleMcp(
   await transport.handleRequest(request, response);
 }
 
-type ReadBody =
-  | Readonly<{ kind: "ok"; text: string }>
-  | Readonly<{ kind: "too-large"; reason: string }>;
-
-function readBody(options: Readonly<{ request: IncomingMessage }>): Promise<ReadBody> {
-  return new Promise<ReadBody>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let bytes = 0;
-    options.request.on("data", (chunk: Buffer) => {
-      bytes += chunk.length;
-      if (bytes > MAX_REQUEST_BODY_BYTES) {
-        options.request.destroy();
-        resolve({
-          kind: "too-large",
-          reason: `body exceeds ${String(MAX_REQUEST_BODY_BYTES)} bytes`,
-        });
-        return;
-      }
-      chunks.push(chunk);
-    });
-    options.request.on("end", () => resolve({ kind: "ok", text: Buffer.concat(chunks).toString("utf-8") }));
-    options.request.on("error", reject);
-  });
+/** The body as text under `MAX_REQUEST_BODY_BYTES`, or null (the connection is dropped). */
+function readBody(options: Readonly<{ request: IncomingMessage }>): Promise<string | null> {
+  return readBodyText({ request: options.request, maximumBytes: MAX_REQUEST_BODY_BYTES, onOverflow: "destroy" });
 }
 
-/** The media type without its parameters, lowercased: `application/json; charset=utf-8`. */
-function mediaTypeOf(request: IncomingMessage): string | null {
-  const header = request.headers["content-type"];
-  if (typeof header !== "string") return null;
-  const type = header.split(";")[0];
-  return type === undefined ? null : type.trim().toLowerCase();
-}
+const BODY_TOO_LARGE = `body exceeds ${String(MAX_REQUEST_BODY_BYTES)} bytes`;
 
 function bearerTokenOf(request: IncomingMessage): string | null {
   const header = request.headers.authorization;
@@ -492,6 +459,7 @@ function isMetadataPath(options: Readonly<{ path: string; base: string }>): bool
   return options.path === options.base || options.path === `${options.base}${MCP_PATH}`;
 }
 
+/** Every JSON answer here is readable cross-origin: browser-based MCP clients call these routes. */
 function sendJson(
   options: Readonly<{
     response: ServerResponse;
@@ -500,14 +468,7 @@ function sendJson(
     headers?: Readonly<Record<string, string>>;
   }>,
 ): void {
-  const payload = JSON.stringify(options.body, null, 2);
-  options.response.writeHead(options.status, {
-    ...corsHeaders({ methods: "GET, POST, DELETE, OPTIONS" }),
-    ...(options.headers ?? {}),
-    "content-type": "application/json",
-    "content-length": String(Buffer.byteLength(payload, "utf-8")),
-  });
-  options.response.end(payload);
+  sendJsonAnswer({ ...options, headers: { ...corsHeaders({ methods: "GET, POST, DELETE, OPTIONS" }), ...(options.headers ?? {}) } });
 }
 
 function sendOAuthError(

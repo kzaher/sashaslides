@@ -20,6 +20,7 @@ import type {
   TextStyle,
 } from "./slides-api.js";
 import type { FractionalRegion, UnsupportedFeature } from "./unsupported-feature.js";
+import { assertNever } from "../engine/src/contracts/assert-never.js";
 
 export type ElementEmission = Readonly<{
   requests: readonly SlidesApiRequest[];
@@ -222,8 +223,4 @@ function baselineOffsetFor(
 
 function sanitiseIdPart(text: string): string {
   return text.replace(/[^a-zA-Z0-9_-]/g, "");
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled baseline: ${String(value)}`);
 }

@@ -17,8 +17,9 @@
  * decoded bodies of a `multipart/alternative`, together with the account its token acts for.
  */
 import { verify, type KeyObject } from "node:crypto";
-import type { HttpFetchInit, HttpFetchResponse } from "../http/identity-providers";
-import { GMAIL_SEND_SCOPE, GMAIL_SEND_URL, GOOGLE_TOKEN_URL, JWT_BEARER_GRANT_TYPE } from "../http/gmail-sender";
+import type { HttpFetchInit, HttpFetchResponse } from "../http/http-kit";
+import { GOOGLE_TOKEN_ENDPOINT } from "../google-constants";
+import { GMAIL_SEND_SCOPE, GMAIL_SEND_URL, JWT_BEARER_GRANT_TYPE } from "../http/gmail-sender";
 import { asNumber, asRecord, asString, parseJson } from "../http/json-values";
 import { jsonResponse, type FakeRoute } from "./fake-identity-providers";
 
@@ -92,7 +93,7 @@ export function createFakeGmail(
 
   const route: FakeRoute = (url, init) => {
     const target = `${url.origin}${url.pathname}`;
-    if (target === GOOGLE_TOKEN_URL) {
+    if (target === GOOGLE_TOKEN_ENDPOINT) {
       tokenRequests.push({ init });
       return token(init);
     }
@@ -219,7 +220,7 @@ function checkAssertion(options: Readonly<{ assertion: string; account: FakeServ
   if (header.kid !== account.privateKeyId) return refuse("kid is not the key's private_key_id");
   if (claims.iss !== account.clientEmail) return refuse("iss is not the service account's client_email");
   if (claims.scope !== GMAIL_SEND_SCOPE) return refuse("scope is not gmail.send alone");
-  if (claims.aud !== GOOGLE_TOKEN_URL) return refuse("aud is not the token URL");
+  if (claims.aud !== GOOGLE_TOKEN_ENDPOINT) return refuse("aud is not the token URL");
   const issuedAt = asNumber(claims.iat);
   const expiresAt = asNumber(claims.exp);
   const nowSeconds = Math.floor(account.nowMs() / 1000);

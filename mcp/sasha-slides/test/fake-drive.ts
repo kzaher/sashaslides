@@ -15,7 +15,7 @@ import {
   type DriveQuery,
   FOLDER_MIME_TYPE,
 } from "../drive-channel";
-import { assertNever } from "../google-auth";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type FakeDrive = Readonly<{
   channel: DriveChannel;

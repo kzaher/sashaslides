@@ -19,6 +19,8 @@
  * know) is dropped here or kept as an `unknown` element that becomes a loss.
  */
 
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
+
 export const ENGLISH_METRIC_UNITS_PER_POINT = 12_700;
 
 export type SlidesPresentation = Readonly<{
@@ -695,8 +697,4 @@ function stringOr(raw: unknown, fallback: string): string {
 
 function numberOr(raw: unknown, fallback: number): number {
   return typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

@@ -28,6 +28,7 @@ import {
   toCallToolResult,
 } from "../server";
 import { createFakeDrive, type FakeDrive } from "./fake-drive";
+import { asRecord } from "../http/json-values";
 
 describe("createProposal", () => {
   test("writes READY last: after every slide HTML and the manifest", async () => {
@@ -943,12 +944,6 @@ function insertSlide(
     }),
     appProperties: {},
   });
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
 }
 
 function pathFor(index: number): Readonly<{ path: string; label: string | null }> {

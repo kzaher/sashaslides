@@ -13,12 +13,10 @@
  * subject. `include_granted_scopes` keeps whatever the person granted the connector before.
  */
 import type { GoogleClientCredentials } from "../google-auth";
+import { DRIVE_FILE_SCOPE, GOOGLE_CONSENT_ENDPOINT, GOOGLE_TOKEN_ENDPOINT, SLIDES_SCOPE } from "../google-constants.ts";
 import type { GoogleIdentity } from "../http/oauth-store";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
-export const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
-export const GOOGLE_CONSENT_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
-export const SLIDES_SCOPE = "https://www.googleapis.com/auth/presentations";
-export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 export const GOOGLE_SLIDES_CONNECT_SCOPES: readonly string[] = ["openid", "email", SLIDES_SCOPE, DRIVE_FILE_SCOPE];
 
 export function googleConsentAddress(
@@ -155,8 +153,4 @@ async function postTokenForm(
     grantedScopes: scope.split(" ").filter((part) => part.length > 0),
     identityToken,
   };
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

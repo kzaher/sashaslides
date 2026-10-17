@@ -19,6 +19,7 @@ import type { DocumentStore, RepairPolicy } from "../engine/src/contracts/docume
 import type { AssetId, DeckId, PersonId } from "../engine/src/contracts/ids.ts";
 import type { DeckCaller, DeckHandle, DeckOpenOutcome, DeckService } from "../deck-contracts/deck-service-contract.ts";
 import type { AccountId } from "../http/account-vault";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type TestDeck = {
   deckId: DeckId;
@@ -168,8 +169,4 @@ async function loadCreateTestStore(): Promise<CreateTestStore> {
   }
   // model-fixtures.ts exports `createTestStore` with exactly this shape (seed, repair policy, random seed -> { store }).
   return loaded.createTestStore as CreateTestStore;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

@@ -49,23 +49,13 @@
  * All network traffic goes through an injected `HttpFetch`, so the tests drive real token
  * signing and verification against fakes.
  */
-import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, verify, type KeyObject } from "node:crypto";
-import { assertNever, type GoogleClientCredentials } from "../google-auth";
+import { createHash, createPrivateKey, createPublicKey, sign, verify, type KeyObject } from "node:crypto";
+import type { GoogleClientCredentials } from "../google-auth";
 import { PASSKEY_PROVIDER } from "./account-directory";
 import type { OAuthParameters } from "./authorization-server";
-import { asRecord, asString, asStringArray, parseJson } from "./json-values";
-
-/** The narrow slice of `fetch` this module uses. The global `fetch` satisfies it. */
-export type HttpFetch = (url: string, init: HttpFetchInit) => Promise<HttpFetchResponse>;
-
-export type HttpFetchInit = Readonly<{
-  method: "GET" | "POST" | "PATCH";
-  headers: Readonly<Record<string, string>>;
-  body?: string;
-  signal: AbortSignal;
-}>;
-
-export type HttpFetchResponse = Readonly<{ status: number; json(): Promise<unknown> }>;
+import { jsonSegment, type HttpFetch } from "./http-kit";
+import { asRecord, asString, asStringArray, nodeErrorCode, parseJson, type FieldParse } from "./json-values";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /** A configured provider: the parsed config entry, credentials included. Never logged. */
 export type IdentityProviderSpec =
@@ -257,11 +247,6 @@ export function createIdentityProvider(
     default:
       return assertNever(spec);
   }
-}
-
-/** 32 random bytes, base64url: the default `randomToken`. */
-export function randomSignInToken(): string {
-  return randomBytes(32).toString("base64url");
 }
 
 /** Sign in with Apple's client secret: an ES256 JWT over the Services ID, signed with the .p8 key. */
@@ -496,7 +481,7 @@ function loadAppleKey(
     text = options.readKeyFile(options.keyPath);
   } catch (cause) {
     // Only the error code: the message would repeat the file path, and a parser error the content.
-    return { kind: "error", message: `${options.path}: cannot read the key file (${errorCode(cause)})` };
+    return { kind: "error", message: `${options.path}: cannot read the key file (${nodeErrorCode(cause)})` };
   }
   let key: KeyObject;
   try {
@@ -509,13 +494,6 @@ function loadAppleKey(
   }
   return { kind: "ok", value: key };
 }
-
-function errorCode(cause: unknown): string {
-  const code = cause instanceof Error && "code" in cause ? cause.code : undefined;
-  return typeof code === "string" ? code : "unreadable";
-}
-
-type FieldParse<TValue> = Readonly<{ kind: "ok"; value: TValue }> | Readonly<{ kind: "error"; message: string }>;
 
 function optionalNonEmptyString(options: Readonly<{ value: unknown; path: string }>): FieldParse<string | null> {
   if (options.value === undefined) return { kind: "ok", value: null };
@@ -828,10 +806,6 @@ function decodeJsonSegment(segment: string): Readonly<Record<string, unknown>> |
   if (!/^[A-Za-z0-9_-]*$/.test(segment)) return null;
   const parsed = parseJson(Buffer.from(segment, "base64url").toString("utf-8"));
   return parsed.kind === "ok" ? asRecord(parsed.value) : null;
-}
-
-function jsonSegment(value: Readonly<Record<string, unknown>>): string {
-  return Buffer.from(JSON.stringify(value), "utf-8").toString("base64url");
 }
 
 // ---------------------------------------------------------------- GitHub

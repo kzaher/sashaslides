@@ -14,11 +14,9 @@ import type { DeckCaller } from "../../deck-contracts/deck-service-contract.ts";
 import type { DiscussionSnapshot } from "../../engine/src/contracts/discussion.ts";
 import type { DocumentSnapshot, ElementSnapshot, ShapeElement, SlideSnapshot, TextBody } from "../../engine/src/contracts/document.ts";
 import { parseDeckId, parseElementId, parseSlideId, type DeckId, type ElementId, type MessageId, type SlideId, type ThreadId } from "../../engine/src/contracts/ids.ts";
-import { TRANSITION_LIMITS } from "../../engine/src/contracts/transition-protocol.ts";
 import { PARAGRAPH_ATTRIBUTE_NAMES } from "../../engine/src/contracts/yjs-schema.ts";
 import { connectAssistant, TEST_PUBLIC_URL, type AssistantConnection } from "../assistant-harness.ts";
 import type { CreatedIds } from "../edit-expansion.ts";
-import { SCRIPT_LIMITS } from "../transition-limits.ts";
 import { createFakeDeckService, fakeCaller, type FakeDeckService } from "./fake-deck-service.ts";
 
 const OWNER = fakeCaller({ accountId: "account-owner", displayName: "Ada", colourIndex: 1 });
@@ -346,15 +344,6 @@ describe("addImage (acceptance 7)", () => {
 });
 
 describe("deck_write_transition (acceptance 8)", () => {
-  test("the TRANSITION_LIMITS restated for the connector are the engine's", () => {
-    assert.deepEqual(SCRIPT_LIMITS, {
-      maximumScriptBytes: TRANSITION_LIMITS.maximumScriptBytes,
-      maximumStylesheetBytes: TRANSITION_LIMITS.maximumStylesheetBytes,
-      maximumOverlayMarkupBytes: TRANSITION_LIMITS.maximumOverlayMarkupBytes,
-      maximumDurationMilliseconds: TRANSITION_LIMITS.maximumDurationMilliseconds,
-    });
-  });
-
   for (const row of [
     { name: "a script at the limit, by the deck owner's account", bytes: 256 * 1024, accepted: true },
     { name: "a script one byte over the limit", bytes: 256 * 1024 + 1, accepted: false },

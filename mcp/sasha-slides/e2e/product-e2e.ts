@@ -40,13 +40,15 @@ import type { OAuth2Client } from "google-auth-library";
 import { describeAuthFailure, loadOAuthClient } from "../google-auth.ts";
 import { closePages, withExistingPage, withNewPage, type PageSession } from "./product-browser.ts";
 import { capturePageThumbnail, describeElement, pageById, readDeck, type DeckElement } from "./product-deck.ts";
-import { INBOX_FOLDER_NAME, PICK_NAME, READY_NAME, assertNever, slideFileName } from "./protocol-records.ts";
+import { INBOX_FOLDER_NAME, PICK_NAME, READY_NAME, slideFileName } from "./protocol-records.ts";
 import { googleStagingDrive } from "./google-staging-drive.ts";
 import { referenceProposalSide } from "./reference-proposal-side.ts";
 import { openMcpProposalSide } from "./mcp-proposal-side.ts";
 import { childByName, describeChildren } from "./staged-file.ts";
 import type { StagingDrive } from "./staging-drive.ts";
 import type { ProposalSide } from "./proposal-side.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
+import { asRecord } from "../http/json-values.ts";
 
 const HERE = __dirname;
 const REPO_ROOT = resolve(HERE, "..", "..", "..");
@@ -323,33 +325,32 @@ async function stepPicker({ context, options }: { context: Context; options: Opt
     const notes: string[] = [];
     await page.activate();
 
-    const chips = await page.count("document.querySelectorAll('.sasha-chip').length");
+    // The candidates are the grid's cells (addon/src/candidate-grid.tsx), each numbered on its picture.
+    const cells = await page.count("document.querySelectorAll('.sasha-cell').length");
     const numbers = await page.text(
-      "JSON.stringify([...document.querySelectorAll('.sasha-chip-number')].map(e => e.textContent))",
+      "JSON.stringify([...document.querySelectorAll('.sasha-cell .sasha-cell-number')].map(e => e.textContent))",
     );
-    checks.push({ ok: chips === FIXTURES.length, what: `the picker renders ${FIXTURES.length} candidates`, detail: `saw ${chips}` });
+    checks.push({ ok: cells === FIXTURES.length, what: `the picker renders ${FIXTURES.length} candidates`, detail: `saw ${cells}` });
     checks.push({
       ok: numbers === JSON.stringify(FIXTURES.map((_fixture, position) => String(position + 1))),
       what: "they are numbered 1..4",
       detail: numbers,
     });
-    const labels = await page.text("JSON.stringify([...document.querySelectorAll('.sasha-chip-label')].map(e => e.textContent))");
-    notes.push(`chip labels: ${labels}`);
 
     // The HTML pane is the authoritative document: compare its srcdoc with the fixture bytes.
     const authoritative = await htmlPaneCheck({ page, index: 1 });
     checks.push(authoritative);
 
     // Selecting option 2 must move the authoritative pane to option 2's bytes.
-    const selected = await page.click({ selector: ".sasha-chip:nth-of-type(2)" });
-    notes.push(`clicked chip 2 at ${selected.kind === "clicked" ? `${selected.x.toFixed(0)},${selected.y.toFixed(0)}` : "<absent>"}`);
+    const selected = await page.click({ selector: ".sasha-cell:nth-of-type(2) .sasha-cell-open" });
+    notes.push(`clicked candidate 2 at ${selected.kind === "clicked" ? `${selected.x.toFixed(0)},${selected.y.toFixed(0)}` : "<absent>"}`);
     const movedOn = await page.waitFor({
       expression: "(document.querySelector('.sasha-primary')||{}).textContent === 'Insert option 2'",
       budgetMs: 5_000,
     });
     checks.push({
       ok: movedOn !== null,
-      what: "clicking chip 2 selects option 2",
+      what: "clicking candidate 2 selects option 2",
       detail: movedOn === null ? await page.text("(document.querySelector('.sasha-primary')||{}).textContent||''") : `${movedOn} ms`,
     });
     const loadedTwo = await page.waitFor({ expression: "!!document.querySelector('iframe.sasha-frame')", budgetMs: 10_000 });
@@ -988,12 +989,6 @@ function usage(): string {
     "steps:",
     stepLines,
   ].join("\n");
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
 }
 
 function stringAt({ record, key }: { record: Readonly<Record<string, unknown>>; key: string }): string | null {

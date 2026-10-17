@@ -27,6 +27,7 @@ import type { BaselineOffset, Colour, ListGlyph, ListMarkerColour, ListMembershi
 import { colourOf, type ColourContext } from "./import-colours.ts";
 import type { InterchangeLossSink } from "./interchange-losses.ts";
 import type { SlidesLink, SlidesParagraph, SlidesParagraphStyle, SlidesShape, SlidesText, SlidesTextStyle } from "./slides-presentation.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type TextContext = Readonly<{
   colours: ColourContext;
@@ -336,8 +337,4 @@ function sameStyle(first: RunStylePatch, second: RunStylePatch): boolean {
 /** Sizes to a thousandth of a unit, so 18 points is 32 units, not 31.999999999999996. */
 export function roundUnits(value: number): number {
   return Math.round(value * 1000) / 1000;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

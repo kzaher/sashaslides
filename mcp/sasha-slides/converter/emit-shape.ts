@@ -34,6 +34,7 @@ import type { ElementEmission, EmitContext } from "./emit-context.js";
 import { EMPTY_EMISSION, featureSite } from "./emit-context.js";
 import { STAGED_IMAGE_FIELD, slideImageSourceFor } from "./slide-image.js";
 import type { UnsupportedFeature } from "./unsupported-feature.js";
+import { assertNever } from "../engine/src/contracts/assert-never.js";
 
 export function emitRect(
   options: Readonly<{ element: RectElement; context: EmitContext; viewportPx: SizePx }>,
@@ -173,7 +174,7 @@ export function emitImage(
         unsupported: cornerRadiusReport({ element, site }),
       };
     default:
-      return assertNeverImageSource(source);
+      return assertNever(source);
   }
 }
 
@@ -648,10 +649,6 @@ function cornerRadiusReport(
       radiusPx: element.cornerRadiusPx,
     },
   ];
-}
-
-function assertNeverImageSource(source: never): never {
-  throw new Error(`Unhandled image source: ${JSON.stringify(source)}`);
 }
 
 /** Re-exported so the orchestrator can skip elements with nothing to emit. */

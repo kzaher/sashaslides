@@ -24,6 +24,7 @@ import { childNamed, childrenNamed, descendantNamed, openPptxArchive, parseXml, 
 import type { CustomOutline } from "../engine/src/contracts/document.ts";
 import { customOutlineOf, type ShapeAdjustments } from "./import-shape-geometry.ts";
 import type { SlidesColour, SlidesPageElement, SlidesPresentation, SlidesSolidFill } from "./slides-presentation.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /** A stop at `offset` (0..1 along the gradient) in a Slides colour, so theme references survive. */
 export type PptxGradientStop = Readonly<{ offset: number; fill: SlidesSolidFill }>;
@@ -351,8 +352,4 @@ function integerOr(value: string | undefined, fallback: number): number {
 /** Clamped to 0..1 and rounded to a millionth, so `0.2` stays `0.2` after the percentage arithmetic. */
 function clampUnit(value: number): number {
   return Math.round(Math.min(1, Math.max(0, value)) * 1_000_000) / 1_000_000;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

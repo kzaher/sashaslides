@@ -57,13 +57,15 @@
  * to learn which addresses have accounts.
  */
 import { createHash } from "node:crypto";
-import { assertNever } from "../google-auth";
 import { emailHint, type AccountDirectory, type IdentityLinkOutcome } from "./account-directory";
 import type { AccountId } from "./account-vault";
 import { isMailboxAddress, type MailSender, type OutgoingMail } from "./gmail-sender";
+import { createExpiringTable } from "./expiring-table";
+import { escapeHtml } from "./html-pages";
 import type { PasswordCredential, RecordStore } from "./oauth-store";
 import { hashPassword, isWeakerThan, verifyPassword, type ScryptCost } from "./password-hashing";
 import type { Throttle, ThrottleDecision, ThrottleRule } from "./request-throttle";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export const EMAIL_PROVIDER = "email";
 export const EMAIL_PROVIDER_DISPLAY_NAME = "Email and password";
@@ -176,9 +178,10 @@ export function createPasswordSignIn(
 ): PasswordSignIn {
   const { credentials, directory, mailSender, throttle, limits, now, randomToken, scryptCost, runInBackground, warn } = options;
   const baseUrl = options.publicUrl.replace(/\/+$/, "");
-  const unconfirmed = new Map<string, UnconfirmedSignUp>();
+  const clock = (): number => now().getTime();
+  const unconfirmed = createExpiringTable<UnconfirmedSignUp>({ now: clock, capacity: MAX_UNCONFIRMED });
   /** Addresses being added to a signed-in account, keyed by subject; a newer request replaces an older one. */
-  const pendingLinks = new Map<string, PendingEmailLink>();
+  const pendingLinks = createExpiringTable<PendingEmailLink>({ now: clock, capacity: MAX_UNCONFIRMED });
   const links: Readonly<Record<LinkPurpose, SingleUseLinks>> = {
     confirm: singleUseLinks({ now, randomToken, lifetimeMs: EMAIL_LINK_LIFETIME_MS }),
     reset: singleUseLinks({ now, randomToken, lifetimeMs: EMAIL_LINK_LIFETIME_MS }),
@@ -218,14 +221,6 @@ export function createPasswordSignIn(
     );
   }
 
-  function liveUnconfirmed(subject: string): UnconfirmedSignUp | null {
-    const nowMs = now().getTime();
-    for (const [key, entry] of unconfirmed) {
-      if (entry.expiresAtMs <= nowMs) unconfirmed.delete(key);
-    }
-    return unconfirmed.get(subject) ?? null;
-  }
-
   function sendConfirmation(signUp: UnconfirmedSignUp): void {
     const token = links.confirm.issue(signUp.subject);
     deliver({ mail: confirmationMail({ to: signUp.email, link: `${baseUrl}/account/email/verify?token=${token}` }), what: "confirmation" });
@@ -250,13 +245,8 @@ export function createPasswordSignIn(
         deliver({ mail: alreadyRegisteredMail({ to: normalised, baseUrl }), what: "already-registered notice" });
         return { kind: "accepted" };
       }
-      liveUnconfirmed(subject);
-      if (unconfirmed.size >= MAX_UNCONFIRMED) {
-        const oldest = unconfirmed.keys().next();
-        if (oldest.done !== true) unconfirmed.delete(oldest.value);
-      }
-      const signUp: UnconfirmedSignUp = { subject, email: normalised, passwordHash, expiresAtMs: now().getTime() + UNCONFIRMED_SIGNUP_LIFETIME_MS };
-      unconfirmed.set(subject, signUp);
+      const signUp: UnconfirmedSignUp = { subject, email: normalised, passwordHash };
+      unconfirmed.put({ key: subject, value: signUp, lifetimeMilliseconds: UNCONFIRMED_SIGNUP_LIFETIME_MS });
       sendConfirmation(signUp);
       return { kind: "accepted" };
     },
@@ -282,7 +272,7 @@ export function createPasswordSignIn(
         }
         return { kind: "signed-in", accountId: await signInAs({ subject, email: normalised }) };
       }
-      const pending = liveUnconfirmed(subject);
+      const pending = unconfirmed.get(subject);
       if (pending !== null) {
         if ((await verifyPassword({ password, encoded: pending.passwordHash })).kind !== "match") return { kind: "rejected" };
         // A resend is still mail: it is sent only when the mail limits allow.
@@ -306,7 +296,7 @@ export function createPasswordSignIn(
         return { kind: "accepted" };
       }
       // Someone who signed up but lost the confirmation mail: "forgot password" resends it.
-      const pending = liveUnconfirmed(subject);
+      const pending = unconfirmed.get(subject);
       if (pending !== null) sendConfirmation(pending);
       return { kind: "accepted" };
     },
@@ -315,7 +305,7 @@ export function createPasswordSignIn(
 
     confirmAddress: async ({ token }) => {
       const subject = links.confirm.take(token);
-      const pending = subject === null ? null : liveUnconfirmed(subject);
+      const pending = subject === null ? null : unconfirmed.get(subject);
       if (subject === null || pending === null) return { kind: "invalid-link" };
       unconfirmed.delete(subject);
       const key = emailLinkKey(subject);
@@ -354,15 +344,7 @@ export function createPasswordSignIn(
         deliver({ mail: alreadyInUseMail({ to: normalised, baseUrl }), what: "address-in-use notice" });
         return { kind: "accepted" };
       }
-      const nowMs = now().getTime();
-      for (const [key, entry] of pendingLinks) {
-        if (entry.expiresAtMs <= nowMs) pendingLinks.delete(key);
-      }
-      if (pendingLinks.size >= MAX_UNCONFIRMED) {
-        const oldest = pendingLinks.keys().next();
-        if (oldest.done !== true) pendingLinks.delete(oldest.value);
-      }
-      pendingLinks.set(subject, { accountId, email: normalised, passwordHash, expiresAtMs: nowMs + EMAIL_LINK_LIFETIME_MS });
+      pendingLinks.put({ key: subject, value: { accountId, email: normalised, passwordHash }, lifetimeMilliseconds: EMAIL_LINK_LIFETIME_MS });
       const token = links.link.issue(subject);
       deliver({ mail: addAddressMail({ to: normalised, link: `${baseUrl}/account/email/link?token=${token}` }), what: "add-address" });
       return { kind: "accepted" };
@@ -370,8 +352,8 @@ export function createPasswordSignIn(
 
     confirmLink: async ({ token, accountId }) => {
       const subject = links.link.subjectOf(token);
-      const pending = subject === null ? undefined : pendingLinks.get(subject);
-      if (subject === null || pending === undefined || pending.expiresAtMs <= now().getTime()) return { kind: "invalid-link" };
+      const pending = subject === null ? null : pendingLinks.get(subject);
+      if (subject === null || pending === null) return { kind: "invalid-link" };
       // Checked before the link is used, so opening it in the wrong browser does not cost it.
       if (pending.accountId !== accountId) return { kind: "wrong-account" };
       links.link.take(token);
@@ -398,9 +380,9 @@ function checkPassword(password: string): InputProblem | null {
 
 // ---------------------------------------------------------------- unconfirmed sign-ups and links
 
-type UnconfirmedSignUp = Readonly<{ subject: string; email: string; passwordHash: string; expiresAtMs: number }>;
+type UnconfirmedSignUp = Readonly<{ subject: string; email: string; passwordHash: string }>;
 
-type PendingEmailLink = Readonly<{ accountId: AccountId; email: string; passwordHash: string; expiresAtMs: number }>;
+type PendingEmailLink = Readonly<{ accountId: AccountId; email: string; passwordHash: string }>;
 
 /** Bounds memory against a flood of sign-ups that never confirm; the oldest go first. */
 const MAX_UNCONFIRMED = 10_000;
@@ -541,14 +523,10 @@ function mail(
   const { paragraphs, link, after } = options;
   const text = [...paragraphs, link, ...after, SIGNATURE].join("\n\n") + "\n";
   const html = [
-    ...paragraphs.map((paragraph) => `<p>${escapeMailHtml(paragraph)}</p>`),
-    `<p><a href="${escapeMailHtml(link)}">${escapeMailHtml(link)}</a></p>`,
-    ...after.map((paragraph) => `<p>${escapeMailHtml(paragraph)}</p>`),
-    `<p style="color:#6e6e73">${escapeMailHtml(SIGNATURE)}</p>`,
+    ...paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`),
+    `<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`,
+    ...after.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`),
+    `<p style="color:#6e6e73">${escapeHtml(SIGNATURE)}</p>`,
   ].join("\n");
   return { to: options.to, subject: options.subject, text, html: `<!doctype html><html><body style="font-family:Helvetica,Arial,sans-serif">${html}</body></html>` };
-}
-
-function escapeMailHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }

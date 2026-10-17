@@ -36,7 +36,6 @@ import {
   READY_NAME,
   RENDER_FOLDER_NAME,
   SASHA_PROPERTY,
-  assertNever,
   parseManifest,
   parseReadyMarker,
   slideFileName,
@@ -51,6 +50,7 @@ import { FAULT_NAMES } from "./proposal-side.ts";
 import { referenceProposalSide } from "./reference-proposal-side.ts";
 import { openMcpProposalSide } from "./mcp-proposal-side.ts";
 import { writePick } from "./extension-simulator.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 const HERE = __dirname;
 const REPO_ROOT = resolve(HERE, "..", "..", "..");

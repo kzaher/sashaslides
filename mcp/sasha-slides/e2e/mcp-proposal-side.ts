@@ -22,6 +22,7 @@ import type {
 } from "./proposal-side.ts";
 import type { PickReply } from "./protocol-records.ts";
 import { parsePickReply } from "./protocol-records.ts";
+import { asRecord } from "../http/json-values.ts";
 
 export const TOOL_NAMES = ["propose_slides", "await_pick", "slide_images", "proposal_state"] as const;
 
@@ -241,12 +242,6 @@ function tryParseJson(text: string): unknown {
   } catch {
     return null;
   }
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
 }
 
 /**

@@ -33,9 +33,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { CLIENT_PATH, describeAuthFailure, loadClientCredentials } from "../google-auth";
-import { GMAIL_SEND_SCOPE, GOOGLE_TOKEN_URL, parseMailSenderConfig } from "../http/gmail-sender";
+import { GOOGLE_CONSENT_ENDPOINT, GOOGLE_TOKEN_ENDPOINT } from "../google-constants";
+import { GMAIL_SEND_SCOPE, parseMailSenderConfig } from "../http/gmail-sender";
 
-const AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 /** The consent screen is a person's pace, not a machine's: ten minutes, then give up. */
 const CONSENT_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -89,7 +89,7 @@ async function main(): Promise<number> {
   const state = randomBytes(32).toString("base64url");
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
-  const authorizeUrl = `${AUTHORIZE_URL}?${new URLSearchParams({
+  const authorizeUrl = `${GOOGLE_CONSENT_ENDPOINT}?${new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
@@ -108,7 +108,7 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  const exchanged = await fetch(GOOGLE_TOKEN_URL, {
+  const exchanged = await fetch(GOOGLE_TOKEN_ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({

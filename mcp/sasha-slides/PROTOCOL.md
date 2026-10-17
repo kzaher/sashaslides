@@ -1,4 +1,4 @@
-# sasha-slides: MCP ↔ Drive ↔ extension contract
+# sasha-slides: MCP ↔ Drive ↔ add-on contract
 
 The single source of truth for the staging protocol. Three components are built against
 it in parallel, so **change this file first, never a component's local assumption**.

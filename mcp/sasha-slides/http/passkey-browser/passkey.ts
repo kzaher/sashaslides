@@ -18,7 +18,7 @@
  *
  * Not React (the TypeScript skill's default for UI): there is no state to render, only two
  * attributes to flip on server-rendered markup and one status line, which is the
- * server-generated-static-HTML exception that rule names. Bundled by `build.ts` into
+ * server-generated-static-HTML exception that rule names. Bundled by `browser-scripts/build.ts` into
  * `../passkey-script.generated.ts`, which the portal serves at `/account/passkey.js`.
  */
 

@@ -12,6 +12,8 @@
  * has a human-readable sentence for the UI.
  */
 
+import { assertNever } from "../engine/src/contracts/assert-never.js";
+
 /** 0–1 relative to the slide box, so it survives any scaling. */
 export type FractionalRegion = Readonly<{
   x: number;
@@ -225,8 +227,4 @@ export function describeUnsupportedFeature(feature: UnsupportedFeature): string 
     default:
       return assertNever(feature);
   }
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled unsupported-feature kind: ${JSON.stringify(value)}`);
 }

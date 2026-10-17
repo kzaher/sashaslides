@@ -19,6 +19,7 @@ import { emitImage, emitLine, emitPoly, emitRect, emitTriangle, emitVisual } fro
 import { emitList, emitText } from "./emit-text.js";
 import { emitTable } from "./emit-table.js";
 import type { UnsupportedFeature } from "./unsupported-feature.js";
+import { assertNever } from "../engine/src/contracts/assert-never.js";
 
 export type EmitOptions = Readonly<{
   extraction: ParsedExtraction;
@@ -161,8 +162,4 @@ function emitIgnored(
     default:
       return assertNever(element.reason);
   }
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled element: ${JSON.stringify(value)}`);
 }

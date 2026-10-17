@@ -44,8 +44,9 @@
  * is a `rejected` outcome with reason `malformed`, never an exception.
  */
 import { createHash, createPublicKey, timingSafeEqual, verify, type KeyObject } from "node:crypto";
-import { assertNever } from "../google-auth";
+import { constantTimeEqual } from "./cookies";
 import { asRecord, asString, parseJson } from "./json-values";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /** The two signature algorithms the portal offers and accepts. */
 export type PasskeyAlgorithm = "ES256" | "RS256";
@@ -270,15 +271,10 @@ function checkClientData(
     return rejected("malformed", "client data is not the expected JSON");
   }
   if (type !== options.type) return rejected("wrong-type", `client data type ${type}, expected ${options.type}`);
-  if (!digestsEqual(challenge, options.expectedChallenge)) return rejected("challenge-mismatch", "not the challenge this browser was given");
+  if (!constantTimeEqual(challenge, options.expectedChallenge)) return rejected("challenge-mismatch", "not the challenge this browser was given");
   if (origin !== options.origin) return rejected("origin-mismatch", `origin ${origin}, expected ${options.origin}`);
   if (record["crossOrigin"] === true) return rejected("cross-origin", "the ceremony ran inside a cross-origin frame");
   return null;
-}
-
-function digestsEqual(left: string, right: string): boolean {
-  const digest = (text: string): Buffer => createHash("sha256").update(text, "utf-8").digest();
-  return timingSafeEqual(digest(left), digest(right));
 }
 
 // ---------------------------------------------------------------- authenticator data

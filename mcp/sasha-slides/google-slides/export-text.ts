@@ -19,6 +19,7 @@ import { DEFAULT_PARAGRAPH_STYLE, type Colour, type ListGlyph, type ParagraphSty
 import { wireSolidFill } from "./export-colours.ts";
 import type { InterchangeLossSink } from "./interchange-losses.ts";
 import type { ExportRequest, WireCellLocation, WireParagraphStyle, WireTextStyle } from "./slides-requests.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 export type TextExportContext = Readonly<{
   theme: ThemeSnapshot;
@@ -270,8 +271,4 @@ function linkOf(options: Readonly<{ style: RunStyle; context: TextExportContext 
 
 function roundPoints(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

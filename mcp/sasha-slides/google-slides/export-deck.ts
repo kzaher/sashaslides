@@ -45,6 +45,7 @@ import { textRequests, type TextExportContext } from "./export-text.ts";
 import { pageScaleFor, transformForFrame, type PageScale } from "./interchange-geometry.ts";
 import { createLossCollector, type InterchangeLossSink } from "./interchange-losses.ts";
 import type { ExportRequest, WireElementProperties, WireSolidFill, WireTransform } from "./slides-requests.ts";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /**
  * MEASURED 2026-10-15 against the development account (e2e/google-slides-round-trip.ts
@@ -630,8 +631,4 @@ function backgroundRequests(
 
 function notesText(options: Readonly<{ slide: SlideSnapshot; slideNumber: number }>): string {
   return plainText({ body: options.slide.speakerNotes, slideNumber: options.slideNumber }).trim();
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
 }

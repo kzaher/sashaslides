@@ -64,7 +64,8 @@ import { googleFeedbackChannel, type FeedbackChannel } from "./feedback/feedback
 import { FEEDBACK_DELIVERY_THRESHOLD_MS } from "./feedback-delivery";
 import { pollProgressReporter } from "./long-poll-progress.ts";
 import { describeCommentAnchor } from "./feedback/comment-anchor";
-import { CLIENT_PATH, assertNever, describeAuthFailure, loadClientCredentials, loadOAuthClient } from "./google-auth";
+import type { OAuth2Client } from "google-auth-library";
+import { CLIENT_PATH, describeAuthFailure, loadOAuthClient } from "./google-auth";
 import { googleSubjectOf } from "./http/authorization-server";
 import { loadBrokeredStack, type BrokeredStack } from "./http/brokered-stack";
 import { createSashaSlidesHttpServer } from "./http/http-server";
@@ -72,7 +73,7 @@ import type { CommentBot } from "./comment-bot/comment-bot";
 import { loadCommentBot } from "./comment-bot/comment-bot-stack";
 import { openCommentTasks, registerCommentTools, type CommentTaskPayload } from "./comment-bot/comment-tools";
 import { loadAccountPortal } from "./http/account-portal-stack";
-import { parseSessionSecret } from "./http/account-portal";
+import { parseSessionSecret, type SessionSecretParse } from "./http/account-portal";
 import { withDeckErasure } from "./http/account-eraser";
 import { storeAccountDirectory } from "./http/account-directory";
 import { randomAccountId } from "./http/accounts";
@@ -127,6 +128,7 @@ import {
   type ReadSessionEventsOutcome,
   type SessionEventRecord,
 } from "./session-log";
+import { assertNever } from "./engine/src/contracts/assert-never.ts";
 
 export const SERVER_NAME = "sasha-slides";
 export const SERVER_VERSION = "0.1.0";
@@ -140,8 +142,8 @@ function serverWarn(message: string): void {
 }
 
 /** Resolved lazily so a missing credential file is a tool error, not a dead server. */
-export type EnvironmentLoad =
-  | Readonly<{ kind: "ok"; env: ProposalEnvironment }>
+type EnvironmentResolution<TEnvironment> =
+  | Readonly<{ kind: "ok"; env: TEnvironment }>
   | Readonly<{ kind: "auth-failed"; message: string }>;
 
 /**
@@ -150,18 +152,14 @@ export type EnvironmentLoad =
  * concurrent callers resolve two different Drives; in stdio mode it is absent and the
  * single developer token is used.
  */
-export type ResolveEnvironment = (
+type ResolveFor<TEnvironment> = (
   options: Readonly<{ authInfo: AuthInfo | undefined }>,
-) => Promise<EnvironmentLoad>;
+) => Promise<EnvironmentResolution<TEnvironment>>;
+
+export type ResolveEnvironment = ResolveFor<ProposalEnvironment>;
 
 /** The same lazy, per-call resolution for the comment feedback channel. */
-export type FeedbackEnvironmentLoad =
-  | Readonly<{ kind: "ok"; env: FeedbackEnvironment }>
-  | Readonly<{ kind: "auth-failed"; message: string }>;
-
-export type ResolveFeedbackEnvironment = (
-  options: Readonly<{ authInfo: AuthInfo | undefined }>,
-) => Promise<FeedbackEnvironmentLoad>;
+export type ResolveFeedbackEnvironment = ResolveFor<FeedbackEnvironment>;
 
 export type ToolOutcome<TPayload> =
   | Readonly<{ kind: "payload"; payload: TPayload }>
@@ -293,6 +291,15 @@ export function createSashaSlidesServer(
     { instructions: options.instructions },
   );
   const { resolveEnvironment, resolveFeedbackEnvironment, remote } = options;
+  // Every tool acts as its CALLER: the environment is resolved per call, and a caller that cannot
+  // be resolved gets the reason as the tool's answer.
+  type ToolWork<TEnvironment> = (env: TEnvironment) => Promise<CallToolResult>;
+  const withEnvironment = (extra: ToolCaller, work: ToolWork<ProposalEnvironment>): Promise<CallToolResult> =>
+    whenLoaded(resolveEnvironment({ authInfo: extra.authInfo }), work);
+  const withFeedbackEnvironment = (extra: ToolCaller, work: ToolWork<FeedbackEnvironment>): Promise<CallToolResult> =>
+    whenLoaded(resolveFeedbackEnvironment({ authInfo: extra.authInfo }), work);
+  const withCandidateEnvironment = (extra: ToolCaller, work: ToolWork<CandidateFeedbackEnvironment>): Promise<CallToolResult> =>
+    whenLoaded(resolveCandidateEnvironment({ resolveEnvironment, resolveFeedbackEnvironment, authInfo: extra.authInfo }), work);
   const commentBot = options.commentBot ?? null;
 
   // Declares the `prompts` capability and so makes `/mcp__sasha-slides__<name>` appear in the
@@ -360,21 +367,20 @@ export function createSashaSlidesServer(
           ),
       },
     },
-    async ({ slides, presentationId, merge }, extra) => {
-      const loaded = await resolveEnvironment({ authInfo: extra.authInfo });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const parsed = slideSourcesFrom({ slides, remote });
-      if (parsed.kind === "error") return errorResult(parsed.message);
-      const merged = mergeRequestFrom({ slides, merge, presentationId });
-      if (merged.kind === "error") return errorResult(`propose_slides: ${merged.message}`);
-      const outcome = await createProposal({
-        env: loaded.env,
-        slides: parsed.sources,
-        presentationId: presentationId ?? null,
-        ...(merged.merge === null ? {} : { merge: merged.merge }),
-      });
-      return toCallToolResult(proposeSlidesPayload(outcome));
-    },
+    ({ slides, presentationId, merge }, extra) =>
+      withEnvironment(extra, async (env) => {
+        const parsed = slideSourcesFrom({ slides, remote });
+        if (parsed.kind === "error") return errorResult(parsed.message);
+        const merged = mergeRequestFrom({ slides, merge, presentationId });
+        if (merged.kind === "error") return errorResult(`propose_slides: ${merged.message}`);
+        const outcome = await createProposal({
+          env,
+          slides: parsed.sources,
+          presentationId: presentationId ?? null,
+          ...(merged.merge === null ? {} : { merge: merged.merge }),
+        });
+        return toCallToolResult(proposeSlidesPayload(outcome));
+      }),
   );
 
   server.registerTool(
@@ -397,26 +403,25 @@ export function createSashaSlidesServer(
           .describe("How long to wait before giving up. Default 300."),
       },
     },
-    async ({ proposalId, timeoutSeconds }, extra) => {
-      const loaded = await resolveEnvironment({ authInfo: extra.authInfo });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const outcome = await awaitPick({
-        env: loaded.env,
-        proposalId,
-        timeoutSeconds,
-        // Without this the client's own request timeout (60 s measured) ends the wait long
-        // before the user has picked anything.
-        onPoll: pollProgressReporter({
-          extra,
-          timeoutMs: timeoutSeconds * 1000,
-          describe: ({ polls, elapsedMs }) =>
-            `waiting for a pick on ${proposalId}: ${String(polls)} polls, ` +
-            `${String(Math.round(elapsedMs / 1000))}s elapsed`,
-          warn: serverWarn,
-        }),
-      });
-      return toCallToolResult(awaitPickPayload(outcome));
-    },
+    ({ proposalId, timeoutSeconds }, extra) =>
+      withEnvironment(extra, async (env) => {
+        const outcome = await awaitPick({
+          env,
+          proposalId,
+          timeoutSeconds,
+          // Without this the client's own request timeout (60 s measured) ends the wait long
+          // before the user has picked anything.
+          onPoll: pollProgressReporter({
+            extra,
+            timeoutMs: timeoutSeconds * 1000,
+            describe: ({ polls, elapsedMs }) =>
+              `waiting for a pick on ${proposalId}: ${String(polls)} polls, ` +
+              `${String(Math.round(elapsedMs / 1000))}s elapsed`,
+            warn: serverWarn,
+          }),
+        });
+        return toCallToolResult(awaitPickPayload(outcome));
+      }),
   );
 
   server.registerTool(
@@ -438,18 +443,17 @@ export function createSashaSlidesServer(
         outDir: z.string().min(1).describe("Directory to write the images into; created if missing."),
       },
     },
-    async ({ proposalId, indices, outDir }, extra) => {
-      const loaded = await resolveEnvironment({ authInfo: extra.authInfo });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const outcome = await downloadSlideImages({
-        env: loaded.env,
-        proposalId,
-        indices: indices ?? null,
-        outDir,
-        remote,
-      });
-      return toCallToolResult(slideImagesPayload(outcome));
-    },
+    ({ proposalId, indices, outDir }, extra) =>
+      withEnvironment(extra, async (env) => {
+        const outcome = await downloadSlideImages({
+          env,
+          proposalId,
+          indices: indices ?? null,
+          outDir,
+          remote,
+        });
+        return toCallToolResult(slideImagesPayload(outcome));
+      }),
   );
 
   server.registerTool(
@@ -464,12 +468,11 @@ export function createSashaSlidesServer(
         proposalId: z.string().min(1).describe("The proposalId returned by propose_slides."),
       },
     },
-    async ({ proposalId }, extra) => {
-      const loaded = await resolveEnvironment({ authInfo: extra.authInfo });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const state = await readProposalState({ env: loaded.env, proposalId });
-      return toCallToolResult(proposalStatePayload(state));
-    },
+    ({ proposalId }, extra) =>
+      withEnvironment(extra, async (env) => {
+        const state = await readProposalState({ env, proposalId });
+        return toCallToolResult(proposalStatePayload(state));
+      }),
   );
 
   server.registerTool(
@@ -486,17 +489,12 @@ export function createSashaSlidesServer(
         "answer - do not guess an id.",
       inputSchema: {},
     },
-    async (_arguments, extra) => {
-      const loaded = await resolveCandidateEnvironment({
-        resolveEnvironment,
-        resolveFeedbackEnvironment,
-        authInfo: extra.authInfo,
-      });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const work = await listOpenWork({ env: loaded.env.proposal, feedback: loaded.env.feedback });
-      const commentTasks = await openCommentTasks({ commentBot, authInfo: extra.authInfo });
-      return toCallToolResult(withCommentTasks({ outcome: openWorkPayload(work), commentTasks }));
-    },
+    (_arguments, extra) =>
+      withCandidateEnvironment(extra, async (env) => {
+        const work = await listOpenWork({ env: env.proposal, feedback: env.feedback });
+        const commentTasks = await openCommentTasks({ commentBot, authInfo: extra.authInfo });
+        return toCallToolResult(withCommentTasks({ outcome: openWorkPayload(work), commentTasks }));
+      }),
   );
 
   registerCommentTools({ server, commentBot });
@@ -545,22 +543,17 @@ export function createSashaSlidesServer(
           .describe("Include threads the user or the agent already resolved. Default false."),
       },
     },
-    async ({ proposalId, slideIndex, since, includeResolved }, extra) => {
-      const loaded = await resolveCandidateEnvironment({
-        resolveEnvironment,
-        resolveFeedbackEnvironment,
-        authInfo: extra.authInfo,
-      });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const outcome = await readCandidateFeedback({
-        env: loaded.env,
-        proposalId,
-        slideIndex: slideIndex ?? null,
-        since: since ?? null,
-        includeResolved,
-      });
-      return toCallToolResult(readFeedbackPayload(outcome));
-    },
+    ({ proposalId, slideIndex, since, includeResolved }, extra) =>
+      withCandidateEnvironment(extra, async (env) => {
+        const outcome = await readCandidateFeedback({
+          env,
+          proposalId,
+          slideIndex: slideIndex ?? null,
+          since: since ?? null,
+          includeResolved,
+        });
+        return toCallToolResult(readFeedbackPayload(outcome));
+      }),
   );
 
   server.registerTool(
@@ -586,22 +579,17 @@ export function createSashaSlidesServer(
         text: z.string().min(1).describe("What to say back to the user, in plain text."),
       },
     },
-    async ({ proposalId, slideIndex, commentId, text }, extra) => {
-      const loaded = await resolveCandidateEnvironment({
-        resolveEnvironment,
-        resolveFeedbackEnvironment,
-        authInfo: extra.authInfo,
-      });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const outcome = await replyToCandidateComment({
-        env: loaded.env,
-        proposalId,
-        slideIndex,
-        commentId,
-        text,
-      });
-      return toCallToolResult(replyFeedbackPayload({ outcome, tool: "reply_feedback" }));
-    },
+    ({ proposalId, slideIndex, commentId, text }, extra) =>
+      withCandidateEnvironment(extra, async (env) => {
+        const outcome = await replyToCandidateComment({
+          env,
+          proposalId,
+          slideIndex,
+          commentId,
+          text,
+        });
+        return toCallToolResult(replyFeedbackPayload({ outcome, tool: "reply_feedback" }));
+      }),
   );
 
   server.registerTool(
@@ -629,22 +617,17 @@ export function createSashaSlidesServer(
           .describe(`The note to close the thread with. Defaults to "${DEFAULT_RESOLVE_NOTE}".`),
       },
     },
-    async ({ proposalId, slideIndex, commentId, text }, extra) => {
-      const loaded = await resolveCandidateEnvironment({
-        resolveEnvironment,
-        resolveFeedbackEnvironment,
-        authInfo: extra.authInfo,
-      });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const outcome = await resolveCandidateComment({
-        env: loaded.env,
-        proposalId,
-        slideIndex,
-        commentId,
-        text: text ?? null,
-      });
-      return toCallToolResult(replyFeedbackPayload({ outcome, tool: "resolve_feedback" }));
-    },
+    ({ proposalId, slideIndex, commentId, text }, extra) =>
+      withCandidateEnvironment(extra, async (env) => {
+        const outcome = await resolveCandidateComment({
+          env,
+          proposalId,
+          slideIndex,
+          commentId,
+          text: text ?? null,
+        });
+        return toCallToolResult(replyFeedbackPayload({ outcome, tool: "resolve_feedback" }));
+      }),
   );
 
   server.registerTool(
@@ -683,35 +666,30 @@ export function createSashaSlidesServer(
           .describe("The `cursor` from a previous read_feedback or await_feedback. Pass it back verbatim."),
       },
     },
-    async ({ proposalId, slideIndex, timeoutMs, since }, extra) => {
-      const loaded = await resolveCandidateEnvironment({
-        resolveEnvironment,
-        resolveFeedbackEnvironment,
-        authInfo: extra.authInfo,
-      });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const outcome = await awaitCandidateFeedback({
-        env: loaded.env,
-        proposalId,
-        slideIndex,
-        since:
-          since === undefined
-            ? null
-            : { modifiedTime: since.modifiedTime, seenPostIds: since.seenPostIds },
-        timeoutMs,
-        // This is what makes a multi-minute wait survive the client's own request timeout,
-        // and it doubles as the honest "still watching" signal the user asked for.
-        onPoll: pollProgressReporter({
-          extra,
+    ({ proposalId, slideIndex, timeoutMs, since }, extra) =>
+      withCandidateEnvironment(extra, async (env) => {
+        const outcome = await awaitCandidateFeedback({
+          env,
+          proposalId,
+          slideIndex,
+          since:
+            since === undefined
+              ? null
+              : { modifiedTime: since.modifiedTime, seenPostIds: since.seenPostIds },
           timeoutMs,
-          describe: ({ polls, elapsedMs }) =>
-            `watching candidate ${String(slideIndex)} of ${proposalId} for comments: ` +
-            `${String(polls)} polls, ${String(Math.round(elapsedMs / 1000))}s elapsed`,
-          warn: serverWarn,
-        }),
-      });
-      return toCallToolResult(awaitFeedbackPayload(outcome));
-    },
+          // This is what makes a multi-minute wait survive the client's own request timeout,
+          // and it doubles as the honest "still watching" signal the user asked for.
+          onPoll: pollProgressReporter({
+            extra,
+            timeoutMs,
+            describe: ({ polls, elapsedMs }) =>
+              `watching candidate ${String(slideIndex)} of ${proposalId} for comments: ` +
+              `${String(polls)} polls, ${String(Math.round(elapsedMs / 1000))}s elapsed`,
+            warn: serverWarn,
+          }),
+        });
+        return toCallToolResult(awaitFeedbackPayload(outcome));
+      }),
   );
 
   server.registerTool(
@@ -753,19 +731,19 @@ export function createSashaSlidesServer(
     async ({ proposalId, slideIndex, path, html, label, answeredCommentIds }, extra) => {
       const parsed = slideSourcesFrom({ slides: [{ path, html, label }], remote });
       if (parsed.kind === "error") return errorResult(parsed.message);
-      const loaded = await resolveEnvironment({ authInfo: extra.authInfo });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const [source] = parsed.sources;
-      if (source === undefined) return errorResult("give the slide as path or html");
-      const outcome = await reviseSlide({
-        env: loaded.env,
-        proposalId,
-        slideIndex,
-        ...("path" in source ? { htmlPath: source.path } : { html: source.html }),
-        label: label ?? null,
-        answeredCommentIds: answeredCommentIds ?? [],
+      return withEnvironment(extra, async (env) => {
+        const [source] = parsed.sources;
+        if (source === undefined) return errorResult("give the slide as path or html");
+        const outcome = await reviseSlide({
+          env,
+          proposalId,
+          slideIndex,
+          ...("path" in source ? { htmlPath: source.path } : { html: source.html }),
+          label: label ?? null,
+          answeredCommentIds: answeredCommentIds ?? [],
+        });
+        return toCallToolResult(reviseSlidePayload(outcome));
       });
-      return toCallToolResult(reviseSlidePayload(outcome));
     },
   );
 
@@ -787,12 +765,11 @@ export function createSashaSlidesServer(
           .describe("One line the user will read in the conversation, e.g. 'starting over on the layout'."),
       },
     },
-    async ({ proposalId, reason }, extra) => {
-      const loaded = await resolveEnvironment({ authInfo: extra.authInfo });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const outcome = await clearSlides({ env: loaded.env, proposalId, reason: reason ?? null });
-      return toCallToolResult(clearSlidesPayload(outcome));
-    },
+    ({ proposalId, reason }, extra) =>
+      withEnvironment(extra, async (env) => {
+        const outcome = await clearSlides({ env, proposalId, reason: reason ?? null });
+        return toCallToolResult(clearSlidesPayload(outcome));
+      }),
   );
 
   server.registerTool(
@@ -810,11 +787,10 @@ export function createSashaSlidesServer(
         proposalId: z.string().min(1).describe("The proposalId returned by propose_slides."),
       },
     },
-    async ({ proposalId }, extra) => {
-      const loaded = await resolveEnvironment({ authInfo: extra.authInfo });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      return toCallToolResult(sessionEventsPayload(await readProposalLog({ env: loaded.env, proposalId })));
-    },
+    ({ proposalId }, extra) =>
+      withEnvironment(extra, async (env) => {
+        return toCallToolResult(sessionEventsPayload(await readProposalLog({ env, proposalId })));
+      }),
   );
 
   server.registerTool(
@@ -835,10 +811,10 @@ export function createSashaSlidesServer(
     async ({ presentationId, slideObjectId, slideNumber }, extra) => {
       const slide = slideSelectorFrom({ slideObjectId, slideNumber });
       if (slide.kind === "error") return errorResult(slide.message);
-      const loaded = await resolveFeedbackEnvironment({ authInfo: extra.authInfo });
-      if (loaded.kind === "auth-failed") return errorResult(loaded.message);
-      const read = await loaded.env.channel.readSlide({ presentationId, slide: slide.selector });
-      return toCallToolResult(slideStructurePayload({ presentationId, read }));
+      return withFeedbackEnvironment(extra, async (env) => {
+        const read = await env.channel.readSlide({ presentationId, slide: slide.selector });
+        return toCallToolResult(slideStructurePayload({ presentationId, read }));
+      });
     },
   );
 
@@ -982,7 +958,7 @@ export function awaitPickPayload(outcome: PickOutcome): ToolOutcome<AwaitPickPay
         },
       };
     case "unknown-proposal":
-      return { kind: "error", message: "await_pick: no such proposal (it may have been cleaned up)" };
+      return unknownProposal("await_pick");
     case "unreadable":
       return { kind: "error", message: `await_pick: PICK could not be parsed: ${outcome.reason}` };
     default:
@@ -1003,7 +979,7 @@ export function slideImagesPayload(outcome: SlideImagesOutcome): ToolOutcome<Sli
     case "unavailable":
       return { kind: "payload", payload: { status: "unavailable", files: [], note: outcome.reason } };
     case "unknown-proposal":
-      return { kind: "error", message: "slide_images: no such proposal (it may have been cleaned up)" };
+      return unknownProposal("slide_images");
     default:
       return assertNever(outcome);
   }
@@ -1405,7 +1381,7 @@ export function reviseSlidePayload(outcome: ReviseSlideOutcome): ToolOutcome<Rev
     case "invalid-input":
       return { kind: "error", message: `revise_slide: ${outcome.reason}` };
     case "unknown-proposal":
-      return { kind: "error", message: "revise_slide: no such proposal (it may have been cleaned up)" };
+      return unknownProposal("revise_slide");
     case "unknown-slide":
       return {
         kind: "error",
@@ -1461,7 +1437,7 @@ export function clearSlidesPayload(outcome: ClearSlidesOutcome): ToolOutcome<Cle
         },
       };
     case "unknown-proposal":
-      return { kind: "error", message: "clear_slides: no such proposal (it may have been cleaned up)" };
+      return unknownProposal("clear_slides");
     case "manifest-unusable":
       return {
         kind: "error",
@@ -1510,7 +1486,7 @@ export type SessionEventPayload = Readonly<{
 export function sessionEventsPayload(outcome: ProposalLogOutcome): ToolOutcome<SessionEventsPayload> {
   switch (outcome.kind) {
     case "unknown-proposal":
-      return { kind: "error", message: "session_events: no such proposal (it may have been cleaned up)" };
+      return unknownProposal("session_events");
     case "drive-failed":
       return { kind: "error", message: `session_events: Drive could not be reached: ${outcome.reason}` };
     case "ok":
@@ -1537,32 +1513,12 @@ export function liveEnvironment(options: Readonly<{ drive: ProposalEnvironment["
     drive: options.drive,
     now: () => new Date(),
     randomSuffix,
-    sleep: ({ milliseconds }) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    sleep: sleepFor,
     statFile: (path) => {
       const stats = statSync(path, { throwIfNoEntry: false });
       return stats !== undefined && stats.isFile() ? { bytes: stats.size } : null;
     },
-    // stdout is the MCP transport; a warning written there would corrupt the framing.
-    warn: (message) => void process.stderr.write(`[${SERVER_NAME}] ${message}\n`),
-  };
-}
-
-/**
- * stdio/dev: one `ProposalEnvironment` for the single token in `.auth/tokens.json`,
- * whoever that is. `authInfo` is ignored because stdio carries no per-caller identity —
- * which is precisely why this mode cannot be the deployed one.
- *
- * Loads credentials on first use and caches the success. A failure is not cached: the user
- * may be creating `.auth/google_oauth.json` right now, and the next call should see it.
- */
-export function singleTokenEnvironmentResolver(): ResolveEnvironment {
-  let cached: ProposalEnvironment | null = null;
-  return async () => {
-    if (cached !== null) return { kind: "ok", env: cached };
-    const auth = await loadOAuthClient();
-    if (auth.kind !== "ok") return { kind: "auth-failed", message: describeAuthFailure(auth) };
-    cached = liveEnvironment({ drive: googleDriveChannel({ auth: auth.auth }) });
-    return { kind: "ok", env: cached };
+    warn: serverWarn,
   };
 }
 
@@ -1573,41 +1529,53 @@ export function liveFeedbackEnvironment(
   return {
     channel: options.channel,
     now: () => new Date(),
-    sleep: ({ milliseconds }) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
-    // stdout is the MCP transport; a warning written there would corrupt the framing.
-    warn: (message) => void process.stderr.write(`[${SERVER_NAME}] ${message}\n`),
+    sleep: sleepFor,
+    warn: serverWarn,
   };
 }
 
-/** stdio/dev: the comment channel for the single token in `.auth/tokens.json`. */
-export function singleTokenFeedbackEnvironmentResolver(): ResolveFeedbackEnvironment {
-  let cached: FeedbackEnvironment | null = null;
+function sleepFor(options: Readonly<{ milliseconds: number }>): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, options.milliseconds));
+}
+
+/**
+ * stdio/dev: one environment for the single token in `.auth/tokens.json`, whoever that is.
+ * `authInfo` is ignored because stdio carries no per-caller identity — which is precisely why
+ * this mode cannot be the deployed one.
+ *
+ * Loads credentials on first use and caches the success. A failure is not cached: the user
+ * may be creating `.auth/google_oauth.json` right now, and the next call should see it.
+ */
+function singleTokenResolver<TEnvironment>(environmentFor: (auth: OAuth2Client) => TEnvironment): ResolveFor<TEnvironment> {
+  let cached: TEnvironment | null = null;
   return async () => {
     if (cached !== null) return { kind: "ok", env: cached };
     const auth = await loadOAuthClient();
     if (auth.kind !== "ok") return { kind: "auth-failed", message: describeAuthFailure(auth) };
-    cached = liveFeedbackEnvironment({ channel: googleFeedbackChannel({ auth: auth.auth }) });
+    cached = environmentFor(auth.auth);
     return { kind: "ok", env: cached };
   };
 }
 
+export function singleTokenEnvironmentResolver(): ResolveEnvironment {
+  return singleTokenResolver((auth) => liveEnvironment({ drive: googleDriveChannel({ auth }) }));
+}
+
+/** stdio/dev: the comment channel for the single token in `.auth/tokens.json`. */
+export function singleTokenFeedbackEnvironmentResolver(): ResolveFeedbackEnvironment {
+  return singleTokenResolver((auth) => liveFeedbackEnvironment({ channel: googleFeedbackChannel({ auth }) }));
+}
+
 /**
- * HTTP/per-user: **not wired yet, and explicit about it.**
- *
- * The comment channel needs the caller's own `OAuth2Client`, and `http/user-drive.ts`'s
- * `UserDriveFactory` hands out a `DriveChannel` only — it closes over the client and does not
- * expose it. Rather than reach around that seam (or, far worse, fall back to the developer
- * token in `.auth/tokens.json` and write into one person's Drive on every caller's behalf),
- * this resolver declines with the exact change that would enable it. `http/**
- * HTTP/per-user: the comment channel for the caller's OWN Google account.
- *
- * Same rule as `brokeredEnvironmentResolver` and for the same reason: an unidentified caller
- * is a tool error, never a fallback to a shared token. A bearer that names no Google subject
- * must not be able to read one developer's comment threads.
+ * HTTP/per-user: the caller's verified bearer names exactly one Google subject, and the
+ * environment is built from *that* user's stored refresh token. Nothing falls back to a shared
+ * token — an unidentified caller is a tool error, not a different user's Drive or comment
+ * threads. That is the property `test/oauth.test.ts` asserts by staging a proposal with user
+ * A's token and finding user B's Drive empty.
  */
-export function brokeredFeedbackEnvironmentResolver(
-  options: Readonly<{ userDrive: UserDriveFactory }>,
-): ResolveFeedbackEnvironment {
+function brokeredResolver<TEnvironment>(
+  environmentOf: (subject: string) => Promise<EnvironmentResolution<TEnvironment>>,
+): ResolveFor<TEnvironment> {
   return async ({ authInfo }) => {
     const subject = googleSubjectOf({ authInfo });
     if (subject === null) {
@@ -1618,6 +1586,15 @@ export function brokeredFeedbackEnvironmentResolver(
           "connector so Claude can obtain an access token for your Google account.",
       };
     }
+    return environmentOf(subject);
+  };
+}
+
+/** HTTP/per-user: the comment channel for the caller's OWN Google account. */
+export function brokeredFeedbackEnvironmentResolver(
+  options: Readonly<{ userDrive: UserDriveFactory }>,
+): ResolveFeedbackEnvironment {
+  return brokeredResolver(async (subject) => {
     const resolved = await options.userDrive.feedbackForGoogleSubject({ subject });
     switch (resolved.kind) {
       case "ok":
@@ -1627,32 +1604,17 @@ export function brokeredFeedbackEnvironmentResolver(
       default:
         return assertNever(resolved);
     }
-  };
+  });
 }
 
-/**
- * HTTP/per-user: the caller's verified bearer names exactly one Google subject, and the
- * Drive this resolves is built from *that* user's stored refresh token. Nothing falls back
- * to a shared token — an unidentified caller is a tool error, not a different user's
- * Drive. That is the property `test/oauth.test.ts` asserts by staging a proposal with
- * user A's token and finding user B's Drive empty.
- */
+/** HTTP/per-user: the caller's OWN Drive. */
 export function brokeredEnvironmentResolver(
   options: Readonly<{
     userDrive: UserDriveFactory;
     environmentFor: (options: Readonly<{ drive: DriveChannel }>) => ProposalEnvironment;
   }>,
 ): ResolveEnvironment {
-  return async ({ authInfo }) => {
-    const subject = googleSubjectOf({ authInfo });
-    if (subject === null) {
-      return {
-        kind: "auth-failed",
-        message:
-          "this request carries no verified Google identity. Reconnect the sasha-slides " +
-          "connector so Claude can obtain an access token for your Google account.",
-      };
-    }
+  return brokeredResolver(async (subject) => {
     const resolved = await options.userDrive.forGoogleSubject({ subject });
     switch (resolved.kind) {
       case "ok":
@@ -1662,7 +1624,7 @@ export function brokeredEnvironmentResolver(
       default:
         return assertNever(resolved);
     }
-  };
+  });
 }
 
 /**
@@ -1859,8 +1821,24 @@ export const USAGE = `sasha-slides MCP server
                  instructions we returned?" are answered by measurement. Diagnostics only.
 `;
 
+function unknownProposal(tool: string): Readonly<{ kind: "error"; message: string }> {
+  return { kind: "error", message: `${tool}: no such proposal (it may have been cleaned up)` };
+}
+
 function errorResult(message: string): CallToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
+}
+
+/** What a tool handler knows about who called it. */
+type ToolCaller = Readonly<{ authInfo?: AuthInfo | undefined }>;
+
+/** The tool's answer once the caller's environment resolved; the reason it did not, otherwise. */
+async function whenLoaded<TEnvironment>(
+  loading: Promise<EnvironmentResolution<TEnvironment>>,
+  work: (env: TEnvironment) => Promise<CallToolResult>,
+): Promise<CallToolResult> {
+  const loaded = await loading;
+  return loaded.kind === "auth-failed" ? errorResult(loaded.message) : work(loaded.env);
 }
 
 /**
@@ -1887,9 +1865,7 @@ async function resolveCandidateEnvironment(
   return { kind: "ok", env: { proposal: proposal.env, feedback: feedback.env } };
 }
 
-type CandidateEnvironmentLoad =
-  | Readonly<{ kind: "ok"; env: CandidateFeedbackEnvironment }>
-  | Readonly<{ kind: "auth-failed"; message: string }>;
+type CandidateEnvironmentLoad = EnvironmentResolution<CandidateFeedbackEnvironment>;
 
 /**
  * What a half-finished revision left behind, so a caller knows what a retry repeats.
@@ -2192,10 +2168,8 @@ async function serveStdio(
       frameLogPath: mode.frameLogPath,
     }),
   );
-  process.stderr.write(
-    `[${SERVER_NAME}] ready on stdio (dev mode: single .auth/tokens.json identity)\n`,
-  );
-  process.stderr.write(`[${SERVER_NAME}] ${describeInstructions(instructions)}\n`);
+  serverWarn("ready on stdio (dev mode: single .auth/tokens.json identity)");
+  serverWarn(describeInstructions(instructions));
 }
 
 /**
@@ -2216,7 +2190,7 @@ function instrumentedTransport(options: Readonly<{ inner: Transport; frameLogPat
 function serveHttp(
   mode: Extract<ServerMode, Readonly<{ kind: "http" }>>,
 ): Promise<void> {
-  const warn = (message: string): void => void process.stderr.write(`[${SERVER_NAME}] ${message}\n`);
+  const warn = serverWarn;
   const loaded = loadBrokeredStack({
     publicUrl: mode.publicUrl,
     storePath: mode.storePath,
@@ -2226,37 +2200,27 @@ function serveHttp(
     googleClientPath: mode.googleClientPath,
     warn,
   });
-  if (loaded.kind === "failed") {
-    process.stderr.write(`[${SERVER_NAME}] cannot start: ${loaded.message}\n`);
-    process.exitCode = 1;
-    return Promise.resolve();
-  }
+  if (loaded.kind === "failed") return failStartup(loaded.message);
   const { stack } = loaded;
-  const decks = loadDeckServer({ mode, stack, warn });
-  if (decks.kind === "failed") {
-    process.stderr.write(`[${SERVER_NAME}] cannot start: ${decks.message}\n`);
-    process.exitCode = 1;
-    return Promise.resolve();
-  }
+  const sessionSecretText = process.env.SASHA_SESSION_SECRET;
+  const sessionSecret = sessionSecretText === undefined || sessionSecretText === "" ? null : parseSessionSecret(sessionSecretText);
+  const decks = loadDeckServer({ mode, stack, sessionSecret, warn });
+  if (decks.kind === "failed") return failStartup(decks.message);
   const deckServer = decks.kind === "ok" ? decks.server : null;
   const portal = loadAccountPortal({
     publicUrl: mode.publicUrl,
     identityProvidersPath: mode.identityProvidersPath,
     mailSenderPath: mode.mailSenderPath,
     trustedProxies: mode.trustedProxies,
-    googleClientPath: mode.googleClientPath,
-    sessionSecret: process.env.SASHA_SESSION_SECRET,
+    googleClient: stack.googleClient,
+    sessionSecret,
     store: stack.store,
     vault: stack.vault,
     eraser: deckServer === null ? stack.eraser : withDeckErasure({ eraser: stack.eraser, eraseDecks: deckServer.eraseAccount }),
     deckSessionStart: deckServer === null ? null : deckServer.deckSessionStart,
     warn,
   });
-  if (portal.kind === "failed") {
-    process.stderr.write(`[${SERVER_NAME}] cannot start: ${portal.message}\n`);
-    process.exitCode = 1;
-    return Promise.resolve();
-  }
+  if (portal.kind === "failed") return failStartup(portal.message);
   const commentBot = loadCommentBot({
     publicUrl: mode.publicUrl,
     googleCallbackUrl: stack.endpoints.googleCallbackUrl,
@@ -2301,22 +2265,30 @@ function serveHttp(
   if (deckServer !== null) shutDownOnTerminate({ deckServer, httpServer, warn });
   return new Promise<void>((resolve) => {
     httpServer.listen(mode.port, mode.host, () => {
-      for (const line of startupBanner({
-        endpoints: stack.endpoints,
-        mode,
-        store: stack.storeDescription,
-        keyStore: stack.keyStoreDescription,
-        instructions,
-      })) {
-        process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
-      }
-      for (const line of portal.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
-      for (const line of commentBot.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
-      for (const line of decks.banner) process.stderr.write(`[${SERVER_NAME}] ${line}\n`);
+      const banner = [
+        ...startupBanner({
+          endpoints: stack.endpoints,
+          mode,
+          store: stack.storeDescription,
+          keyStore: stack.keyStoreDescription,
+          instructions,
+        }),
+        ...portal.banner,
+        ...commentBot.banner,
+        ...decks.banner,
+      ];
+      for (const line of banner) serverWarn(line);
       void bot.start().catch((cause: unknown) => warn(`comment bot: start failed: ${String(cause)}`));
       resolve();
     });
   });
+}
+
+/** Startup refused: the reason on stderr and a failing exit code, no server. */
+function failStartup(message: string): Promise<void> {
+  serverWarn(`cannot start: ${message}`);
+  process.exitCode = 1;
+  return Promise.resolve();
 }
 
 type DeckServerLoad =
@@ -2331,17 +2303,16 @@ type DeckServerLoad =
 function loadDeckServer(
   options: Readonly<{
     mode: Extract<ServerMode, Readonly<{ kind: "http" }>>;
-    stack: Pick<BrokeredStack, "store" | "vault">;
+    stack: Pick<BrokeredStack, "store" | "vault" | "googleClient">;
+    /** `SASHA_SESSION_SECRET`, parsed once by the caller; null when it is not set. */
+    sessionSecret: SessionSecretParse | null;
     warn: (message: string) => void;
   }>,
 ): DeckServerLoad {
   const { mode, stack, warn } = options;
-  const secretText = process.env.SASHA_SESSION_SECRET;
-  if (secretText === undefined || secretText === "") return { kind: "off", banner: ["decks: off (they sign in through /account; set SASHA_SESSION_SECRET)"] };
-  const secret = parseSessionSecret(secretText);
+  const secret = options.sessionSecret;
+  if (secret === null) return { kind: "off", banner: ["decks: off (they sign in through /account; set SASHA_SESSION_SECRET)"] };
   if (secret.kind === "error") return { kind: "failed", message: secret.message };
-  const credentials = loadClientCredentials({ path: mode.googleClientPath });
-  if (credentials.kind !== "ok") return { kind: "failed", message: describeAuthFailure(credentials) };
   const dataDirectory = mode.deckDataDirectory ?? (mode.storePath === null ? null : dirname(mode.storePath));
   let storage: DeckStorage;
   if (dataDirectory === null) storage = memoryDeckStorage();
@@ -2359,7 +2330,7 @@ function loadDeckServer(
     directory: storeAccountDirectory({ store: stack.store, vault: stack.vault, now: () => new Date(), newAccountId: randomAccountId }),
     sessionSecret: secret.secret,
     webDistributionDirectory: webBuildDirectory,
-    googleClient: credentials.credentials,
+    googleClient: stack.googleClient,
     createGoogleSlidesInterchange,
     timers: REAL_TIMERS,
     now: () => Date.now(),

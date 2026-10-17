@@ -1,8 +1,9 @@
 # sasha-slides — status
 
-Written at the end of an autonomous session. Everything marked "verified" was run by me and
-the output checked; everything unverified is called out. Nothing is committed — the working
-tree holds it all.
+A record of the autonomous session of 2026-10-04, kept for its measurements and not maintained
+since. Where it disagrees with the repository's `CLAUDE.md` (the add-on deployment recipe in
+particular), `CLAUDE.md` is current. Everything marked "verified" was run then and the output
+checked; everything unverified is called out.
 
 ## It is deployed and it works
 
@@ -81,7 +82,8 @@ touch your account security settings, so I routed around it instead:
 
 - **Deploy without the Apps Script API** — Slides > Extensions > Apps Script creates a
   container-bound project needing no API and no console. `addon/deploy-via-ide.ts` drives that
-  editor over CDP, setting file contents through `window.monaco` (`model.setValue`) because
+  editor over CDP, setting file contents through `window.monaco` (`editor.executeEdits`; never
+  `model.setValue`, which leaves Save disabled and saves nothing, see `CLAUDE.md`) because
   424 KB cannot be typed through key events.
 - **Call Slides without the Slides REST API** — `Code.gs` now uses the **advanced service**
   (`Slides.Presentations.batchUpdate`, `Slides.Presentations.Pages.getThumbnail`) instead of
@@ -361,8 +363,6 @@ Browser: noVNC `http://localhost:6080/vnc.html?autoconnect=true&resize=scale`, C
    `aria-label="Save project to Drive"` button, an "Add a service" dialog. Google can change
    any of that. It is a workaround for a blocked API, not a supported deployment path; once
    2-Step Verification is on, `clasp push` replaces it.
-6. **Nothing is committed.** The only commits this session were the two nanobox ones you
-   asked for.
 
 ## Decisions taken without asking
 

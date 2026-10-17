@@ -43,6 +43,8 @@ import {
 import type { ProposalEnvironment } from "../proposal";
 import { createFakeDrive, type FakeDrive } from "./fake-drive";
 import { createFakeGoogle, fakeGoogleIdentity, FAKE_GOOGLE_AUTHORIZE_URL, type FakeGoogle } from "./fake-google";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
+import { asString } from "../http/json-values.ts";
 
 /** Configured, not derived from the Host header: `resource` must match it exactly. */
 const PUBLIC_URL = "https://slides.example.test";
@@ -503,7 +505,7 @@ describe("a Google consent without the Slides permissions", () => {
       const page = await partial.text();
       assert.match(page, /Google Slides/);
       assert.match(page, /Select all|tick/i, "says what to do on Google's screen");
-      const retry = page.match(/href="([^"]+)"/)?.[1]?.replaceAll("&amp;", "&");
+      const retry = page.match(/<a class="button" href="([^"]+)"/)?.[1]?.replaceAll("&amp;", "&");
       assert.ok(retry !== undefined && retry.startsWith(FAKE_GOOGLE_AUTHORIZE_URL), `retry link goes to Google: ${String(retry)}`);
       assert.equal(await harness.store.googleIdentities.get({ key: "user-a" }), null, "the partial grant is not stored");
 
@@ -1072,12 +1074,8 @@ async function clientRedirectFor(
       return location;
     }
     default:
-      return assertNeverOutcome(options.outcome);
+      return assertNever(options.outcome);
   }
-}
-
-function assertNeverOutcome(value: never): never {
-  throw new Error(`unhandled outcome: ${String(value)}`);
 }
 
 async function registerClient(
@@ -1203,10 +1201,6 @@ function requireRecord(value: unknown): Readonly<Record<string, unknown>> {
     `expected a JSON object, got ${JSON.stringify(value)}`,
   );
   return value as Readonly<Record<string, unknown>>;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
 }
 
 // THE GOOGLE CALLBACK CAN BE KEPT ON LOOPBACK while the public URL is a tunnel. A Desktop OAuth

@@ -17,10 +17,10 @@
  *    (engine/src/model/command-validation.ts), and a malformed one comes back as a rejection.
  */
 import { z } from "zod";
-import { ANIMATION_LIMITS, DEFAULT_ANIMATION_DURATION_MILLISECONDS, type AnimationEdge, type AnimationTrigger, type ScriptedAnimationCategory } from "../engine/src/contracts/animations.ts";
+import { ANIMATION_EDGES, ANIMATION_LIMITS, ANIMATION_TRIGGERS, DEFAULT_ANIMATION_DURATION_MILLISECONDS, type ScriptedAnimationCategory } from "../engine/src/contracts/animations.ts";
 import type { AssistantParagraph } from "../engine/src/contracts/assistant-deck-tools.ts";
 import type { DocumentCommand, DocumentCommandKind } from "../engine/src/contracts/commands.ts";
-import type { ShapePreset, TransitionEasing } from "../engine/src/contracts/document.ts";
+import type { TransitionEasing } from "../engine/src/contracts/document.ts";
 import { COLLABORATION_LIMITS } from "../engine/src/contracts/collaboration.ts";
 import {
   parseAnimationStepId,
@@ -33,9 +33,10 @@ import {
   parseThreadId,
   parseTransitionScriptId,
 } from "../engine/src/contracts/ids.ts";
-import type { ArrowHead, DashStyle, ListGlyph, ThemeColourSlot } from "../engine/src/contracts/style.ts";
+import { THEME_COLOUR_SLOTS, type ArrowHead, type DashStyle, type ListGlyph } from "../engine/src/contracts/style.ts";
+import { TRANSITION_LIMITS } from "../engine/src/contracts/transition-limits.ts";
+import { SHAPE_PRESETS } from "../engine/src/model/stored-values.ts";
 import type { AssistantEditRequest } from "./assistant-edit-request.ts";
-import { SCRIPT_LIMITS } from "./transition-limits.ts";
 
 // --- identifiers -------------------------------------------------------------------------------
 
@@ -51,21 +52,6 @@ const animationStepIdSchema = brandedId({ parse: parseAnimationStepId, label: "b
 
 // --- style values (style.ts) --------------------------------------------------------------------
 
-const THEME_COLOUR_SLOT_VALUES = [
-  "dark1",
-  "light1",
-  "dark2",
-  "light2",
-  "accent1",
-  "accent2",
-  "accent3",
-  "accent4",
-  "accent5",
-  "accent6",
-  "hyperlink",
-  "followedHyperlink",
-] as const satisfies readonly ThemeColourSlot[];
-
 const alphaSchema = z.number().min(0).max(1).default(1);
 
 export const colourSchema = z.discriminatedUnion("kind", [
@@ -77,7 +63,7 @@ export const colourSchema = z.discriminatedUnion("kind", [
       .transform((value) => value.toLowerCase()),
     alpha: alphaSchema,
   }),
-  z.object({ kind: z.literal("theme"), slot: z.enum(THEME_COLOUR_SLOT_VALUES), alpha: alphaSchema }),
+  z.object({ kind: z.literal("theme"), slot: z.enum(THEME_COLOUR_SLOTS), alpha: alphaSchema }),
 ]).meta({ id: "SashaColour" });
 
 const gradientStopsSchema = z.array(z.object({ colour: colourSchema, offset: z.number().min(0).max(1) })).min(2).max(10);
@@ -129,31 +115,6 @@ const textBoxPatchSchema = z.object({
   wrap: z.boolean().exactOptional(),
 });
 
-const SHAPE_PRESET_VALUES = [
-  "textBox",
-  "rectangle",
-  "roundedRectangle",
-  "ellipse",
-  "triangle",
-  "rightTriangle",
-  "diamond",
-  "parallelogram",
-  "trapezoid",
-  "pentagon",
-  "hexagon",
-  "octagon",
-  "fivePointStar",
-  "plus",
-  "heart",
-  "cloud",
-  "speechBubble",
-  "chevron",
-  "rightArrow",
-  "leftArrow",
-  "upArrow",
-  "downArrow",
-] as const satisfies readonly ShapePreset[];
-
 const ARROW_HEAD_VALUES = ["none", "triangle", "openArrow", "stealth", "diamond", "oval", "bar"] as const satisfies readonly ArrowHead[];
 
 /** `AssistantStylePatch`: everything optional, grouped values partial (assistant-edit-request.ts). */
@@ -168,7 +129,7 @@ export const stylePatchSchema = z
     shadow: shadowPatchSchema.nullable().exactOptional(),
     opacity: z.number().min(0).max(1).exactOptional(),
     textBox: textBoxPatchSchema.exactOptional(),
-    preset: z.enum(SHAPE_PRESET_VALUES).exactOptional(),
+    preset: z.enum(SHAPE_PRESETS).exactOptional(),
     crop: z
       .object({ left: z.number().min(0).max(1).exactOptional(), top: z.number().min(0).max(1).exactOptional(), right: z.number().min(0).max(1).exactOptional(), bottom: z.number().min(0).max(1).exactOptional() })
       .exactOptional(),
@@ -302,13 +263,13 @@ const slideTransitionSchema = z.discriminatedUnion("kind", [
       z.object({ effect: z.literal("zoom"), mode: z.enum(["in", "out"]) }),
       z.object({ effect: z.literal("morph") }),
     ]),
-    durationMilliseconds: z.number().min(0).max(SCRIPT_LIMITS.maximumDurationMilliseconds),
+    durationMilliseconds: z.number().min(0).max(TRANSITION_LIMITS.maximumDurationMilliseconds),
     easing: z.enum(["linear", "easeIn", "easeOut", "easeInOut"]).default("easeInOut"),
   }),
   z.object({
     kind: z.literal("scripted"),
     scriptId: transitionScriptIdSchema,
-    durationMilliseconds: z.number().min(0).max(SCRIPT_LIMITS.maximumDurationMilliseconds),
+    durationMilliseconds: z.number().min(0).max(TRANSITION_LIMITS.maximumDurationMilliseconds),
     parameters: serialisableObjectSchema.default({}),
   }),
 ]).meta({ id: "SashaSlideTransition" });
@@ -322,8 +283,6 @@ const slidePropertiesPatchSchema = z.object({
 
 // --- builds (animations.ts) -------------------------------------------------------------------
 
-const ANIMATION_EDGE_VALUES = ["left", "right", "top", "bottom"] as const satisfies readonly AnimationEdge[];
-const ANIMATION_TRIGGER_VALUES = ["onClick", "withPrevious", "afterPrevious"] as const satisfies readonly AnimationTrigger[];
 const SCRIPTED_CATEGORY_VALUES = ["entrance", "emphasis", "exit"] as const satisfies readonly ScriptedAnimationCategory[];
 const EASING_VALUES = ["linear", "easeIn", "easeOut", "easeInOut"] as const satisfies readonly TransitionEasing[];
 
@@ -334,10 +293,10 @@ export const animationEffectSchema = z
   .discriminatedUnion("kind", [
     z.object({ kind: z.literal("appear") }),
     z.object({ kind: z.literal("fadeIn") }),
-    z.object({ kind: z.literal("flyIn"), from: z.enum(ANIMATION_EDGE_VALUES).default("left") }),
+    z.object({ kind: z.literal("flyIn"), from: z.enum(ANIMATION_EDGES).default("left") }),
     z.object({ kind: z.literal("zoomIn") }),
     z.object({ kind: z.literal("floatIn") }),
-    z.object({ kind: z.literal("wipe"), from: z.enum(ANIMATION_EDGE_VALUES).default("left") }),
+    z.object({ kind: z.literal("wipe"), from: z.enum(ANIMATION_EDGES).default("left") }),
     z.object({ kind: z.literal("pulse") }),
     z.object({ kind: z.literal("growShrink"), scale: z.number().min(ANIMATION_LIMITS.minimumScale).max(ANIMATION_LIMITS.maximumScale).default(1.5).describe("Ends this many times its size.") }),
     z.object({
@@ -347,7 +306,7 @@ export const animationEffectSchema = z
     z.object({ kind: z.literal("colourChange"), colour: colourSchema, part: z.enum(["fill", "text"]).default("fill") }),
     z.object({ kind: z.literal("disappear") }),
     z.object({ kind: z.literal("fadeOut") }),
-    z.object({ kind: z.literal("flyOut"), to: z.enum(ANIMATION_EDGE_VALUES).default("right") }),
+    z.object({ kind: z.literal("flyOut"), to: z.enum(ANIMATION_EDGES).default("right") }),
     z.object({ kind: z.literal("zoomOut") }),
     z.object({ kind: z.literal("motionPath"), offsetX: motionOffsetSchema, offsetY: motionOffsetSchema }).describe("A straight move by the offset, in slide units."),
     z.object({
@@ -364,7 +323,7 @@ export const animationEffectSchema = z
       "changes it; exits (disappear, fadeOut, flyOut, zoomOut) hide it after; motionPath moves it.",
   });
 
-const animationTriggerSchema = z.enum(ANIMATION_TRIGGER_VALUES).describe("onClick: the presenter's next click; withPrevious: together with the step before; afterPrevious: when it ends.");
+const animationTriggerSchema = z.enum(ANIMATION_TRIGGERS).describe("onClick: the presenter's next click; withPrevious: together with the step before; afterPrevious: when it ends.");
 const animationDurationSchema = z.number().min(0).max(ANIMATION_LIMITS.maximumDurationMilliseconds);
 const animationDelaySchema = z.number().min(0).max(ANIMATION_LIMITS.maximumDelayMilliseconds);
 
@@ -459,7 +418,7 @@ const assistantEditSchema = z.discriminatedUnion("kind", [
     kind: z.literal("addShape"),
     id: newElementIdSchema,
     slideId: slideIdSchema,
-    preset: z.enum(SHAPE_PRESET_VALUES).default("textBox"),
+    preset: z.enum(SHAPE_PRESETS).default("textBox"),
     frame: assistantFrameSchema.nullable().default(null),
     style: stylePatchSchema.default({}),
     text: paragraphsSchema.default([]),
@@ -565,7 +524,7 @@ export const DECK_WRITE_TRANSITION_INPUT = {
   markup: z.string().default(""),
   defaultParameters: serialisableObjectSchema.default({}),
   assignTo: z
-    .array(z.object({ slideId: slideIdSchema, durationMilliseconds: z.number().min(0).max(SCRIPT_LIMITS.maximumDurationMilliseconds).default(1000) }))
+    .array(z.object({ slideId: slideIdSchema, durationMilliseconds: z.number().min(0).max(TRANSITION_LIMITS.maximumDurationMilliseconds).default(1000) }))
     .max(500)
     .default([])
     .describe("Slides whose transition (into them) becomes this script."),

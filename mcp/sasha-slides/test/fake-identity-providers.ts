@@ -16,10 +16,10 @@
  * the `name` or `email` scope that does not ask for `response_mode=form_post`, as Apple does.
  */
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign, verify, type KeyObject } from "node:crypto";
-import { assertNever } from "../google-auth";
-import type { HttpFetch, HttpFetchInit, HttpFetchResponse } from "../http/identity-providers";
+import type { HttpFetch, HttpFetchInit, HttpFetchResponse } from "../http/http-kit";
 import { APPLE_ISSUER, GITHUB_AUTHORIZE_URL, GITHUB_EMAILS_URL, GITHUB_TOKEN_URL, GITHUB_USER_URL } from "../http/identity-providers";
 import { asRecord, parseJson } from "../http/json-values";
+import { assertNever } from "../engine/src/contracts/assert-never.ts";
 
 /** Answers a request it owns, or returns null so the next route can try. */
 export type FakeRoute = (url: URL, init: HttpFetchInit) => HttpFetchResponse | null;

@@ -12,7 +12,7 @@
  * the "Choose the deck" button is the way in, and it also reopens the picker after a cancel.
  *
  * Not React (the TypeScript skill's default for UI): there is no state to render, only one
- * button and one status line on server-rendered markup. Bundled by `build.ts` into
+ * button and one status line on server-rendered markup. Bundled by `browser-scripts/build.ts` into
  * `../picker-script.generated.ts`, which the page serves at `/comments/allow/picker.js`.
  *
  * Google's `gapi` and `google.picker` globals have no types in this repository, so the few
