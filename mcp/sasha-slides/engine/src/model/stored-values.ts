@@ -54,9 +54,6 @@ import {
 import { isHexadecimalColour } from "../shared/colour-values.ts";
 import { ASSET_MEDIA_TYPES } from "../shared/media-types.ts";
 
-// deck-tools/tool-input-schemas.ts reads the shape presets from here.
-export { SHAPE_PRESETS } from "../shared/closed-sets.ts";
-
 export type Verdict = "valid" | "unsupported" | "wrongType";
 
 /** A stored value as read: present and typed, present but not usable (and why), or absent. */

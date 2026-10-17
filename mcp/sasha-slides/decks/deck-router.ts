@@ -52,7 +52,7 @@ import type { DeckManager, Outcome, Refusal } from "./deck-manager";
 import { parseInvitedRole, parseLinkSharing } from "./deck-records";
 import type { DeckSession, DeckSessionCookies, EmbedSessions } from "./deck-sessions";
 import { constantTimeEqual } from "../http/cookies";
-import { parseMediaType } from "./deck-storage";
+import { parseAssetMediaType } from "../engine/src/shared/media-types.ts";
 import { asRecord } from "./deck-wire-values";
 import type { WebApplication } from "./web-application";
 import { mediaTypeOf, readBody, readJsonBody, sendDeckApiError, sendJson, type JsonBodyRead } from "../http/http-kit";
@@ -354,7 +354,7 @@ export function createDeckRouter(options: DeckRouterOptions): DeckRouter {
 
   async function uploadAsset(options: Readonly<{ request: IncomingMessage; response: ServerResponse; accountId: string; deckId: DeckId }>): Promise<void> {
     const { request, response } = options;
-    const declared = parseMediaType((request.headers["content-type"] ?? "").split(";")[0]?.trim().toLowerCase() ?? "");
+    const declared = parseAssetMediaType((request.headers["content-type"] ?? "").split(";")[0]?.trim().toLowerCase() ?? "");
     // Decided before the body is read: anyone signed in could otherwise make the server hold 25
     // megabytes per request for a deck they cannot even see (putAsset checks again).
     const access = await manager.access({ accountId: options.accountId, deckId: options.deckId });

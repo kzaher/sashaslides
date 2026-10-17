@@ -22,28 +22,19 @@
  * read-only; nothing here writes to `renderer/`) plus this directory's own
  * fixtures for features the basic set does not cover.
  */
-import CDPraw from "chrome-remote-interface";
-import { build } from "esbuild";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CdpModule } from "../../../../types/cdp-types.ts";
-import { extractorScript as compileExtractorScript } from "../../../../renderer/html2slides/extractor-script.ts";
+import { convertInPage, evaluate, openConverter } from "../calibration/in-page-converter.js";
+import type { CdpPage, Conversion } from "../calibration/in-page-converter.js";
 import { STAGED_IMAGE_URL, stagedImageOf } from "../index.js";
 import type { SlideImageUpload } from "../index.js";
 import { kindOf, startTestRun } from "./assert.js";
 
-// chrome-remote-interface ships no .d.ts; its default export is declared
-// `unknown` in types/ambient.d.ts. Narrow it at this one boundary, as
-// convert-pptx-io.ts does.
-const CDP = CDPraw as CdpModule;
-
-const CDP_PORT = 9222;
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../../..");
 const BASIC_FIXTURES = join(REPO_ROOT, "renderer/html2slides/e2e/fixtures-basic");
 const OWN_FIXTURES = join(HERE, "fixtures");
-const HOST_PAGE = join(OWN_FIXTURES, "host.html");
 
 /** 9144000 EMU / 1280 px. */
 const EMU_PER_PX = 7143.75;
@@ -52,54 +43,26 @@ const PAGE_HEIGHT_EMU = 5143500;
 
 const test = startTestRun("browser.e2e");
 
-type ConversionReport = Readonly<{
-  requests: readonly Readonly<Record<string, unknown>>[];
-  unsupported: readonly Readonly<{ kind: string; region: Readonly<{ x: number; y: number; w: number; h: number }>; fallback: string; elementType: string }>[];
-  elementCount: number;
-  malformedCount: number;
-  elapsedMs: number;
-  /** `stackedElements[].zIndex`, in paint order: what a merge stacks the new elements by. */
-  stackedZ: readonly number[];
-}>;
+/** The shared harness's result, its requests read as plain records by the structural checks below. */
+type ConversionReport = Readonly<Omit<Conversion, "requests"> & { requests: readonly Readonly<Record<string, unknown>>[] }>;
 
 async function main(): Promise<void> {
   const only = parseOnly(process.argv.slice(2));
 
-  // 1. The extractor, compiled exactly as the renderer compiles it
-  //    (renderer/html2slides/extractor-script.ts) — a bare IIFE source string.
-  const extractorScript = compileExtractorScript();
-
-  // 2. The converter, bundled as the extension will bundle it: one IIFE on a
-  //    global, no Node builtins. A bundle failure here is a real signal that
-  //    something Node-only crept in.
-  const bundled = await build({
-    entryPoints: [join(HERE, "../index.ts")],
-    bundle: true,
-    write: false,
-    format: "iife",
-    globalName: "SashaConverter",
-    platform: "browser",
-    target: "es2020",
-    logLevel: "silent",
-  });
-  const converterBundle = bundled.outputFiles[0]?.text ?? "";
-  test.check("converter bundles for the browser", converterBundle.length > 0);
-  test.check(
-    "the bundle pulls in no Node builtins",
-    !/require\(["']node:/.test(converterBundle),
-    "a `node:` require survived bundling",
-  );
-
-  const tab = await CDP.New({ port: CDP_PORT, url: `file://${HOST_PAGE}` });
-  const client = await CDP({ target: tab, port: CDP_PORT });
+  // The converter, bundled as the extension will bundle it (one IIFE on a
+  // global, no Node builtins) and injected with the compiled extractor into the
+  // host page by the shared harness. A bundle failure is a real signal that
+  // something Node-only crept in.
+  const browser = await openConverter();
+  const { page } = browser;
   try {
-    const { Runtime, Page } = client;
-    await Page.enable();
-    await Runtime.enable();
-    await waitForHostPage(client);
-
-    await evaluate(client, converterBundle, false);
-    const installed = await evaluate(client, "typeof SashaConverter.convertHtmlToSlideRequests", false);
+    test.check("converter bundles for the browser", browser.bundle.length > 0);
+    test.check(
+      "the bundle pulls in no Node builtins",
+      !/require\(["']node:/.test(browser.bundle),
+      "a `node:` require survived bundling",
+    );
+    const installed = await evaluate(page, "typeof SashaConverter.convertHtmlToSlideRequests", false);
     test.equal("the bundle installs the entry point", installed, "function");
 
     const fixtures = [
@@ -114,7 +77,7 @@ async function main(): Promise<void> {
     const timings: { name: string; ms: number; requests: number }[] = [];
     for (const fixture of fixtures) {
       const html = readFileSync(join(fixture.dir, fixture.name), "utf-8");
-      const report = await convertInPage(client, { html, extractorScript, name: fixture.name });
+      const report = await convert(page, { html, name: fixture.name });
       timings.push({ name: fixture.name, ms: report.elapsedMs, requests: report.requests.length });
       checkFixture({ name: fixture.name, report });
     }
@@ -124,9 +87,8 @@ async function main(): Promise<void> {
         EXPECTED_REQUEST_SHAPES.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
           async (expectation) => ({
             expectation,
-            report: await convertInPage(client, {
+            report: await convert(page, {
               html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
-              extractorScript,
               name: expectation.fixture,
             }),
           }),
@@ -139,9 +101,8 @@ async function main(): Promise<void> {
         EXPECTED_FONT_SIZES.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
           async (expectation) => ({
             expectation,
-            report: await convertInPage(client, {
+            report: await convert(page, {
               html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
-              extractorScript,
               name: expectation.fixture,
             }),
           }),
@@ -154,9 +115,8 @@ async function main(): Promise<void> {
         EXPECTED_BORDERS.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
           async (expectation) => ({
             expectation,
-            report: await convertInPage(client, {
+            report: await convert(page, {
               html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
-              extractorScript,
               name: expectation.fixture,
             }),
           }),
@@ -169,9 +129,8 @@ async function main(): Promise<void> {
         EXPECTED_CELL_FILLS.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
           async (expectation) => ({
             expectation,
-            report: await convertInPage(client, {
+            report: await convert(page, {
               html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
-              extractorScript,
               name: expectation.fixture,
             }),
           }),
@@ -184,9 +143,8 @@ async function main(): Promise<void> {
         EXPECTED_TEXT.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
           async (expectation) => ({
             expectation,
-            report: await convertInPage(client, {
+            report: await convert(page, {
               html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
-              extractorScript,
               name: expectation.fixture,
             }),
           }),
@@ -199,9 +157,8 @@ async function main(): Promise<void> {
         EXPECTED_ANOMALIES.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
           async (expectation) => ({
             expectation,
-            report: await convertInPage(client, {
+            report: await convert(page, {
               html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
-              extractorScript,
               name: expectation.fixture,
             }),
           }),
@@ -214,9 +171,8 @@ async function main(): Promise<void> {
         EXPECTED_STACKING.filter((expectation) => only === null || only.includes(expectation.fixture)).map(
           async (expectation) => ({
             expectation,
-            report: await convertInPage(client, {
+            report: await convert(page, {
               html: readFileSync(join(fixtureDirFor(expectation.fixture), expectation.fixture), "utf-8"),
-              extractorScript,
               name: expectation.fixture,
             }),
           }),
@@ -226,8 +182,7 @@ async function main(): Promise<void> {
 
     reportTimings(timings);
   } finally {
-    await client.close();
-    await CDP.Close({ port: CDP_PORT, id: tab.id });
+    await browser.close();
   }
 
   test.finish();
@@ -731,7 +686,7 @@ function checkExpectedAnomalies(
   }>[],
 ): void {
   for (const { expectation, report } of results) {
-    const kinds = new Set(report.unsupported.map((anomaly) => anomaly.kind));
+    const kinds = new Set<string>(report.unsupported.map((anomaly) => anomaly.kind));
     for (const required of expectation.mustReport) {
       test.check(
         `${expectation.fixture}: reports ${required}`,
@@ -878,76 +833,16 @@ function fixtureDirFor(name: string): string {
   return name.startsWith("slide_") ? BASIC_FIXTURES : OWN_FIXTURES;
 }
 
-/**
- * Convert one slide inside the page. The HTML crosses into the browser as a
- * JSON string literal in the evaluated expression, and the timing is taken
- * in-page so it measures the conversion rather than the CDP round-trip.
- */
-async function convertInPage(
-  client: Awaited<ReturnType<CdpModule>>,
-  options: Readonly<{ html: string; extractorScript: string; name: string }>,
-): Promise<ConversionReport> {
-  const expression = `(async () => {
-    const started = performance.now();
-    const result = await SashaConverter.convertHtmlToSlideRequests({
-      html: ${JSON.stringify(options.html)},
-      presentationId: "test-presentation",
-      pageObjectId: "p1",
-      extractorScript: window.__EXTRACTOR__,
-      container: document.body,
-      objectIdPrefix: ${JSON.stringify(sanitise(options.name))},
-    });
-    return JSON.stringify({
-      requests: result.requests,
-      unsupported: result.unsupported,
-      elementCount: result.elementCount,
-      malformedCount: result.malformedCount,
-      elapsedMs: performance.now() - started,
-      stackedZ: result.stackedElements.map((element) => element.zIndex),
-    });
-  })()`;
-
-  // The extractor goes over as a global so it is not re-serialised per fixture
-  // (it is ~400 KB of compiled JS).
-  await client.Runtime.evaluate({
-    expression: `window.__EXTRACTOR__ = ${JSON.stringify(options.extractorScript)}; true`,
-    returnByValue: true,
+/** Convert one slide in the shared harness, onto the test's page with an object id prefix of its own. */
+async function convert(page: CdpPage, options: Readonly<{ html: string; name: string }>): Promise<ConversionReport> {
+  return convertInPage({
+    page,
+    html: options.html,
+    name: options.name,
+    presentationId: "test-presentation",
+    pageObjectId: "p1",
+    objectIdPrefix: sanitise(options.name),
   });
-  const raw = await evaluate(client, expression, true);
-  if (typeof raw !== "string") throw new Error(`conversion of ${options.name} returned ${typeof raw}`);
-  return JSON.parse(raw) as ConversionReport;
-}
-
-async function evaluate(
-  client: Awaited<ReturnType<CdpModule>>,
-  expression: string,
-  awaitPromise: boolean,
-): Promise<unknown> {
-  const response = await client.Runtime.evaluate({ expression, returnByValue: true, awaitPromise });
-  // `types/cdp-types.ts` types exceptionDetails as `{}` (the protocol shape is
-  // large and mostly unused here), so narrow the two fields this needs.
-  const thrown = response.exceptionDetails as
-    | Readonly<{ text?: string; exception?: Readonly<{ description?: string }> }>
-    | undefined
-    | null;
-  if (thrown !== undefined && thrown !== null) {
-    throw new Error(`page threw: ${thrown.exception?.description ?? thrown.text ?? "<no detail>"}`);
-  }
-  return response.result.value;
-}
-
-/**
- * Poll for the host page rather than sleeping: it is a static local file, so it
- * is ready almost immediately and a fixed wait would just be dead time.
- */
-async function waitForHostPage(client: Awaited<ReturnType<CdpModule>>): Promise<void> {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    const state = await evaluate(client, "document.readyState + '|' + !!document.body", false);
-    if (state === "complete|true") return;
-    await new Promise<void>((done) => setTimeout(done, 25));
-  }
-  throw new Error("host page did not become ready within 5s");
 }
 
 function reportTimings(timings: readonly Readonly<{ name: string; ms: number; requests: number }>[]): void {

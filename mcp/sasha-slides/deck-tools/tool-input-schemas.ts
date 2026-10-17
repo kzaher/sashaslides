@@ -20,7 +20,6 @@ import { z } from "zod";
 import { ANIMATION_EDGES, ANIMATION_LIMITS, ANIMATION_TRIGGERS, DEFAULT_ANIMATION_DURATION_MILLISECONDS, type ScriptedAnimationCategory } from "../engine/src/contracts/animations.ts";
 import type { AssistantParagraph } from "../engine/src/contracts/assistant-deck-tools.ts";
 import type { DocumentCommand, DocumentCommandKind } from "../engine/src/contracts/commands.ts";
-import type { TransitionEasing } from "../engine/src/contracts/document.ts";
 import { COLLABORATION_LIMITS } from "../engine/src/contracts/collaboration.ts";
 import {
   parseAnimationStepId,
@@ -33,9 +32,20 @@ import {
   parseThreadId,
   parseTransitionScriptId,
 } from "../engine/src/contracts/ids.ts";
-import { THEME_COLOUR_SLOTS, type ArrowHead, type DashStyle, type ListGlyph } from "../engine/src/contracts/style.ts";
+import { THEME_COLOUR_SLOTS } from "../engine/src/contracts/style.ts";
 import { TRANSITION_LIMITS } from "../engine/src/contracts/transition-limits.ts";
-import { SHAPE_PRESETS } from "../engine/src/model/stored-values.ts";
+import {
+  ARROW_HEADS,
+  DASH_STYLES,
+  IMAGE_FITS,
+  LINE_ROUTINGS,
+  LIST_GLYPHS,
+  SHAPE_PRESETS,
+  SLIDE_DIRECTIONS,
+  TEXT_AUTOFITS,
+  TRANSITION_EASINGS,
+  VERTICAL_ALIGNMENTS,
+} from "../engine/src/shared/closed-sets.ts";
 import type { AssistantEditRequest } from "./assistant-edit-request.ts";
 
 // --- identifiers -------------------------------------------------------------------------------
@@ -73,17 +83,15 @@ export const fillSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("solid"), colour: colourSchema }),
   z.object({ kind: z.literal("linearGradient"), angle: z.number(), stops: gradientStopsSchema }),
   z.object({ kind: z.literal("radialGradient"), centreX: z.number().min(0).max(1), centreY: z.number().min(0).max(1), stops: gradientStopsSchema }),
-  z.object({ kind: z.literal("image"), assetId: assetIdSchema, fit: z.enum(["cover", "contain", "stretch", "tile"]), opacity: z.number().min(0).max(1).default(1) }),
+  z.object({ kind: z.literal("image"), assetId: assetIdSchema, fit: z.enum(IMAGE_FITS), opacity: z.number().min(0).max(1).default(1) }),
 ]).meta({ id: "SashaFill" });
 
-const DASH_STYLE_VALUES = ["solid", "dot", "dash", "dashDot", "longDash", "longDashDot"] as const satisfies readonly DashStyle[];
-
-const strokeSchema = z.object({ width: z.number().min(0).max(200), colour: colourSchema, dash: z.enum(DASH_STYLE_VALUES).default("solid") }).meta({ id: "SashaStroke" });
+const strokeSchema = z.object({ width: z.number().min(0).max(200), colour: colourSchema, dash: z.enum(DASH_STYLES).default("solid") }).meta({ id: "SashaStroke" });
 
 const strokePatchSchema = z.object({
   width: z.number().min(0).max(200).exactOptional(),
   colour: colourSchema.exactOptional(),
-  dash: z.enum(DASH_STYLE_VALUES).exactOptional(),
+  dash: z.enum(DASH_STYLES).exactOptional(),
 }).meta({ id: "SashaStrokePatch" });
 
 const borderPatchSchema = z.union([
@@ -106,16 +114,14 @@ const shadowPatchSchema = z.object({
 });
 
 const textBoxPatchSchema = z.object({
-  verticalAlignment: z.enum(["top", "middle", "bottom"]).exactOptional(),
+  verticalAlignment: z.enum(VERTICAL_ALIGNMENTS).exactOptional(),
   paddingTop: z.number().min(0).exactOptional(),
   paddingRight: z.number().min(0).exactOptional(),
   paddingBottom: z.number().min(0).exactOptional(),
   paddingLeft: z.number().min(0).exactOptional(),
-  autofit: z.enum(["none", "shrinkText", "resizeShape"]).exactOptional(),
+  autofit: z.enum(TEXT_AUTOFITS).exactOptional(),
   wrap: z.boolean().exactOptional(),
 });
-
-const ARROW_HEAD_VALUES = ["none", "triangle", "openArrow", "stealth", "diamond", "oval", "bar"] as const satisfies readonly ArrowHead[];
 
 /** `AssistantStylePatch`: everything optional, grouped values partial (assistant-edit-request.ts). */
 export const stylePatchSchema = z
@@ -134,9 +140,9 @@ export const stylePatchSchema = z
       .object({ left: z.number().min(0).max(1).exactOptional(), top: z.number().min(0).max(1).exactOptional(), right: z.number().min(0).max(1).exactOptional(), bottom: z.number().min(0).max(1).exactOptional() })
       .exactOptional(),
     stroke: strokePatchSchema.exactOptional(),
-    startArrow: z.enum(ARROW_HEAD_VALUES).exactOptional(),
-    endArrow: z.enum(ARROW_HEAD_VALUES).exactOptional(),
-    routing: z.enum(["straight", "elbow", "curved"]).exactOptional(),
+    startArrow: z.enum(ARROW_HEADS).exactOptional(),
+    endArrow: z.enum(ARROW_HEADS).exactOptional(),
+    routing: z.enum(LINE_ROUTINGS).exactOptional(),
   })
   .meta({
     id: "SashaStylePatch",
@@ -164,21 +170,6 @@ export const runStylePatchSchema = z.object({
   textCase: z.enum(["none", "smallCaps", "allCaps"]).exactOptional(),
 }).meta({ id: "SashaRunStyle" });
 
-const LIST_GLYPH_VALUES = [
-  "disc",
-  "circle",
-  "square",
-  "arrow",
-  "star",
-  "checkbox",
-  "decimal",
-  "decimalZeroPadded",
-  "upperAlphabetic",
-  "lowerAlphabetic",
-  "upperRoman",
-  "lowerRoman",
-] as const satisfies readonly ListGlyph[];
-
 export const paragraphStylePatchSchema = z.object({
   alignment: z.enum(["start", "centre", "end", "justify"]).exactOptional(),
   lineSpacing: z.number().positive().max(10).exactOptional(),
@@ -189,7 +180,7 @@ export const paragraphStylePatchSchema = z.object({
   direction: z.enum(["leftToRight", "rightToLeft"]).exactOptional(),
   list: z
     .discriminatedUnion("kind", [
-      z.object({ kind: z.literal("list"), listId: listIdSchema.describe("Paragraphs sharing a list id number together, e.g. ls_points01."), glyph: z.enum(LIST_GLYPH_VALUES), level: z.number().int().min(0).max(8).default(0) }),
+      z.object({ kind: z.literal("list"), listId: listIdSchema.describe("Paragraphs sharing a list id number together, e.g. ls_points01."), glyph: z.enum(LIST_GLYPHS), level: z.number().int().min(0).max(8).default(0) }),
       z.object({ kind: z.literal("none") }),
     ])
     .exactOptional(),
@@ -251,7 +242,7 @@ const placeholderTextSchema = z.object({
 
 const serialisableObjectSchema = z.record(z.string(), z.json());
 
-const slideDirectionSchema = z.enum(["fromLeft", "fromRight", "fromTop", "fromBottom"]);
+const slideDirectionSchema = z.enum(SLIDE_DIRECTIONS);
 
 const slideTransitionSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -264,7 +255,7 @@ const slideTransitionSchema = z.discriminatedUnion("kind", [
       z.object({ effect: z.literal("morph") }),
     ]),
     durationMilliseconds: z.number().min(0).max(TRANSITION_LIMITS.maximumDurationMilliseconds),
-    easing: z.enum(["linear", "easeIn", "easeOut", "easeInOut"]).default("easeInOut"),
+    easing: z.enum(TRANSITION_EASINGS).default("easeInOut"),
   }),
   z.object({
     kind: z.literal("scripted"),
@@ -284,7 +275,6 @@ const slidePropertiesPatchSchema = z.object({
 // --- builds (animations.ts) -------------------------------------------------------------------
 
 const SCRIPTED_CATEGORY_VALUES = ["entrance", "emphasis", "exit"] as const satisfies readonly ScriptedAnimationCategory[];
-const EASING_VALUES = ["linear", "easeIn", "easeOut", "easeInOut"] as const satisfies readonly TransitionEasing[];
 
 const motionOffsetSchema = z.number().min(-ANIMATION_LIMITS.maximumMotionOffset).max(ANIMATION_LIMITS.maximumMotionOffset);
 
@@ -334,7 +324,7 @@ const assistantAnimationStepSchema = z
     trigger: animationTriggerSchema.default("onClick"),
     durationMilliseconds: animationDurationSchema.default(DEFAULT_ANIMATION_DURATION_MILLISECONDS),
     delayMilliseconds: animationDelaySchema.default(0),
-    easing: z.enum(EASING_VALUES).default("easeOut"),
+    easing: z.enum(TRANSITION_EASINGS).default("easeOut"),
   })
   .meta({ id: "SashaAnimationStep" });
 
@@ -344,7 +334,7 @@ const animationStepPatchSchema = z.object({
   trigger: animationTriggerSchema.exactOptional(),
   durationMilliseconds: animationDurationSchema.exactOptional(),
   delayMilliseconds: animationDelaySchema.exactOptional(),
-  easing: z.enum(EASING_VALUES).exactOptional(),
+  easing: z.enum(TRANSITION_EASINGS).exactOptional(),
 });
 
 const animationStepIdsSchema = z.array(animationStepIdSchema).min(1).max(ANIMATION_LIMITS.maximumStepsPerSlide);

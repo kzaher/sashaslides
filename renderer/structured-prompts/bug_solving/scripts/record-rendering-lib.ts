@@ -20,9 +20,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { Readable } from "stream";
+import { pathToFileURL } from "url";
 import CDPDefault from "chrome-remote-interface";
 import { google } from "googleapis";
 import { runConvertPptx } from "../../../html2slides/convert-pptx-io";
+import { DEV_CREDENTIALS_PATH, DEV_TOKENS_PATH, loadDevOAuthClient } from "../../../html2slides/dev-google-auth.ts";
+import { DEFAULT_CAPTURE_CHROME_PORT, openChromeTab } from "../../../html2slides/reverse/chrome-capture.ts";
 import { exportThumbs } from "../../../html2slides/export-thumbs-lib";
 import type { CdpModule } from "../../../../types/cdp-types.ts";
 
@@ -38,6 +41,8 @@ export interface RecordRenderingOpts {
   title?: string;
   fixtures?: string;
   mode?: Mode;
+  /** The DevTools port of the headless Chrome that captures and reaps tabs. Default DEFAULT_CAPTURE_CHROME_PORT. */
+  chromePort?: number;
 }
 
 export interface RecordRenderingResult {
@@ -46,8 +51,6 @@ export interface RecordRenderingResult {
   thumbsDir?: string;
   presId?: string;
 }
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Bounded-concurrency map: run `fn(item)` for every item in `items`,
@@ -156,8 +159,7 @@ async function recordPptx(slides: string[], outDir: string, fixturesDir: string)
  * Screenshot each fixture HTML in headless Chrome at the same 1280×720 (2×
  * DPR) viewport convert-pptx uses for DOM extraction. Idempotent.
  */
-async function screenshotFixtures(slides: string[], fixturesDir: string, outDir: string) {
-  const PORT = 9222;
+async function screenshotFixtures(slides: string[], fixturesDir: string, outDir: string, port: number) {
   const missing = slides.filter((id) => !existsSync(join(outDir, `${id}.png`)));
   if (missing.length === 0) {
     console.log(`  screenshots: all ${slides.length} present, skipping`);
@@ -165,54 +167,33 @@ async function screenshotFixtures(slides: string[], fixturesDir: string, outDir:
   }
   const conc = Math.min(chromeConcurrency(), missing.length);
   console.log(`  screenshots: capturing ${missing.length}/${slides.length} (rest cached, concurrency=${conc}, tab-reuse)...`);
-  // Each worker owns ONE reused tab for its whole lifetime: navigate → capture per
-  // slide, close the tab ONCE at the end. No per-slide CDP.New/CDP.Close churn (the
-  // tab-leak + Chrome-wedge source). A shared cursor hands the next slide to
-  // whichever worker is free; the finally always closes the tab.
+  // Each worker owns ONE reused tab (the shared capture tab: load event subscribed
+  // before navigating, readiness polled) for its whole lifetime, closed ONCE at the
+  // end by `await using`. No per-slide tab churn (the tab-leak + Chrome-wedge
+  // source). A shared cursor hands the next slide to whichever worker is free.
   let cursor = 0;
   const worker = async (): Promise<void> => {
-    const target = await CDP.New({ port: PORT, url: "about:blank" });
-    const client = await CDP({ target, port: PORT });
-    try {
-      const { Page, Emulation } = client;
-      await Page.enable();
-      await Emulation.setDeviceMetricsOverride({ width: 1280, height: 720, deviceScaleFactor: 2, mobile: false });
-      for (let i = cursor++; i < missing.length; i = cursor++) {
-        const id = missing[i];
-        const outPath = join(outDir, `${id}.png`);
-        await Page.navigate({ url: "file://" + resolve(fixturesDir, `${id}.html`) });
-        await Page.loadEventFired();
-        await sleep(300);
-        const { data } = await Page.captureScreenshot({ format: "png", clip: { x: 0, y: 0, width: 1280, height: 720, scale: 1 } });
-        writeFileSync(outPath, Buffer.from(data, "base64"));
-        console.log(`    ${id} → ${outPath}`);
-      }
-    } finally {
-      try { await client.close(); } catch { /* */ }
-      try { await CDP.Close({ port: PORT, id: target.id }); } catch { /* */ }
+    await using tab = await openChromeTab({ port, deviceScaleFactor: 2 });
+    for (let i = cursor++; i < missing.length; i = cursor++) {
+      const id = missing[i];
+      const outPath = join(outDir, `${id}.png`);
+      const capture = await tab.capture({ address: pathToFileURL(resolve(fixturesDir, `${id}.html`)).href });
+      writeFileSync(outPath, capture.png);
+      console.log(`    ${id} → ${outPath}${capture.readiness === "timedOut" ? " (page never reported ready)" : ""}`);
     }
   };
   await Promise.all(Array.from({ length: conc }, () => worker()));
 }
 
-/** Google Drive + Slides oauth2 client built from the project's saved tokens. */
+/** Google Drive + Slides oauth2 client built from the project's saved tokens (dev-google-auth.ts). */
 export function getGoogleAuth() {
-  const credsPath = resolve("/workspaces/sashaslides/.auth/google_oauth.json");
-  const tokensPath = resolve("/workspaces/sashaslides/.auth/tokens.json");
-  if (!existsSync(credsPath) || !existsSync(tokensPath)) {
+  if (!existsSync(DEV_CREDENTIALS_PATH) || !existsSync(DEV_TOKENS_PATH)) {
     throw new Error(
       `Missing Google credentials. Run \`npx tsx /workspaces/sashaslides/.auth/generate-token.ts\` first. ` +
-        `Looked for: ${credsPath}, ${tokensPath}`,
+        `Looked for: ${DEV_CREDENTIALS_PATH}, ${DEV_TOKENS_PATH}`,
     );
   }
-  const creds = JSON.parse(readFileSync(credsPath, "utf-8")).installed;
-  const tokens = JSON.parse(readFileSync(tokensPath, "utf-8"));
-  const oauth2 = new google.auth.OAuth2(creds.client_id, creds.client_secret, creds.redirect_uris?.[0]);
-  oauth2.setCredentials(tokens);
-  oauth2.on("tokens", (newTokens) => {
-    writeFileSync(tokensPath, JSON.stringify({ ...tokens, ...newTokens }, null, 2));
-  });
-  return oauth2;
+  return loadDevOAuthClient({ persistRefreshedTokens: true });
 }
 
 /**
@@ -319,6 +300,7 @@ export async function recordRendering(opts: RecordRenderingOpts): Promise<Record
   const title = opts.title ?? `bug_solving-${Date.now()}`;
   const fixtures = opts.fixtures ?? "renderer/html2slides/e2e/fixtures";
   const mode: Mode = opts.mode ?? "full";
+  const chromePort = opts.chromePort ?? DEFAULT_CAPTURE_CHROME_PORT;
   if (!slides || slides.length === 0) throw new Error("recordRendering: slides is required and non-empty");
   if (!opts.out) throw new Error("recordRendering: out is required");
   if (mode !== "pptx" && mode !== "screenshots" && mode !== "full") {
@@ -350,12 +332,12 @@ export async function recordRendering(opts: RecordRenderingOpts): Promise<Record
 
   // Start from a clean Chrome (reap orphaned tabs from a prior crashed/wedged
   // render) so this render can't inherit the leak cascade. Gated (see reapAllPages).
-  await reapAllPages(9222);
+  await reapAllPages(chromePort);
 
   await recordPptx(slides, pptxDir, fixtures);
   assertComplete(pptxDir, "pptx", "pptx");
   if (mode !== "pptx") {
-    await screenshotFixtures(slides, fixtures, originalsDir);
+    await screenshotFixtures(slides, fixtures, originalsDir, chromePort);
     assertComplete(originalsDir, "png", "screenshots");
   }
   let presId: string | undefined;

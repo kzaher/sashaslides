@@ -44,6 +44,7 @@ import type { DiscussionLogEntry } from "../engine/src/contracts/discussion.ts";
 import type { AssetMediaType } from "../engine/src/contracts/document.ts";
 import { parseAssetId, type AssetId, type DeckId } from "../engine/src/contracts/ids.ts";
 import { isDocumentUpdate } from "../engine/src/server/index.ts";
+import { parseAssetMediaType } from "../engine/src/shared/media-types.ts";
 import { parseDiscussionLogEntry } from "./deck-wire-values";
 import type { AccountId, AccountVault } from "../http/account-vault";
 import { EMPTY_DECK_INDEX, parseDeckIndex, parseDeckRecord, type DeckIndex, type DeckRecord } from "./deck-records";
@@ -216,7 +217,7 @@ export function openFileDeckStorage(
       if (text === null) return null;
       const [header, sealed] = text.split("\n");
       const [mediaType] = (header ?? "").split(" ");
-      const parsedType = parseMediaType(mediaType ?? "");
+      const parsedType = parseAssetMediaType(mediaType ?? "");
       const opened = sealed === undefined ? null : await openSealed(ownerAccountId, sealed.trim());
       if (parsedType === null || opened === null) return null;
       return { mediaType: parsedType, bytes: Buffer.from(opened, "base64url") };
@@ -342,12 +343,6 @@ export function memoryDeckStorage(): DeckStorage {
       return Promise.resolve();
     },
   };
-}
-
-export const ASSET_MEDIA_TYPES: readonly AssetMediaType[] = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
-
-export function parseMediaType(candidate: string): AssetMediaType | null {
-  return ASSET_MEDIA_TYPES.find((mediaType) => mediaType === candidate) ?? null;
 }
 
 const SNAPSHOT_HEADER = /^sasha-deck-snapshot 1 (\d+)$/u;
