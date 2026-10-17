@@ -24,31 +24,11 @@ import CDPDefault from "chrome-remote-interface";
 import { google } from "googleapis";
 import { runConvertPptx } from "../../../html2slides/convert-pptx-io";
 import { exportThumbs } from "../../../html2slides/export-thumbs-lib";
+import type { CdpModule } from "../../../../types/cdp-types.ts";
 
-// chrome-remote-interface ships no .d.ts (its default export types as
-// `unknown` via types/ambient.d.ts). Narrow the boundary into the methods we
-// actually invoke — the only place untyped CDP becomes typed.
-interface CDPTarget { id: string; url: string; type: string }
-interface CDPEmulation {
-  setDeviceMetricsOverride(opts: { width: number; height: number; deviceScaleFactor: number; mobile: boolean }): Promise<unknown>;
-}
-interface CDPPage {
-  enable(): Promise<unknown>;
-  navigate(opts: { url: string }): Promise<unknown>;
-  loadEventFired(): Promise<unknown>;
-  captureScreenshot(opts?: { format?: string; clip?: { x: number; y: number; width: number; height: number; scale?: number } }): Promise<{ data: string }>;
-}
-interface CDPClient {
-  Page: CDPPage;
-  Emulation: CDPEmulation;
-  close(): Promise<void>;
-}
-interface CDPModule {
-  (opts?: { target?: { id: string; url: string }; port?: number }): Promise<CDPClient>;
-  New(opts: { port: number; url?: string }): Promise<CDPTarget>;
-  Close(opts: { port: number; id: string }): Promise<void>;
-}
-const CDP = CDPDefault as CDPModule;
+// chrome-remote-interface ships no .d.ts; its default export is declared
+// `unknown` (types/ambient.d.ts). Narrow it to the shared typed boundary once.
+const CDP = CDPDefault as CdpModule;
 
 export type Mode = "pptx" | "screenshots" | "full";
 
@@ -136,7 +116,7 @@ function chromeConcurrency(): number {
 async function reapAllPages(port: number): Promise<void> {
   if (process.env.RECORD_REAP_TABS !== "1") return;
   try {
-    const list = (await CDP.List({ port })) as Array<{ id: string; type: string }>;
+    const list = await CDP.List({ port });
     const pages = list.filter((t) => t.type === "page");
     for (const t of pages) { try { await CDP.Close({ port, id: t.id }); } catch { /* */ } }
     if (pages.length) console.log(`  [reap] closed ${pages.length} pre-existing tab(s) for a clean render`);

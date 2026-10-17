@@ -20,7 +20,7 @@
  */
 import CDPraw from "chrome-remote-interface";
 import { inflateRawSync } from "node:zlib";
-import type { CdpModule } from "../../types/cdp-types.ts";
+import type { CdpModule } from "../../../types/cdp-types.ts";
 import { extractXmlFromEditableSvg } from "../drawio-store.ts";
 
 const CDP = CDPraw as unknown as CdpModule;

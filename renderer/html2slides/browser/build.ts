@@ -5,17 +5,18 @@
  *
  * Inputs (all compiled/inlined at build time):
  *   - extract-dom.ts       → JS string, substituted into main.ts via esbuild define
- *   - main.ts              → IIFE bundle, with Node-only imports aliased to stubs
+ *   - main.ts              → IIFE bundle (browser-bundle.ts)
  *   - pptxgenjs.bundle.js  → attaches window.PptxGenJS
  *   - jszip.min.js         → attaches window.JSZip
  *
  * Output (mirrors the source path under the repo-root dist/ — gitignored):
  *   - dist/renderer/html2slides/browser/html2slides.html (self-contained, no network deps)
  */
-import { build, transformSync } from "esbuild";
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+import { extractorScript } from "../extractor-script.ts";
+import { browserBundle } from "./browser-bundle.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../../..");
@@ -23,49 +24,12 @@ const ROOT = resolve(HERE, "../../..");
 function readText(p: string): string { return readFileSync(p, "utf-8"); }
 
 async function main() {
-  // 1. Compile extract-dom.ts → JS string. Same options as convert-pptx-lib.ts.
-  const extractTs = readText(join(HERE, "..", "extract-dom.ts"));
-  const extractJs = transformSync(extractTs, { loader: "ts", target: "es2020" }).code;
+  // 1. Compile extract-dom.ts → JS string (extractor-script.ts, as convert-pptx-io.ts does).
+  const extractJs = extractorScript();
   console.log(`extract-dom.ts → ${extractJs.length.toLocaleString()} bytes JS`);
 
-  // 2. Bundle main.ts. Node-only modules are aliased to per-stub files so the
-  //    convert-pptx-lib top-level imports don't blow up the browser bundle.
-  //    `define` substitutes the extract-dom JS string at every use site.
-  const stubEmpty = join(HERE, "stubs", "empty.ts");
-  const stubModule = join(HERE, "stubs", "module.ts");
-  const result = await build({
-    entryPoints: [join(HERE, "main.ts")],
-    bundle: true,
-    write: false,
-    format: "iife",
-    platform: "browser",
-    target: "es2020",
-    minify: false,
-    sourcemap: false,
-    alias: {
-      "fs": stubEmpty,
-      "path": stubEmpty,
-      "stream": stubEmpty,
-      "url": stubEmpty,
-      "module": stubModule,
-      "chrome-remote-interface": stubEmpty,
-      "googleapis": stubEmpty,
-      "esbuild": stubEmpty,
-      // pptxgenjs + jszip are inlined as vendor <script> tags below; alias the
-      // module specifiers to thin stubs that read window.PptxGenJS / window.JSZip
-      // so esbuild doesn't bundle the ~560 KB of source twice.
-      "pptxgenjs": join(HERE, "stubs", "pptxgenjs-global.ts"),
-      "jszip": join(HERE, "stubs", "jszip-global.ts"),
-    },
-    define: {
-      __EXTRACT_JS_LITERAL__: JSON.stringify(extractJs),
-    },
-    logLevel: "info",
-  });
-  if (!result.outputFiles || result.outputFiles.length === 0) {
-    throw new Error("esbuild produced no output");
-  }
-  const mainJs = result.outputFiles[0].text;
+  // 2. Bundle main.ts (browser-bundle.ts: vendor aliases + the inlined extract-dom string).
+  const mainJs = await browserBundle(join(HERE, "main.ts"), extractJs);
   console.log(`main bundle → ${mainJs.length.toLocaleString()} bytes JS`);
 
   // 3. Read vendor bundles + the slides-scraper snippet (verbatim text shown

@@ -3,7 +3,7 @@
  * build-addon.ts — Bundles the Google Slides add-on (sidebar + bound Apps
  * Script) from the shared browser conversion core.
  *
- * It mirrors build.ts (same esbuild config / vendor inlining) but targets the
+ * It mirrors build.ts (same browser-bundle.ts esbuild config) but targets the
  * add-on instead of a standalone page. Output is a ready-to-push Apps Script
  * project under the repo-root dist/ (gitignored), mirroring the source path:
  *
@@ -21,17 +21,16 @@
  * Push it with clasp (`cd dist/renderer/html2slides/addon && clasp push`) or
  * paste the three files into Extensions → Apps Script. See addon/README.md.
  */
-import { build, transformSync } from "esbuild";
 import { execSync } from "child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+import { extractorScript } from "../extractor-script.ts";
+import { browserBundle } from "./browser-bundle.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../../..");
 const OUT = join(ROOT, "dist", "renderer", "html2slides", "addon");
-
-function readText(p: string): string { return readFileSync(p, "utf-8"); }
 
 // ---------------------------------------------------------------------------
 // Apps Script server (Code.gs) — plain V8 JavaScript, served as a .gs file.
@@ -890,63 +889,18 @@ const APPSSCRIPT_JSON = JSON.stringify({
 
 async function main() {
   // 1. Compile extract-dom.ts -> JS string (same as build.ts).
-  const extractTs = readText(join(HERE, "..", "extract-dom.ts"));
-  const extractJs = transformSync(extractTs, { loader: "ts", target: "es2020" }).code;
+  const extractJs = extractorScript();
   console.log(`extract-dom.ts → ${extractJs.length.toLocaleString()} bytes JS`);
 
-  // 2. Bundle addon-main.ts (same aliases/define as build.ts).
-  const stubEmpty = join(HERE, "stubs", "empty.ts");
-  const stubModule = join(HERE, "stubs", "module.ts");
-  const result = await build({
-    entryPoints: [join(HERE, "addon-main.ts")],
-    bundle: true,
-    write: false,
-    format: "iife",
-    platform: "browser",
-    target: "es2020",
-    minify: false,
-    sourcemap: false,
-    alias: {
-      "fs": stubEmpty,
-      "path": stubEmpty,
-      "stream": stubEmpty,
-      "url": stubEmpty,
-      "module": stubModule,
-      "chrome-remote-interface": stubEmpty,
-      "googleapis": stubEmpty,
-      "esbuild": stubEmpty,
-      "pptxgenjs": join(HERE, "stubs", "pptxgenjs-global.ts"),
-      "jszip": join(HERE, "stubs", "jszip-global.ts"),
-    },
-    define: {
-      __EXTRACT_JS_LITERAL__: JSON.stringify(extractJs),
-    },
-    logLevel: "info",
-  });
-  if (!result.outputFiles || result.outputFiles.length === 0) {
-    throw new Error("esbuild produced no output");
-  }
-  const mainJs = result.outputFiles[0].text;
+  // 2. Bundle addon-main.ts (same browser-bundle.ts config as build.ts).
+  const mainJs = await browserBundle(join(HERE, "addon-main.ts"), extractJs);
   console.log(`addon bundle → ${mainJs.length.toLocaleString()} bytes JS`);
 
   // 2b. Bundle insert-feature.ts → addon-server/public/convert-bundle.js (same
-  //     esbuild config: stubs + window globals for pptxgenjs/jszip + the inlined
-  //     extract-dom blob). This is what gives the SERVER-HOSTED UI its
+  //     config: window globals for pptxgenjs/jszip + the inlined extract-dom
+  //     blob). This is what gives the SERVER-HOSTED UI its
   //     bridge.insert(position): convert HTML→pptx in-browser, then google.script.run.
-  const convResult = await build({
-    entryPoints: [join(HERE, "insert-feature.ts")],
-    bundle: true, write: false, format: "iife", platform: "browser", target: "es2020",
-    minify: false, sourcemap: false,
-    alias: {
-      "fs": stubEmpty, "path": stubEmpty, "stream": stubEmpty, "url": stubEmpty,
-      "module": stubModule, "chrome-remote-interface": stubEmpty, "googleapis": stubEmpty, "esbuild": stubEmpty,
-      "pptxgenjs": join(HERE, "stubs", "pptxgenjs-global.ts"),
-      "jszip": join(HERE, "stubs", "jszip-global.ts"),
-    },
-    define: { __EXTRACT_JS_LITERAL__: JSON.stringify(extractJs) },
-    logLevel: "info",
-  });
-  const convertBundleJs = convResult.outputFiles![0].text;
+  const convertBundleJs = await browserBundle(join(HERE, "insert-feature.ts"), extractJs);
   const convertBundlePath = join(HERE, "..", "addon-server", "public", "convert-bundle.js");
   writeFileSync(convertBundlePath, convertBundleJs);
   console.log(`convert-bundle → ${convertBundleJs.length.toLocaleString()} bytes → ${convertBundlePath}`);

@@ -13,9 +13,6 @@
     "eval":          "cd scripts && npx tsx run-eval-multi.ts",
     "eval:force":    "cd scripts && npx tsx run-eval-multi.ts --force",
     "eval:one":      "cd scripts && npx tsx run-eval-multi.ts --pres",
-    "eval:quick":    "cd scripts && npx tsx run-eval-multi.ts --max 1",
-
-    "render":        "cd renderer && npx tsx html-to-slides.ts",
-    "render:eval":   "cd renderer && npx tsx eval-renderer.ts"
+    "eval:quick":    "cd scripts && npx tsx run-eval-multi.ts --max 1"
   }
 }

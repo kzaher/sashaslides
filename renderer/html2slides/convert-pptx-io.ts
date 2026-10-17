@@ -25,8 +25,9 @@ import type { CdpModule } from "../../types/cdp-types.ts";
 import { readFileSync, writeFileSync, readdirSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
 import { Readable } from "stream";
-import { transformSync } from "esbuild";
 import JSZip from "jszip";
+
+import { extractorScript } from "./extractor-script.ts";
 
 import {
   buildEditableSvg,
@@ -41,9 +42,6 @@ import {
   injectBulletColorsIntoZip,
   injectStrokeAlignmentIntoZip,
   injectRound2SameRectAdjIntoZip,
-  injectShapeNoLineIntoZip,
-  injectCellNoBorderIntoZip,
-  injectClipGroupsIntoZip,
   SLIDE_W_PX,
   SLIDE_H_PX,
   type Extraction,
@@ -63,13 +61,10 @@ const CDP_PORT = Number(process.env.HTML2SLIDES_CHROME_PORT ?? "9222");
 // https://github.com/cyrus-and/chrome-remote-interface#cdpnewoptions-callback
 const CDP = CDPraw as CdpModule;
 
-// Compile extract-dom.ts → JS once at module load. Only this Node-only file
-// reads the source; the browser bundle inlines the compiled string at build
-// time via esbuild `define` and never touches this module.
-const EXTRACT_JS = transformSync(
-  readFileSync(join(dirname(new URL(import.meta.url).pathname), "extract-dom.ts"), "utf-8"),
-  { loader: "ts", target: "es2020" },
-).code;
+// Compile extract-dom.ts → JS once at module load (extractor-script.ts). The
+// browser bundle inlines the same compiled string at build time via esbuild
+// `define` and never touches this module.
+const EXTRACT_JS = extractorScript();
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -316,39 +311,6 @@ export async function injectRound2SameRectAdj(pptxPath: string): Promise<void> {
     const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
     writeFileSync(pptxPath, out);
     console.log(`  round2SameRect adj: ${patched} prstGeom(s) → adj1/adj2`);
-  }
-}
-
-export async function injectShapeNoLine(pptxPath: string): Promise<void> {
-  const buf = readFileSync(pptxPath);
-  const zip = await JSZip.loadAsync(buf);
-  const patched = await injectShapeNoLineIntoZip(zip);
-  if (patched > 0) {
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    writeFileSync(pptxPath, out);
-    console.log(`  Shape no-line: ${patched} empty <a:ln> rewrite(s) to <a:noFill/>`);
-  }
-}
-
-export async function injectCellNoBorder(pptxPath: string): Promise<void> {
-  const buf = readFileSync(pptxPath);
-  const zip = await JSZip.loadAsync(buf);
-  const patched = await injectCellNoBorderIntoZip(zip);
-  if (patched > 0) {
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    writeFileSync(pptxPath, out);
-    console.log(`  Cell no-border: ${patched} <a:ln[LRTB] w=0> rewrite(s) to <a:noFill/>`);
-  }
-}
-
-export async function injectClipGroups(pptxPath: string): Promise<void> {
-  const buf = readFileSync(pptxPath);
-  const zip = await JSZip.loadAsync(buf);
-  const created = await injectClipGroupsIntoZip(zip);
-  if (created > 0) {
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    writeFileSync(pptxPath, out);
-    console.log(`  Clip groups: ${created} <p:grpSp>(s) wrapping patch+host pairs`);
   }
 }
 

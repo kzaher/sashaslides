@@ -23,18 +23,19 @@
  * fixtures for features the basic set does not cover.
  */
 import CDPraw from "chrome-remote-interface";
-import { build, transformSync } from "esbuild";
+import { build } from "esbuild";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CdpModule } from "../../../../types/cdp-types.ts";
+import { extractorScript as compileExtractorScript } from "../../../../renderer/html2slides/extractor-script.ts";
 import { STAGED_IMAGE_URL, stagedImageOf } from "../index.js";
 import type { SlideImageUpload } from "../index.js";
 import { kindOf, startTestRun } from "./assert.js";
 
 // chrome-remote-interface ships no .d.ts; its default export is declared
 // `unknown` in types/ambient.d.ts. Narrow it at this one boundary, as
-// dump-table.ts and convert-pptx-io.ts do.
+// convert-pptx-io.ts does.
 const CDP = CDPraw as CdpModule;
 
 const CDP_PORT = 9222;
@@ -65,11 +66,8 @@ async function main(): Promise<void> {
   const only = parseOnly(process.argv.slice(2));
 
   // 1. The extractor, compiled exactly as the renderer compiles it
-  //    (convert-pptx-io.ts:67-71) — a bare IIFE source string.
-  const extractorScript = transformSync(
-    readFileSync(join(REPO_ROOT, "renderer/html2slides/extract-dom.ts"), "utf-8"),
-    { loader: "ts", target: "es2020" },
-  ).code;
+  //    (renderer/html2slides/extractor-script.ts) — a bare IIFE source string.
+  const extractorScript = compileExtractorScript();
 
   // 2. The converter, bundled as the extension will bundle it: one IIFE on a
   //    global, no Node builtins. A bundle failure here is a real signal that

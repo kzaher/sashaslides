@@ -117,10 +117,6 @@ analysis/
 │   ├── extract-slides.ts           # CDP extraction from Google Slides
 │   └── screenshot-html-slides.ts   # HTML → PNG via Chrome
 │
-├── renderer/                       # HTML → Google Slides converter
-│   ├── html-to-slides.ts
-│   └── eval-renderer.ts
-│
 ├── skills/                         # Claude Code skills
 │   ├── extract-slides.{md,sh}
 │   └── analyze-slides.{md,sh}

@@ -2,10 +2,10 @@
  * assert.ts — the repo's existing test idiom, extracted so both test files
  * share it.
  *
- * `renderer/html2slides` has no test framework: `css-parse-helpers.test.ts` and
- * `drawio-store.e2e.test.ts` are plain `npx tsx` scripts with a hand-rolled
- * assert and a pass/fail counter, and they exit non-zero on failure. This
- * follows that convention rather than introducing vitest for two files.
+ * `renderer/html2slides` has no test framework: `drawio-store.e2e.test.ts` is a
+ * plain `npx tsx` script with a hand-rolled assert and a pass/fail counter, and
+ * it exits non-zero on failure. This follows that convention rather than
+ * introducing vitest for two files.
  */
 import { STAGED_IMAGE_FIELD } from "../slide-image.js";
 

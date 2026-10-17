@@ -202,6 +202,7 @@ import * as pptxgenModule from "pptxgenjs";
 import type PptxGenJS from "pptxgenjs";
 import JSZip from "jszip";
 import { topAnchoredTextPlacement } from "./slides-first-baseline";
+import type * as Wire from "./extraction-wire.ts";
 /** Deterministic 8-hex digest (FNV-1a 32-bit) — platform-neutral: this module
  * is ALSO bundled for the browser (Sidebar.html), where node:crypto doesn't
  * exist. Collision strength is irrelevant here; the digest only makes drawio
@@ -829,53 +830,6 @@ function computeClippedPatch(
   return { bounds: clipped, cornerRadii: patchCR };
 }
 
-/** Allocate a unique group id. Any block whose `objectName` starts with
- * `<gid>__` participates in the group — the post-pass wraps all such blocks
- * in one native `<p:grpSp>`. Naming: `<gid>__patch` + `<gid>__host` — a
- * 2-member pair for the rounded-clip rect case. The post-pass groups by
- * `<gid>` regardless of suffix. */
-let _groupCounter = 0;
-function nextGroupId(): string { return `h2s-grp-${++_groupCounter}`; }
-function patchName(gid: string): string { return `${gid}__patch`; }
-function hostName(gid: string): string { return `${gid}__host`; }
-
-/** Emit the underlay patch shape with the same fill as the host element. The
- * caller (host emit path) will tag itself with the matching `hostName`. */
-function emitClipUnderlay(
-  slide: Slide,
-  patch: PatchGeometry,
-  fill: ShapeProps["fill"],
-  groupId: string,
-  patchObjectName?: string,
-): void {
-  const cr = patch.cornerRadii;
-  const cp = cornerPresetFromRadii(cr);
-  const b = patch.bounds;
-  // Same widening pattern used elsewhere in this file for addShape preset
-  // names — pptxgenjs accepts a string but its .d.ts types it as a narrow
-  // enum, so existing calls (line ~1335, ~1373) widen at the call site.
-  const preset = cp.preset as Parameters<Slide["addShape"]>[0];
-  slide.addShape(preset, {
-    x: px2in(b.x),
-    y: px2in(b.y),
-    w: px2in(b.w),
-    h: px2in(b.h),
-    fill,
-    line: { type: "none" },
-    flipH: cp.flipH,
-    flipV: cp.flipV,
-    // A gradient host passes its GRAD_<n> name so injectGradientsIntoZip fills
-    // the rounded underlay too (both shapes share the tag); otherwise the patch
-    // gets its own group name for the host/patch grouping post-pass.
-    objectName: patchObjectName || patchName(groupId),
-  });
-  // Side-rounded mask compensation (matches host path so the patch's
-  // squared-off corners line up with the rounded host above).
-  if (fill && needsFlatCornerOverlay(cr)) {
-    emitFlatCornerOverlays(slide, b, cr, fill);
-  }
-}
-
 // =========================================================================
 // Extracted-DOM data types
 // =========================================================================
@@ -922,39 +876,6 @@ export interface BulletColorList {
   readonly colors: readonly (string | null)[];
 }
 
-/**
- * Build a native pptxgenjs gradient fill from a parsed CSS `Gradient`. Stops are
- * pre-normalised to bare 6-hex (the fork emits `<a:srgbClr>` directly); the fork's
- * `genXmlColorSelection` does the CSS→OOXML angle conversion and `<a:gradFill>` XML.
- * Replaces the old GRAD_<n> objectName tag + `injectGradients` zip post-patch.
- */
-/** Native gradient shape fill, modelled after the OOXML `<a:gradFill>` shape
- * the vendored pptxgenjs fork accepts. The stock pptxgenjs `ShapeFillProps`
- * type only models solid/none fills, so `type` is declared wide enough to
- * remain assignable to it via a structural assertion (no `unknown` bridge
- * needed). */
-interface NativeGradientFill {
-  readonly type: string;
-  readonly gradient: {
-    readonly angle?: number;
-    readonly type?: string;
-    readonly stops: ReadonlyArray<{ readonly color: string; readonly position: number; readonly alpha?: number }>;
-  };
-}
-function nativeGradientFill(g: Gradient): NonNullable<ShapeProps["fill"]> {
-  const fill: NativeGradientFill = {
-    type: "gradient",
-    gradient: {
-      angle: g.angle,
-      type: g.type,
-      stops: g.stops.map((s) => ({ color: hexToRgb(s.color), position: s.position, alpha: s.alpha })),
-    },
-  };
-  // TODO(types): the published pptxgenjs `ShapeFillProps` omits gradient fills
-  // that the fork supports; assert the structurally-compatible shape.
-  return fill as NonNullable<ShapeProps["fill"]>;
-}
-
 export interface BoxShadowLayer {
   readonly color: string;
   readonly offsetX?: number;
@@ -962,7 +883,6 @@ export interface BoxShadowLayer {
   readonly blur?: number;
   readonly spread?: number;
   readonly alpha?: number;
-  readonly inset?: boolean;
 }
 
 /** Style fields shared between block-level elements and list items. */
@@ -988,7 +908,6 @@ export interface ElementStyle {
   readonly bgColorBehind?: string;
   readonly paddingTop?: number;
   readonly paddingRight?: number;
-  readonly paddingBottom?: number;
   readonly paddingLeft?: number;
   readonly bgAlpha?: number;
   readonly borderRadius?: number;
@@ -1052,9 +971,6 @@ interface ElementCommon {
   /** Propagated clip context from a rounded clipping ancestor; null when
    * the element has no clipping context. */
   readonly clipMask?: ClipMask | null;
-  /** Pre-assigned group id shared with an underlay patch — currently unused
-   * by extract-dom and reserved for future synthetic grouping. */
-  readonly _groupId?: string;
   /** Phase 1 (drawio): true only on the rendered diagram element (<svg>/<img>)
    * that pairs with an `Extraction.drawioSource`. When set, the converter tags
    * this element's image with `altText = drawio:<diagramId>` and collects the
@@ -1132,7 +1048,6 @@ export interface TableCell {
   readonly runs?: readonly TextRun[];
   readonly bounds?: Bounds;
   readonly bgColor?: string;
-  readonly borderSides?: BorderSides;
   readonly colspan?: number;
   readonly rowspan?: number;
   readonly isHeader?: boolean;
@@ -1263,6 +1178,33 @@ export interface DrawioDiagram {
   readonly altText: string;       // `drawio:<diagramId>` (mirrors the image's descr)
 }
 
+// Wire drift guards (types only, erased at compile time). The interfaces above are this
+// converter's narrowed, readonly view of the JSON extract-dom.ts emits; extraction-wire.ts is the
+// producer's declaration of it. Each guard fails the type check when the converter reads a field
+// the producer does not declare, which is how `style.bgColorBehind` once drifted: emitted and read,
+// declared on one side only.
+type FieldsOf<T> = T extends unknown ? keyof T : never;
+type UndeclaredFields<Consumer, Producer> = Exclude<FieldsOf<Consumer>, FieldsOf<Producer>>;
+type AllDeclared<Missing extends never> = Missing;
+export type WireDriftGuards = [
+  AllDeclared<UndeclaredFields<Bounds, Wire.Bounds>>,
+  AllDeclared<UndeclaredFields<BorderSide, Wire.BorderSides["top"]>>,
+  AllDeclared<UndeclaredFields<CornerRadii, Wire.CornerRadii>>,
+  AllDeclared<UndeclaredFields<GradientStop, Wire.GradientStop>>,
+  AllDeclared<UndeclaredFields<Gradient, Wire.Gradient>>,
+  AllDeclared<UndeclaredFields<BoxShadowLayer, Wire.BoxShadow>>,
+  AllDeclared<UndeclaredFields<ElementStyle, Wire.ElementStyle>>,
+  AllDeclared<UndeclaredFields<RunStyle, NonNullable<Wire.TextRun["style"]>>>,
+  AllDeclared<UndeclaredFields<TextRun, Wire.TextRun>>,
+  AllDeclared<UndeclaredFields<ClipMask, Wire.ClipMask>>,
+  AllDeclared<UndeclaredFields<ListItem, Wire.ListItem>>,
+  AllDeclared<UndeclaredFields<TableCell, Wire.TableCell>>,
+  AllDeclared<UndeclaredFields<ExtractedElement, Wire.ExtractedElement>>,
+  AllDeclared<UndeclaredFields<Extraction, Wire.Extraction>>,
+];
+// Every variant this converter handles is a `type` the producer can emit.
+export type WireKindGuard = AllDeclared<Exclude<ExtractedElement["type"], Wire.ExtractedElement["type"]>>;
+
 /** Convenience for the buildPptx input shape: paired extraction + per-element
  * rasterised PNGs keyed by element index. Buffer in Node, Uint8Array in
  * browser; we accept both. */
@@ -1345,9 +1287,9 @@ export type PresentationWithRegistries = PptxGenJS & {
  * Pure-shape table renderer — debug path for `<table data-shape-render>`.
  *
  * Emits per-cell `addShape("rect")` for cell fills and per-edge filled
- * rect strips for borders, using the geometry validated in
- * `tools/table-twoway/run.ts`. All coordinates are snapped to a 0.01"
- * lattice so the output matches a `<p:sp>`-only path Slides renders
+ * rect strips for borders, using the geometry validated by the one-off
+ * table-twoway investigation (since removed). All coordinates are snapped
+ * to a 0.01" lattice so the output matches a `<p:sp>`-only path Slides renders
  * deterministically (no `<a:tbl>` rasterisation quirks).
  *
  * Cell coordinates come from the per-cell `bounds` recorded by
@@ -1360,7 +1302,7 @@ function renderTableAsShapes(slide: Slide, el: TableElement): void {
   // (`q01`). This is the grid the Slides UI snaps hand-placed shapes to,
   // so cells, borders, and any rounded-corner masks that consume the
   // SAME prefix sums reference identical edge coordinates → continuations
-  // are exact. Mirrors `tools/table-twoway/run.ts:layoutTable`.
+  // are exact.
   const q01 = (v: number): number => Math.round(v * 100) / 100;
   const rows = el.rows || [];
   if (rows.length === 0 || rows[0].length === 0) return;
@@ -2643,8 +2585,7 @@ export function buildPptx(
         case "table": {
           // DEBUG path — `<table data-shape-render="true|empty">`. Render
           // the entire table via per-cell addShape rects + per-edge filled
-          // rect borders, using the layoutTable approach validated in
-          // tools/table-twoway/. Bypasses native `<a:tbl>` so we can
+          // rect borders (see renderTableAsShapes). Bypasses native `<a:tbl>` so we can
           // isolate geometry issues from `<a:tc>` rasterisation quirks.
           if (el.renderAsShapes) {
             renderTableAsShapes(slide, el);
@@ -3373,7 +3314,7 @@ export function buildPptx(
 // pptxgenjs has no gradFill API. We mark gradient shapes with descr="GRAD:{json}" via altText,
 // then rewrite the saved .pptx XML to replace those shapes' <a:solidFill> with <a:gradFill>.
 
-export function cssAngleToOoxml(cssDeg: number): number {
+function cssAngleToOoxml(cssDeg: number): number {
   // CSS: 0deg=up (to top), clockwise. OOXML <a:lin ang=>: 0=east, clockwise, units of 60000ths deg.
   // CSS direction = OOXML direction rotated 90° CCW: ooxml = (css - 90 + 360) % 360.
   const ooxml = ((cssDeg - 90) % 360 + 360) % 360;
@@ -3589,128 +3530,6 @@ export async function injectCellNoBorderIntoZip(zip: JSZip): Promise<number> {
   return patched;
 }
 
-/**
- * Wrap every cluster of shapes that share a `<gid>__` prefix in their
- * pptxgenjs `objectName` into a single native `<p:grpSp>`. The previous
- * pair-only design (gid__patch + gid__host) is a special case of the
- * generalised N-member algorithm below.
- *
- * Algorithm per slide XML:
- *   1. Scan top-level `<p:sp>` and `<p:graphicFrame>` blocks.
- *   2. Read each block's objectName from `<p:cNvPr name="..."/>`. A name
- *      matching `h2s-grp-<N>__<anything>` enrols the block in group N.
- *   3. For each group with ≥ 2 members, compute the union bbox and emit
- *      a `<p:grpSp>` containing all members in their original spTree
- *      order. Members are rewritten in place at the EARLIEST member's
- *      position; the others are removed from their later positions.
- *      Children keep their absolute coordinates; grpSp's `chOff`/`chExt`
- *      mirror `off`/`ext` so the descendant coordinate system matches.
- *
- * Pure: mutates the JSZip in place, returns the number of groups created.
- */
-export async function injectClipGroupsIntoZip(zip: JSZip): Promise<number> {
-  const slideFiles = Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n));
-  let groupCount = 0;
-
-  const blockRe = /<p:(sp|graphicFrame)>[\s\S]*?<\/p:\1>/g;
-  // Capture the gid prefix (h2s-grp-<N>) regardless of the role suffix
-  // after `__` (patch, host, m0, m1, …). Anything else is ignored.
-  const nameRe = /<p:cNvPr\b[^>]*\bname="(h2s-grp-\d+)__[^"]+"/;
-  const offRe = /<a:off\s+x="(-?\d+)"\s+y="(-?\d+)"\s*\/>/;
-  const extRe = /<a:ext\s+cx="(\d+)"\s+cy="(\d+)"\s*\/>/;
-
-  for (const name of slideFiles) {
-    const xml = await zip.file(name)!.async("string");
-    interface Block { start: number; end: number; raw: string; off: { x: number; y: number }; ext: { cx: number; cy: number } }
-    // gid → ordered list of member blocks (spTree order).
-    const groups = new Map<string, Block[]>();
-    blockRe.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = blockRe.exec(xml)) !== null) {
-      const raw = match[0];
-      const nm = raw.match(nameRe);
-      if (!nm) continue;
-      const gid = nm[1];
-      const off = raw.match(offRe);
-      const ext = raw.match(extRe);
-      if (!off || !ext) continue;
-      const block: Block = {
-        start: match.index,
-        end: match.index + raw.length,
-        raw,
-        off: { x: parseInt(off[1]), y: parseInt(off[2]) },
-        ext: { cx: parseInt(ext[1]), cy: parseInt(ext[2]) },
-      };
-      const list = groups.get(gid) ?? [];
-      list.push(block);
-      groups.set(gid, list);
-    }
-
-    if (groups.size === 0) continue;
-
-    interface GroupPlan { gid: string; anchor: Block; rest: Block[]; bbox: { x: number; y: number; cx: number; cy: number } }
-    const plans: GroupPlan[] = [];
-    const skipRanges: Array<{ start: number; end: number }> = [];
-    for (const [gid, blocks] of groups) {
-      if (blocks.length < 2) continue;
-      blocks.sort((a, b) => a.start - b.start);
-      const anchor = blocks[0];
-      const rest = blocks.slice(1);
-      const x = Math.min(...blocks.map((b) => b.off.x));
-      const y = Math.min(...blocks.map((b) => b.off.y));
-      const r = Math.max(...blocks.map((b) => b.off.x + b.ext.cx));
-      const btm = Math.max(...blocks.map((b) => b.off.y + b.ext.cy));
-      plans.push({ gid, anchor, rest, bbox: { x, y, cx: r - x, cy: btm - y } });
-      for (const b of rest) skipRanges.push({ start: b.start, end: b.end });
-    }
-
-    if (plans.length === 0) continue;
-
-    // Stitch the final XML: at each anchor's position we emit a `<p:grpSp>`
-    // containing the anchor + the rest of its group's members raw. Later
-    // positions of the non-anchor members are dropped via skipRanges.
-    plans.sort((p1, p2) => p1.anchor.start - p2.anchor.start);
-    skipRanges.sort((s1, s2) => s1.start - s2.start);
-
-    let out = "";
-    let cursor = 0;
-    let planIdx = 0;
-    let skipIdx = 0;
-    while (cursor < xml.length) {
-      const nextPlan = planIdx < plans.length ? plans[planIdx].anchor.start : Infinity;
-      const nextSkip = skipIdx < skipRanges.length ? skipRanges[skipIdx].start : Infinity;
-      const next = Math.min(nextPlan, nextSkip);
-      if (next === Infinity) {
-        out += xml.slice(cursor);
-        break;
-      }
-      out += xml.slice(cursor, next);
-      if (nextPlan <= nextSkip) {
-        const p = plans[planIdx++];
-        const groupName = `${p.gid}__grp`;
-        const childrenRaw = [p.anchor.raw, ...p.rest.map((b) => b.raw)].join("");
-        out += `<p:grpSp><p:nvGrpSpPr><p:cNvPr id="0" name="${groupName}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>` +
-               `<p:grpSpPr><a:xfrm><a:off x="${p.bbox.x}" y="${p.bbox.y}"/><a:ext cx="${p.bbox.cx}" cy="${p.bbox.cy}"/>` +
-               `<a:chOff x="${p.bbox.x}" y="${p.bbox.y}"/><a:chExt cx="${p.bbox.cx}" cy="${p.bbox.cy}"/></a:xfrm></p:grpSpPr>` +
-               childrenRaw +
-               `</p:grpSp>`;
-        cursor = p.anchor.end;
-        groupCount++;
-      } else {
-        const s = skipRanges[skipIdx++];
-        cursor = s.end;
-      }
-    }
-
-    zip.file(name, out);
-  }
-
-  return groupCount;
-}
-
-// --- Re-exports of internal helpers callers may want to reuse ---
-export { buildGradFillXml };
-
 // --- In-memory build (browser-friendly) ---
 // Returns a fully-patched .pptx as bytes. No fs, no Drive. Same buildPptx core
 // + same gradient/stroke post-processing as runConvertPptx, applied to the
@@ -3729,14 +3548,12 @@ export async function buildPptxInMemory(
   const round2Patched = await injectRound2SameRectAdjIntoZip(zip);
   const noLinePatched = await injectShapeNoLineIntoZip(zip);
   const cellNoBorderPatched = await injectCellNoBorderIntoZip(zip);
-  const groupsCreated = await injectClipGroupsIntoZip(zip);
   if (gradPatched > 0) console.log(`  Gradient injection: ${gradPatched} shape(s) patched`);
   if (buClrPatched > 0) console.log(`  Bullet colors: ${buClrPatched} <a:buClr> insertion(s)`);
   if (strokePatched > 0) console.log(`  Stroke alignment: ${strokePatched} <a:ln> rewrite(s) to algn="in"`);
   if (round2Patched > 0) console.log(`  round2SameRect adj: ${round2Patched} prstGeom(s) → adj1/adj2`);
   if (noLinePatched > 0) console.log(`  Shape no-line: ${noLinePatched} empty <a:ln> rewrite(s) to <a:noFill/>`);
   if (cellNoBorderPatched > 0) console.log(`  Cell no-border: ${cellNoBorderPatched} <a:ln[LRTB] w=0> rewrite(s) to <a:noFill/>`);
-  if (groupsCreated > 0) console.log(`  Clip groups: ${groupsCreated} <p:grpSp>(s) wrapping patch+host pairs`);
 
   return await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }

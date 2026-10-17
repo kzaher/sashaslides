@@ -48,10 +48,11 @@
 import { build, transformSync, type Plugin } from "esbuild";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APPS_SCRIPT_MANIFEST, codeGs, DEFAULT_EDITOR_ORIGIN, GENERATED_BY } from "./src/apps-script-project.ts";
+import { extractorScript } from "../../../renderer/html2slides/extractor-script.ts";
 import { SERVER_FUNCTION_NAMES } from "./src/bridge.ts";
 import { connectorUrlOf } from "./src/connector-url.ts";
 import { EDITOR_SHELL_BUDGET_BYTES, SURFACE_BUDGET_BYTES } from "./src/surface-budget.ts";
@@ -74,10 +75,10 @@ async function main(): Promise<void> {
     execFileSync(tsc, ["--noEmit", "-p", join(HERE, project)], { stdio: "inherit" });
   }
 
-  // 2. The extractor, compiled exactly as the renderer compiles it (convert-pptx-io.ts:67-71) --
-  //    a bare IIFE source string. It is a SCRIPT, not a module (no `export`), so the bundler is
-  //    the only thing that can carry it; the converter runs it inside its staging iframe.
-  const extractorTs = readFileSync(join(REPO_ROOT, "renderer/html2slides/extract-dom.ts"), "utf-8");
+  // 2. The extractor, compiled exactly as the renderer compiles it (renderer/html2slides/
+  //    extractor-script.ts) -- a bare IIFE source string. It is a SCRIPT, not a module (no
+  //    `export`), so the bundler is the only thing that can carry it; the converter runs it inside
+  //    its staging iframe.
   // MINIFIED, and that is a size decision with a measurement behind it: base64 costs 33% on top of
   // whatever it wraps, so every byte here costs 1.33 in the two bundles that carry it. Un-minified
   // it was 93 KB -> 125 KB of base64, which is a quarter of Dialog.html's entire budget. The
@@ -85,7 +86,7 @@ async function main(): Promise<void> {
   // or its `toString()`, so renaming is safe -- and the browser smoke test converts a real
   // candidate through this exact base64 path, so a mangled extractor fails a test rather than a
   // user's slide.
-  const extractorJs = transformSync(extractorTs, { loader: "ts", target: "es2020", minify: true }).code;
+  const extractorJs = extractorScript({ minify: true });
   // Base64, not a raw string literal. HtmlService sanitises and relays the sidebar document, and a
   // large inlined blob has been observed to come back corrupted ("Uncaught SyntaxError: Invalid or
   // unexpected token" -- see renderer/html2slides/browser/build-addon.ts step 3). Base64 narrows

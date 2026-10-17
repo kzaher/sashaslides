@@ -32,12 +32,14 @@ export interface CdpEvaluateParams {
   expression: string;
   returnByValue?: boolean;
   awaitPromise?: boolean;
+  /** Milliseconds before the evaluation is terminated (Runtime.evaluate `timeout`). */
+  timeout?: number;
 }
 
 /** Result envelope of Runtime.evaluate — `value` is untyped JSON from the page. */
 export interface CdpRemoteResult {
-  result: { value: unknown };
-  exceptionDetails?: unknown;
+  result: { value: unknown; description?: string };
+  exceptionDetails?: CdpExceptionDetails;
 }
 
 /** A remote object as it appears in a console-API / exception payload. */
@@ -73,6 +75,8 @@ export interface CdpRuntime {
 export interface CdpKeyEventParams {
   type: string;
   key?: string;
+  code?: string;
+  text?: string;
   windowsVirtualKeyCode?: number;
   nativeVirtualKeyCode?: number;
   modifiers?: number;
@@ -89,6 +93,7 @@ export interface CdpMouseEventParams {
 export interface CdpInput {
   dispatchKeyEvent(params: CdpKeyEventParams): Promise<void>;
   dispatchMouseEvent(params: CdpMouseEventParams): Promise<void>;
+  insertText(params: { text: string }): Promise<void>;
 }
 
 export interface CdpScreenshotClip {
@@ -124,6 +129,15 @@ export interface CdpTargetDomain {
   activateTarget(params: { targetId: string }): Promise<void>;
 }
 
+/** The DOM domain, for injecting files into an `<input type=file>` (DOM.setFileInputFiles). */
+export interface CdpDom {
+  enable(): Promise<void>;
+  getDocument(params: { depth: number }): Promise<{ root: { nodeId: number } }>;
+  querySelector(params: { nodeId: number; selector: string }): Promise<{ nodeId: number }>;
+  querySelectorAll(params: { nodeId: number; selector: string }): Promise<{ nodeIds: number[] }>;
+  setFileInputFiles(params: { files: string[]; nodeId: number }): Promise<void>;
+}
+
 export interface CdpDeviceMetricsParams {
   width: number;
   height: number;
@@ -146,6 +160,7 @@ export interface CdpClient {
   Target: CdpTargetDomain;
   Emulation: CdpEmulation;
   Browser: CdpBrowser;
+  DOM: CdpDom;
   on(event: string, listener: (params: unknown) => void): void;
   close(): Promise<void>;
 }

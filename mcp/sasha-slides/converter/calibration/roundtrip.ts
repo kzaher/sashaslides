@@ -25,12 +25,13 @@
  * the same harness `test/browser.e2e.test.ts` uses, imported rather than copied.
  */
 import CDPraw from "chrome-remote-interface";
-import { build, transformSync } from "esbuild";
+import { build } from "esbuild";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { slides_v1 } from "googleapis";
 import type { CdpModule } from "../../../../types/cdp-types.ts";
+import { extractorScript as compileExtractorScript } from "../../../../renderer/html2slides/extractor-script.ts";
 import type { SlidesApiRequest } from "../slides-api.js";
 import { applyBatch, googleDrive, kindOf, slidesClient } from "./slides-client.js";
 import type { SlidesClient } from "./slides-client.js";
@@ -224,10 +225,7 @@ type Browser = Readonly<{ page: Awaited<ReturnType<CdpModule>>; close: () => Pro
 
 /** Bundle the converter as the extension will, inject it, hand back the tab. */
 async function openConverter(): Promise<Browser> {
-  const extractorScript = transformSync(
-    readFileSync(join(REPO_ROOT, "renderer/html2slides/extract-dom.ts"), "utf-8"),
-    { loader: "ts", target: "es2020" },
-  ).code;
+  const extractorScript = compileExtractorScript();
   const bundled = await build({
     entryPoints: [join(HERE, "../index.ts")],
     bundle: true,

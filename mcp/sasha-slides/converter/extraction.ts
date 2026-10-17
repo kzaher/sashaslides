@@ -4,21 +4,19 @@
  *
  * REUSE NOTE. The DOM walk itself is NOT reimplemented here. The extractor is
  * `renderer/html2slides/extract-dom.ts` — 3477 lines of measured, hard-won
- * geometry that already runs in a browser (it has zero `import`s and is a bare
- * IIFE returning a JSON string, see extract-dom.ts:448 and :3465). It is
+ * geometry that already runs in a browser (it has no runtime `import`s and is a
+ * bare IIFE returning a JSON string). It is
  * injected verbatim and its JSON output is what this file parses.
  *
- * Two things are deliberately NOT borrowed from the renderer:
+ * The wire field set is declared once, in `renderer/html2slides/extraction-wire.ts`
+ * (types only; extract-dom.ts `import type`s it). That is the PRODUCER's view,
+ * and it is the field-by-field reference for what the parser below reads.
+ * The pptx converter's own narrowed copy in `convert-pptx-lib.ts` is not
+ * borrowed: it comes attached to pptxgenjs-coupled code that does not compile
+ * under `exactOptionalPropertyTypes`.
  *
- *  1. `extract-dom.ts`'s own types are file-local (no `export`, see
- *     extract-dom.ts:121-445), so they are unimportable by construction.
- *  2. The importable copies in `convert-pptx-lib.ts:854-1210` come attached to
- *     194 KB of pptxgenjs-coupled code that does not compile under
- *     `exactOptionalPropertyTypes` — a type-only import of `Extraction` from it
- *     reports errors inside that file and fails this module's gate.
- *
- * So the shape is re-declared, and the re-declaration is turned into an asset
- * rather than drift: `extract-dom.ts:343` is deliberately ONE permissive
+ * So the narrowed model is re-declared here, and the re-declaration is an asset
+ * rather than drift: the wire's `ExtractedElement` is deliberately ONE permissive
  * interface with ~60 optional fields ("consumers narrow via the `type`
  * discriminator"), whereas the emitter wants an exhaustive sum type. The
  * parser below does that narrowing once, at the eval boundary, so the emitter
