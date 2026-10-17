@@ -281,8 +281,8 @@ interface RetryReply {
   status: "ok" | "error";
   message: string;
   /** When cascade was true, the list of node ids that got reset to
-   *  pending (this node + every transitive successor). The scheduler /
-   *  legacy engine will re-fire each of them on its next pass. */
+   *  pending (this node + every transitive successor). Nothing re-runs
+   *  the successors; they stay pending. */
   resetNodeIds?: string[];
 }
 
@@ -345,10 +345,8 @@ async function handleRetry(
 
   // Cascade reset (default true): also reset every transitive successor
   // so downstream nodes whose outputs were derived from this stale value
-  // get recomputed by the scheduler / legacy engine on its next pass.
-  // The actual re-fire of the node happens below for shell/send kinds;
-  // for everything else, resetSubtree returns the affected node ids and
-  // the scheduler/engine handles re-execution.
+  // are marked stale (pending). The node itself is re-run below for
+  // shell/send kinds; nothing re-runs the reset successors.
   const execution = node.execution ?? null;
   const cascade = body.cascade !== false;
   const resetNodeIds = cascade ? graph.resetSubtree(node.id) : (graph.resetNode(node.id), [node.id]);
@@ -523,8 +521,8 @@ interface InjectReply {
   kind: string;
   status: "ok" | "error";
   /** Node ids whose completed state was ERASED (this node + every
-   *  transitive successor). The scheduler / legacy engine re-fires each
-   *  on its next pass; the node itself was already re-run here. */
+   *  transitive successor). Only the node itself is re-run here; the
+   *  successors stay pending. */
   resetNodeIds: string[];
   /** Anchor session id the message was resumed against (NO fork). */
   sessionId: string | null;
@@ -550,15 +548,14 @@ interface InjectReply {
  *      handleAsk, since the clicked node may be a container with no
  *      session of its own);
  *   2. ERASES completed state of the node AND every transitive successor
- *      via graph.resetSubtree(nodeId) — they recompute downstream;
+ *      via graph.resetSubtree(nodeId) — they are left pending;
  *   3. re-runs the node by calling claude with the injected message and
  *      `fork: false` (same session, conversation history extended), then
  *      finishOk/finishErr the node with the result — mirroring
  *      handleRetry's send/askFollowup branch but fork:false and
  *      prompt = the injected message.
  *
- * Downstream re-firing of the reset successors is the scheduler's job;
- * this endpoint's contract is exactly: erase node+successors' completed
+ * Nothing re-runs the reset successors. This endpoint's contract is exactly: erase node+successors' completed
  * state and re-run the node with the no-fork message.
  *
  * The call runs through the engine's driver, in the anchor's recorded
@@ -583,7 +580,7 @@ async function handleInject(
 
   // ERASE completed state: this node + every transitive successor reset to
   // pending (output/error/timestamps cleared). Capture the ids so the
-  // caller can report what was reset; the scheduler re-fires them next pass.
+  // caller can report what was reset; the successors stay pending.
   const resetNodeIds = graph.resetSubtree(node.id);
 
   // Re-run THIS node with the injected message, resuming the SAME session

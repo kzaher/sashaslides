@@ -1,7 +1,6 @@
 /**
- * Helpers shared by both interpreters: the legacy engine (engine.ts) and the
- * state-machine scheduler (scheduler.ts), plus the description builder
- * (session.ts). One copy, so the two interpreters cannot drift apart again.
+ * Helpers shared by the engine (engine.ts) and the description builder
+ * (session.ts).
  */
 import { StructuredError } from "./errors.js";
 

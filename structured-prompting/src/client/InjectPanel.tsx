@@ -6,8 +6,8 @@
  * clean), this panel POSTs `/api/inject {nodeId, message}`: the server
  * resumes THIS node's existing session WITHOUT --fork-session, appending
  * the message to the live conversation, and ERASES the completed state of
- * this node + every transitive successor (resetSubtree) so the node
- * re-runs and the graph continues downstream from the new value.
+ * this node + every transitive successor (resetSubtree). Only this node
+ * re-runs; the erased successors stay pending.
  *
  * Visually distinct (red/restart accent) from the fork "ask" box below it
  * so the destructive same-session semantics are obvious. Disabled until
@@ -71,7 +71,7 @@ export function InjectPanel(props: { node: GraphNode; graph: GraphSnapshot; onSe
       <textarea
         class="inject-input"
         placeholder={canSend
-          ? "type a message — it is appended to THIS node's live session (no fork). this node + every downstream node reset to pending and recompute. enter to restart, shift+enter for newline."
+          ? "type a message — it is appended to THIS node's live session (no fork). this node re-runs; every downstream node is reset to pending and does not re-run. enter to restart, shift+enter for newline."
           : "no completed send in this branch yet — once one finishes, this becomes active"}
         rows={3}
         value={message}
@@ -89,7 +89,7 @@ export function InjectPanel(props: { node: GraphNode; graph: GraphSnapshot; onSe
         <button
           onClick={() => void submit()}
           disabled={!canSend || busy || !message.trim()}
-          title="Resume this node's session with the message (no --fork-session). Erases this node + all transitive successors so the graph recomputes downstream."
+          title="Resume this node's session with the message (no --fork-session). Re-runs this node and erases all transitive successors (they stay pending)."
           style="border-color:#f8514955"
         >{busy ? "restarting…" : "↻ restart with message"}</button>
         {info && <span style="color:var(--ok);font-size:11px">{"✓ " + info}</span>}

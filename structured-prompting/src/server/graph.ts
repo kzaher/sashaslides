@@ -322,10 +322,8 @@ export class ComputationGraph {
     if (parentId) {
       const parent = this.nodes.get(parentId);
       if (parent) parent.children.push(node.id);
-      // Auto-wire a default predecessor edge from parentId. The scheduler
-      // can run a parentId-built graph without the description-builder
-      // having to call setPredecessors() everywhere. Override later (e.g.
-      // parallelFork's aggregator) by calling setPredecessors() directly.
+      // Auto-wire a default predecessor edge from parentId; resetSubtree
+      // follows these edges to find a node's transitive successors.
       (node as { predecessors?: import("../api/wire.js").PredecessorEdge[] }).predecessors = [
         { nodeId: parentId, condition: "ok" },
       ];
@@ -398,31 +396,8 @@ export class ComputationGraph {
     this.persist();
   }
 
-  /** Wire a state-machine edge: this node fires when `predecessor.nodeId`
-   *  reaches `predecessor.condition`. Used by the v2 scheduler. Replaces
-   *  any prior predecessors. Callable repeatedly (e.g. during eager
-   *  expansion of fallback chains) — last write wins. */
-  setPredecessors(id: string, predecessors: import("../api/wire.js").PredecessorEdge[]): void {
-    const n = this.nodes.get(id);
-    if (!n) return;
-    (n as { predecessors?: import("../api/wire.js").PredecessorEdge[] }).predecessors = predecessors;
-    this.version++;
-    this.persist();
-  }
-
-  /** Set how the node combines its predecessor edges. Default is "all".
-   *  Aggregators (e.g. parallelFork post, try success-fan) flip to "any". */
-  setJoinMode(id: string, joinMode: import("../api/wire.js").JoinMode): void {
-    const n = this.nodes.get(id);
-    if (!n) return;
-    (n as { joinMode?: import("../api/wire.js").JoinMode }).joinMode = joinMode;
-    this.version++;
-    this.persist();
-  }
-
   /**
-   * Reset one node to `pending`. Clears output, error, and timestamps so
-   * the scheduler will pick it up again on the next loop iteration. Used
+   * Reset one node to `pending`. Clears output, error, and timestamps. Used
    * by /api/retry to re-fire a node's handler after the user has fixed
    * whatever caused the original failure. The caller decides whether to
    * cascade: see `resetSubtree`.

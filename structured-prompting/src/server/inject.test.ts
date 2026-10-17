@@ -177,7 +177,7 @@ async function main() {
     assert.equal((a.output as { appliedForkFlag?: boolean }).appliedForkFlag, false);
     assert.equal((a.output as { injected?: boolean }).injected, true);
     assert.equal(a.sessionId, "sid-A-next");
-    // Successors B, C remain pending (erased, awaiting the scheduler's next pass).
+    // Successors B, C remain pending (erased; nothing re-runs them).
     assert.equal(g.get(B.id)!.status, "pending");
     assert.equal(g.get(C.id)!.status, "pending");
 

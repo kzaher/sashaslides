@@ -436,13 +436,6 @@ async function run(): Promise<void> {
   const engine = isCodex
     ? new CodexEngine({ port: monitorPort, persist: true })
     : new ClaudeEngine({ port: monitorPort, persist: true });
-  // BUG_SOLVING_USE_SCHEDULER=1 drives the graph via the new state-machine
-  // scheduler instead of the legacy one-shot interpreter (enables
-  // restart-from-node). Default off — the legacy path is unchanged.
-  if (process.env.BUG_SOLVING_USE_SCHEDULER === "1") {
-    engine.useScheduler = true;
-    console.error("[scaffold] useScheduler=true (state-machine scheduler path)");
-  }
   // Worker model: BUG_SOLVING_MODEL (e.g. "opus" for Opus 4.8, "fable", "sonnet",
   // "haiku") overrides the engine default. ctx.model is sticky (engine fix), so
   // every send — fix, verify, fix-summary — uses this exact model.
@@ -497,12 +490,10 @@ async function run(): Promise<void> {
   const succeeded: string[] = [];
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
-    // Defensive: a result can be null/undefined if the engine's result
-    // propagation drops a task's return (observed under the state-machine
-    // scheduler). `"error" in r` throws on null — the very crash that turned a
+    // Defensive: `"error" in r` throws on null/undefined, which would turn a
     // whole solved run into an unrecoverable one.
     if (r == null || typeof r !== "object") {
-      failures.push({ idx: i, error: `task produced no result (got ${r === null ? "null" : typeof r}) — likely a scheduler result-propagation drop` });
+      failures.push({ idx: i, error: `task produced no result (got ${r === null ? "null" : typeof r}) — result propagation dropped it` });
       continue;
     }
     if ("error" in r) {

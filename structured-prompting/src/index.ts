@@ -15,12 +15,6 @@ export * from "../../cow-workspace/cow-workspace.ts";
 export * from "./server/graph.js";
 export * from "./server/session.js";
 export * from "./server/engine.js";
-export {
-  runScheduler,
-  defaultKindRegistry,
-  type KindHandler,
-  type SchedulerCtx,
-} from "./server/scheduler.js";
 export * from "./server/errors.js";
 export * from "./server/io.js";
 export { callClaude, callClaudeFormatted } from "./server/claude-cli.js";

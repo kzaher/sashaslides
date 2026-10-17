@@ -47,13 +47,11 @@ export interface SpawnCaptureArgs {
    */
   branchId?: string;
   /** Live stdout listener. Fires for every chunk as it arrives, BEFORE the
-   *  child exits. Used by the scheduler's executeShell handler to surface
-   *  `stdoutSoFar` on the graph node so the monitor UI sees output mid-run.
+   *  child exits. Used by claude-cli's streaming mode to surface partial
+   *  text on the graph node so the monitor UI sees output mid-run.
    *  Chunks may split mid-line (Node delivers OS read() buffers verbatim);
    *  callers that need line semantics should accumulate and split. */
   onStdout?: (chunk: string) => void;
-  /** Live stderr listener — same contract as `onStdout`. */
-  onStderr?: (chunk: string) => void;
   /** If set, this FILE is fed to the child's stdin (fd 0). Used to pass a very
    *  large prompt (e.g. an LLM merge over full source files) that would blow the
    *  argv `MAX_ARG_STRLEN` limit as a `-p <prompt>` argument (spawn E2BIG). The
@@ -241,9 +239,6 @@ export const realIO: IO = {
       child.stderr?.on("data", (d) => {
         const s = d.toString();
         stderr += s;
-        if (args.onStderr) {
-          try { args.onStderr(s); } catch { /* listener errors must not abort the spawn */ }
-        }
       });
       child.on("error", (err) => {
         spawnError = err instanceof Error ? err.message : String(err);

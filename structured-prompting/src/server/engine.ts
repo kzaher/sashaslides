@@ -14,7 +14,6 @@ import { InterruptException, StructuredError, describeError } from "./errors.js"
 import { startMonitor, type MonitorServer } from "./server.js";
 import { realIO, type IO } from "./io.js";
 import { captureWorktreeDiff, indexFileForCwd } from "./git-diff.js";
-import { runScheduler, defaultKindRegistry } from "./scheduler.js";
 import { flattenSchemaUnit, resolvePrompt, safeValue, truncate, type SchemaUnit } from "./engine-common.js";
 
 /**
@@ -109,15 +108,6 @@ export class Engine {
   private opts: Required<EngineOptions>;
   private readonly driver: ModelDriver;
   readonly io: IO;
-  /**
-   * Opt-in: drive execution through the graph-driven state-machine
-   * scheduler (`runScheduler`) instead of the legacy `runChain`/`runNode`
-   * interpreter. Default false — the legacy path is unchanged. The
-   * scheduler path enables RESTART-FROM-ANY-NODE: reset a node + successors
-   * to pending and the scheduler re-fires them. See scheduler.ts.
-   */
-  useScheduler = false;
-
   constructor(driver: ModelDriver, opts: EngineOptions = {}) {
     this.driver = driver;
     this.opts = {
@@ -187,42 +177,6 @@ export class Engine {
       throw err;
     }
 
-    // 3a. Scheduler path (opt-in): drive the fully-built graph through the
-    // state-machine loop. Enables restart-from-any-node. The legacy
-    // runChain path below is untouched and remains the default.
-    if (this.useScheduler) {
-      // Thread the SAME injected driver into the scheduler's send handler, so
-      // a CodexEngine scheduler run spawns codex (not claude). See scheduler.ts.
-      const { registry, values } = defaultKindRegistry(this.io, this.driver);
-      // Step 2 already `start()`ed the root (status=running). The scheduler
-      // only fires `pending` nodes, so reset the root to pending and seed its
-      // resolved value (undefined upstream) — the root handler then transitions
-      // it to ok, unblocking the first chain step.
-      session.graph.resetNode(session.graph.rootId);
-      values.set(session.graph.rootId, undefined);
-      try {
-        await runScheduler(session.graph, registry, {
-          io: this.io,
-          values,
-          seedCtx: { model: session.model, cwd: session.cwd, branchId: session.branchId ?? null },
-        });
-        const tip = session.graph.get(descriptionTip.tipNodeId);
-        if (tip && tip.status === "error") {
-          throw tip.error ? Object.assign(new Error(tip.error.message), tip.error) : new Error("scheduler: tip node errored");
-        }
-        session.graph.finishOk(session.graph.rootId, { ok: true });
-        this.sweepStuckNodes(session.graph);
-        session.graph.markRootDone("ok");
-        if (!this.opts.persist) await this.shutdown();
-        return (values.get(descriptionTip.tipNodeId) as R);
-      } catch (err) {
-        session.graph.finishErr(session.graph.rootId, err);
-        this.sweepStuckNodes(session.graph);
-        session.graph.markRootDone("error");
-        if (!this.opts.persist) await this.shutdown();
-        throw err;
-      }
-    }
 
     // 3. Walk from root to tip, executing nodes in order against a RunCtx.
     const initialCtx = freshCtx(session);
@@ -772,8 +726,7 @@ export class Engine {
     const composed = prepend + rawPrompt + append;
 
     // Expose the real composed prompt (prepend header + body + append) on the
-    // running node's output BEFORE the CLI call, mirroring the scheduler
-    // (scheduler.ts:534). Without this, a running send only showed the raw
+    // running node's output BEFORE the CLI call. Without this, a running send only showed the raw
     // `.send({prompt})` body — the monitor's "entire prompt sent to claude"
     // reveal was empty until finishOk. finishOk later replaces output (which
     // also carries composedPrompt), so display is consistent running→finished.
@@ -851,9 +804,6 @@ export class ClaudeEngine {
     this.engine = new Engine(claudeDriver, opts);
     this.io = this.engine.io;
   }
-  /** See Engine.useScheduler. Default false (legacy interpreter path). */
-  get useScheduler(): boolean { return this.engine.useScheduler; }
-  set useScheduler(v: boolean) { this.engine.useScheduler = v; }
   execute<R>(session: Session, calculation: (s: Session) => SessionWithResult<R>): Promise<R> {
     return this.engine.execute(session, calculation);
   }
@@ -869,9 +819,6 @@ export class CodexEngine {
     this.engine = new Engine(codexDriver, opts);
     this.io = this.engine.io;
   }
-  /** See Engine.useScheduler. Default false (legacy interpreter path). */
-  get useScheduler(): boolean { return this.engine.useScheduler; }
-  set useScheduler(v: boolean) { this.engine.useScheduler = v; }
   execute<R>(session: Session, calculation: (s: Session) => SessionWithResult<R>): Promise<R> {
     return this.engine.execute(session, calculation);
   }

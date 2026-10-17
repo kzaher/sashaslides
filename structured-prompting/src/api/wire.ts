@@ -47,31 +47,14 @@ export interface NodeError {
 }
 
 /**
- * Predecessor edge: "this node fires when `nodeId` reaches `condition`."
- *
- * The default condition for any chained step is `"ok"` (continue on
- * success). `try` / `tryMultipleTimes` use `"error"` edges for the
- * fallback chain — that fallback only fires if the predecessor errored.
- * `"any"` fires on either ok or error (used by aggregator nodes that
- * sum up parallel branches regardless of individual outcomes).
+ * Predecessor edge: `nodeId` is a node this one depends on. Only `"ok"`
+ * (continue on success) is produced, auto-wired from `parentId`.
  */
 export interface PredecessorEdge {
   nodeId: string;
   /** What state the predecessor must reach for this edge to fire. */
-  condition: "ok" | "error" | "any";
+  condition: "ok";
 }
-
-/**
- * Aggregation rule across multiple predecessor edges on the same node.
- *
- *   "all" (default) — every edge's condition must be satisfied before the
- *     node fires. Used by ordinary chain steps and parallelFork's
- *     post-aggregator (wait for ALL children).
- *   "any"           — node fires as soon as ANY edge's condition is met.
- *     Used by try/tryMultipleTimes success aggregator: "fire when any
- *     attempt succeeds OR the fallback succeeds."
- */
-export type JoinMode = "all" | "any";
 
 /**
  * Wire-level GraphNode. Mirrors the in-memory `GraphNodeBase` minus the
@@ -85,11 +68,9 @@ export type JoinMode = "all" | "any";
  * The graph's version counter increments per chunk, so the monitor's
  * 250 ms poll surfaces the streamed output before the node transitions.
  *
- * `predecessors` is the state-machine edge set: this node fires when
- * every edge's `nodeId` has reached its required `condition`. Empty
- * array = no dependencies (fire immediately). Optional for backward
- * compatibility with the legacy `runChain` interpreter, which uses
- * `parentId` for sequencing instead.
+ * `predecessors` links a node to the nodes it depends on (auto-wired from
+ * `parentId`). The monitor's retry/inject actions follow them to find the
+ * transitive successors whose state they erase.
  */
 export interface GraphNode {
   id: string;
@@ -107,10 +88,8 @@ export interface GraphNode {
   output: unknown;
   error: NodeError | null;
   children: string[];
-  /** State-machine edges. Empty/undefined = legacy chain semantics. */
+  /** Dependency edges (auto-wired from parentId). */
   predecessors?: PredecessorEdge[];
-  /** How multiple predecessor edges combine. Default "all". */
-  joinMode?: JoinMode;
   /**
    * Working-tree git diff captured by the engine after a file-mutating node
    * (send / executeShell) finishes. Absent on nodes that don't change files
