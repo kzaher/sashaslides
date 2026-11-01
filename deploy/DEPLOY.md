@@ -1,7 +1,7 @@
 # Publishing sashaslides.com and the Sasha Slides connector
 
 `deploy/publish.sh` ships two services to the holosweat server (`root@78.46.91.218`; override with
-`DEPLOY_HOST`). It
+`DEPLOY_HOST`; set `DEPLOY_SSH_CONFIG` for an explicit project-local SSH/proxy configuration while retaining strict host-key checks). It
 builds both images on the server, so this machine needs no Docker, rsync or registry: only
 ssh, scp, tar, gzip, dd and node.
 
@@ -29,7 +29,7 @@ rather than scale. A restart is safe: on `SIGTERM` the connector flushes every r
 deck sockets with `serverShuttingDown` (4013), and the editors reconnect and resend anything the
 last 250 milliseconds lost.
 
-`publish.sh connector` also builds the deck web application (`npm ci` and `npm run -s build:web`
+`publish.sh connector` first installs the pinned shared OAuth package dependencies and builds its emitted JavaScript and hosted UI assets. Its Docker image installs OAuth runtime dependencies separately and imports the emitted server/website modules during the build, so an omitted module fails before activation. It also builds the deck web application (`npm ci` and `npm run -s build:web`
 in `mcp/sasha-slides/engine`) before packing, because the connector serves
 `engine/dist/web/**` from disk. Deck data lives in the same `/data` volume as the auth store:
 `/data/decks/` (every record sealed with the deck owner's account key) and `/data/deck-profiles/`.
@@ -90,8 +90,14 @@ and nginx is not reloaded), then checks, one line each:
 `/healthz` and `/privacy` (website), and `/connector/healthz`, `/account` and
 `/.well-known/oauth-protected-resource/mcp` (connector).
 
-Tests that need no server: `npx tsx --test renderer/html2slides/addon-server/deploy/nginx-routing.test.ts`
+Packaging checks (after building `oauth/`): `npx tsx --test deploy/oauth-package.test.mts`. Tests that need no server: `npx tsx --test renderer/html2slides/addon-server/deploy/nginx-routing.test.ts`
 and `bash deploy/publish.test.sh` (a dry run with ssh and scp stubbed out to fail).
+
+### Existing-route rollout and shared identity
+
+`bash deploy/publish.sh --skip-nginx connector` leaves nginx and its shared proxy settings untouched while updating the connector and running the existing health checks. Use this only when its public routes already exist. The default command still installs and validates the nginx template.
+
+Shipping the new image does not enable shared identity: `SASHA_SHARED_AUTH_CONFIG` is explicit opt-in. Enabling it additionally requires persistent private auth/database/CAPTCHA configuration, verified mail/provider callback settings, and `/api/auth/*` plus `/auth/*` routes to the connector. These routes are not added by the existing nginx template; coordinate their reviewed rollout before enabling the config. See [shared identity](../mcp/sasha-slides/http/SHARED-AUTH.md). An image running with the option absent retains legacy account/MCP behavior and must not be reported as shared OAuth live.
 
 ## Rollback
 

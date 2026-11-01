@@ -7,3 +7,6 @@
 [submodule "cow-workspace"]
 	path = cow-workspace
 	url = git@github.com:ExponentGmbH/cow-workspace.git
+[submodule "oauth"]
+	path = oauth
+	url = git@github.com:ExponentGmbH/oauth.git

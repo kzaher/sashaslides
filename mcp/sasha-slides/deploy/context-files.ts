@@ -25,6 +25,12 @@ const READ_AT_RUNTIME: readonly string[] = [
   // Its "type": "module" makes tsx load the engine's sources as ECMAScript modules in the image
   // exactly as in development (SPEC.md 21.18); without it they would load as CommonJS instead.
   "mcp/sasha-slides/engine/package.json",
+  "oauth/package.json",
+  "oauth/package-lock.json",
+  "oauth/dist/server.js",
+  "oauth/dist/website.js",
+  "oauth/dist/auth-ui.js",
+  "oauth/dist/auth-ui.css",
 ];
 
 /** The built deck web application, served from disk (decks/web-application.ts). */
@@ -43,7 +49,7 @@ async function main(): Promise<void> {
   if (!webBuild.includes(`${WEB_BUILD_DIRECTORY}/manifest.json`)) {
     process.stderr.write(`context-files: ${WEB_BUILD_DIRECTORY} is not built (no manifest.json); /decks will answer 503 until it is\n`);
   }
-  const files = [...(await importedFiles()), ...READ_AT_RUNTIME, ...webBuild, ...DEPLOY_FILES].sort();
+  const files = [...new Set([...(await importedFiles()), ...READ_AT_RUNTIME, ...filesUnder("oauth/dist"), ...webBuild, ...DEPLOY_FILES])].sort();
   const missing = files.filter((file) => !existsSync(join(REPO_ROOT, file)));
   if (missing.length > 0) {
     process.stderr.write(`context-files: missing ${missing.join(", ")}\n`);

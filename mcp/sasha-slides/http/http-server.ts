@@ -53,6 +53,8 @@ type HttpServerOptions = Readonly<{
   warn: (message: string) => void;
   /** Absent: no `/account` routes. Present: it answers every path under `/account`. */
   accountPortal?: AccountPortal;
+  /** Shared identity handler owns its origin/CORS before the MCP compatibility surface. */
+  sharedAuth?: ReportIntakeRoutes;
   /** Absent: no comment bot. Present: Drive's push notifications at `/hooks/drive` go to it. */
   driveHook?: DriveHook;
   /**
@@ -104,7 +106,7 @@ export type DeckEntryPoints = Readonly<{
 }>;
 
 function sashaSlidesRequestListener(options: HttpServerOptions): RequestListener {
-  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal, driveHook, commentAccess, decks, reportIntake } = options;
+  const { authorizationServer, createMcpServer, instrumentTransport, warn, accountPortal, driveHook, commentAccess, decks, reportIntake, sharedAuth } = options;
   const { endpoints } = authorizationServer;
 
   async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -113,6 +115,8 @@ function sashaSlidesRequestListener(options: HttpServerOptions): RequestListener
     // configured, because `resource` has to equal the MCP URL Claude was given, exactly.
     const url = new URL(request.url ?? "/", "http://host.invalid");
     const path = url.pathname.replace(/\/+$/, "") === "" ? "/" : url.pathname.replace(/\/+$/, "");
+
+    if (sharedAuth !== undefined && (await sharedAuth.handleRequest({ request, response, url }))) return;
 
     // The account portal (`account-portal.ts`) goes first: its HTML pages are for a browser
     // on this origin only, so they get no CORS headers, and it claims only `/account/...`.

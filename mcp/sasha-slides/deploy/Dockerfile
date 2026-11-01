@@ -17,6 +17,12 @@ WORKDIR /app
 COPY mcp/sasha-slides/deploy/package.json mcp/sasha-slides/deploy/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
+# Emitted OAuth modules resolve their own runtime dependencies from /app/oauth.
+COPY oauth/package.json oauth/package-lock.json oauth/
+RUN npm ci --prefix oauth --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
+COPY oauth/dist oauth/dist
+RUN node --input-type=module -e "await import('./oauth/dist/server.js'); await import('./oauth/dist/website.js')"
+
 COPY .claude/skills/sasha-slides/SKILL.md .claude/skills/sasha-slides/SKILL.md
 COPY mcp/sasha-slides mcp/sasha-slides
 COPY report-service/src report-service/src

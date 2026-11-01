@@ -23,6 +23,7 @@ into your Google Slides deck as native, editable objects. The website is <https:
 | `renderer/structured-prompts/bug_solving/` | Automated converter bug fixing driven by side-by-side ratings (`npm run renderer:solver:run`) |
 | `structured-prompting/` | The graph engine and monitor UI that bug_solving runs on |
 | `report-service/` | Intake for anonymised defect reports from the add-on. See [README](report-service/README.md) |
+| `oauth/` | Shared OAuth identity library and hosted React login. Sasha opt-in/migration: [shared auth](mcp/sasha-slides/http/SHARED-AUTH.md) |
 | `deploy/` | Publishing the website and the connector. See [DEPLOY.md](deploy/DEPLOY.md) |
 | `types/`, `deps/`, `cow-workspace/` | Shared typings, forked dependencies (pptxgenjs, drawio), copy-on-write workspaces |
 

@@ -74,6 +74,7 @@ import type { CommentBot } from "./comment-bot/comment-bot";
 import { loadCommentBot } from "./comment-bot/comment-bot-stack";
 import { openCommentTasks, registerCommentTools, type CommentTaskPayload } from "./comment-bot/comment-tools";
 import { loadAccountPortal } from "./http/account-portal-stack";
+import { loadSharedAuth } from "./http/shared-auth-stack.ts";
 import { loadReportStack } from "./reports/report-stack";
 import { parseSessionSecret, type SessionSecretParse } from "./http/account-portal";
 import { withDeckErasure } from "./http/account-eraser";
@@ -2403,6 +2404,17 @@ async function serveHttp(
     warn,
   });
   if (portal.kind === "failed") return failStartup(portal.message);
+  const sharedAuth = await loadSharedAuth({
+    configPath: process.env.SASHA_SHARED_AUTH_CONFIG,
+    publicUrl: mode.publicUrl,
+    identityProvidersPath: mode.identityProvidersPath,
+    mailSenderPath: mode.mailSenderPath,
+    googleClient: stack.googleClient,
+    trustedProxies: mode.trustedProxies,
+    store: stack.store,
+    authorizationServer: stack.authorizationServer,
+  });
+  if (sharedAuth.kind === "failed") return failStartup(sharedAuth.message);
   const commentBot = loadCommentBot({
     publicUrl: mode.publicUrl,
     googleCallbackUrl: stack.endpoints.googleCallbackUrl,
@@ -2423,7 +2435,8 @@ async function serveHttp(
     environmentFor: ({ drive }) => liveEnvironment({ drive }),
   });
   const httpServer = createSashaSlidesHttpServer({
-    authorizationServer: stack.authorizationServer,
+    authorizationServer: sharedAuth.kind === "ok" ? sharedAuth.authorizationServer : stack.authorizationServer,
+    ...(sharedAuth.kind === "ok" ? { sharedAuth: sharedAuth.routes } : {}),
     createMcpServer: () =>
       createSashaSlidesServer({
         resolveEnvironment,
@@ -2445,6 +2458,7 @@ async function serveHttp(
     ...(deckServer === null ? {} : { decks: deckServer }),
     ...(reportStack === null ? {} : { reportIntake: reportStack.intake }),
   });
+  if (sharedAuth.kind === "ok") httpServer.once("close", sharedAuth.close);
   if (deckServer !== null) shutDownOnTerminate({ deckServer, httpServer, warn });
   return new Promise<void>((resolve) => {
     httpServer.listen(mode.port, mode.host, () => {
@@ -2457,6 +2471,7 @@ async function serveHttp(
           instructions,
         }),
         ...portal.banner,
+        ...sharedAuth.banner,
         ...commentBot.banner,
         ...decks.banner,
         ...(reports.kind === "ok" ? reports.stack.banner : reports.banner),

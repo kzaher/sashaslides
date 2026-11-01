@@ -3,7 +3,7 @@
 # holosweat server, building the images ON THE SERVER. Needs only ssh, scp, tar, gzip, dd
 # and node on this machine: no Docker, no rsync, no registry tunnel.
 #
-#   deploy/publish.sh [--dry-run] site|connector|all|videos
+#   deploy/publish.sh [--dry-run] [--skip-nginx] site|connector|all|videos
 #   deploy/publish.sh [--dry-run] rollback site|connector
 #
 # See deploy/DEPLOY.md for one-time setup, secrets and rollback. --dry-run builds the
@@ -27,7 +27,7 @@ set -euo pipefail
 HOST="${DEPLOY_HOST:-root@78.46.91.218}"
 # The dedicated deploy key in .auth/ (git-ignored, survives container rebuilds) when present, so a
 # deploy does not depend on an SSH agent forwarded by an editor; DEPLOY_KEY overrides, "" forces the agent.
-KEY="${DEPLOY_KEY-$( [ -f "$(dirname "$0")/../.auth/deploy_ed25519" ] && echo "$(cd "$(dirname "$0")/.." && pwd)/.auth/deploy_ed25519" )}"
+KEY="${DEPLOY_KEY-$( if [ -f "$(dirname "$0")/../.auth/deploy_ed25519" ]; then echo "$(cd "$(dirname "$0")/.." && pwd)/.auth/deploy_ed25519"; fi )}"
 DOMAIN="${DEPLOY_DOMAIN:-sashaslides.com}"
 ACME_EMAIL="${DEPLOY_ACME_EMAIL:-krunoslav.zaher@gmail.com}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -63,6 +63,7 @@ SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=10 -o Serv
           -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS")
 # With a key, ignore any forwarded agent: a hung editor agent socket makes ssh wait forever even
 # with -i (measured 2026-10-12).
+if [ -n "${DEPLOY_SSH_CONFIG:-}" ]; then SSH_OPTS+=(-F "$DEPLOY_SSH_CONFIG"); fi
 if [ -n "$KEY" ]; then SSH_OPTS+=(-i "$KEY" -o IdentitiesOnly=yes); export SSH_AUTH_SOCK=; fi
 
 # Wall-clock budgets (seconds). Each remote step is killed past its budget, and the ssh
@@ -74,6 +75,7 @@ BUDGET_UPLOAD=600
 BUDGET_BUILD=1800
 
 DRY=0
+SKIP_NGINX=0
 WORK=""
 
 main() {
@@ -81,6 +83,7 @@ main() {
   for arg in "$@"; do
     case "$arg" in
       --dry-run) DRY=1 ;;
+      --skip-nginx) SKIP_NGINX=1 ;;
       -h|--help) usage; exit 0 ;;
       *) args+=("$arg") ;;
     esac
@@ -178,6 +181,10 @@ REMOTE
 # ── connector ────────────────────────────────────────────────────────────────
 
 publish_connector() {
+  step "connector: building the shared OAuth package (oauth/dist)"
+  run timeout "$BUDGET_UPLOAD" npm --prefix oauth ci --ignore-scripts --no-audit --no-fund
+  run timeout "$BUDGET_UPLOAD" npm --prefix oauth run build
+
   # The deck web application is read from disk at runtime (engine/dist/web), so it is built here,
   # before context-files.ts lists it; the image never builds it (no esbuild, no React in it).
   step "connector: building the deck web application (engine/dist/web)"
@@ -302,6 +309,10 @@ REMOTE
 # ── nginx ────────────────────────────────────────────────────────────────────
 
 install_nginx() {
+  if [ "$SKIP_NGINX" = 1 ]; then
+    step "nginx: leaving existing routes unchanged (--skip-nginx)"
+    return
+  fi
   step "nginx: installing $NGINX_CONF as sites-available/$DOMAIN"
   run timeout "$BUDGET_SHORT" scp -q "${SSH_OPTS[@]}" "$NGINX_CONF" "$HOST:/tmp/nginx-sashaslides.conf.new"
   remote_script "$BUDGET_CERT" "$DOMAIN" "$SITE_HOME" "$ACME_EMAIL" <<'REMOTE'

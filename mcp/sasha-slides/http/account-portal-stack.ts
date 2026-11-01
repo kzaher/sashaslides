@@ -85,7 +85,7 @@ export function loadAccountPortal(
   const secret = options.sessionSecret ?? parseSessionSecret(undefined);
   if (secret.kind === "error") return { kind: "failed", message: secret.message };
 
-  const specs = loadSpecs({ identityProvidersPath, googleClient: options.googleClient });
+  const specs = loadIdentityProviderSpecs({ identityProvidersPath, googleClient: options.googleClient });
   if (specs.kind === "failed") return specs;
   const now = (): Date => new Date();
   const directory = storeAccountDirectory({ store: options.store, vault: options.vault, now, newAccountId: randomAccountId });
@@ -188,7 +188,7 @@ function loadPasswordSignIn(
 /** Bounds the rate limiter's memory; see `request-throttle.ts`. */
 const THROTTLE_MAX_KEYS = 100_000;
 
-function loadMailSenderConfig(
+export function loadMailSenderConfig(
   path: string,
 ): Readonly<{ kind: "ok"; config: MailSenderConfig }> | Readonly<{ kind: "failed"; message: string }> {
   let text: string;
@@ -217,7 +217,7 @@ function describeMailCredentials(config: MailSenderConfig): string {
   }
 }
 
-function loadSpecs(
+export function loadIdentityProviderSpecs(
   options: Readonly<{ identityProvidersPath: string | null; googleClient: GoogleClientCredentials }>,
 ): Readonly<{ kind: "ok"; specs: readonly IdentityProviderSpec[] }> | Readonly<{ kind: "failed"; message: string }> {
   const connectorGoogleCredentials = options.googleClient;
