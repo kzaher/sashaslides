@@ -1,10 +1,10 @@
 {
   "scripts": {
     "reauth": "npx tsx .auth/generate-token.ts",
-    "sudo_claude": "oris -- claude --dangerously-skip-permissions",
-    "sudo_codex": "oris -- codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
-    "sudo_claude_fork": "oris -- claude --dangerously-skip-permissions --continue --fork-session",
-    "sudo_claude_resume": "oris -- claude --dangerously-skip-permissions --continue",
+    "sudo_claude": "oris claude -- --dangerously-skip-permissions",
+    "sudo_codex": "oris codex -- --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
+    "sudo_claude_fork": "oris claude -- --dangerously-skip-permissions --continue --fork-session",
+    "sudo_claude_resume": "oris claude -- --dangerously-skip-permissions --continue",
     "reinstall": "rm -rf node_modules && npm install",
     "typecheck": "tsc --noEmit",
     "cow-workspace:test": "npx tsx cow-workspace/cow-workspace.e2e.test.ts && npx tsx cow-workspace/workspace-jail.e2e.test.ts",
